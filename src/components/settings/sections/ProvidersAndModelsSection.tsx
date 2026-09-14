@@ -37,7 +37,9 @@ import { resolveProviderDisplayBaseUrl } from '../../../utils/llm/provider-base-
 import { providerSupportsEmbedding } from '../../../utils/llm/provider-config'
 import { openExternalLink } from '../../../utils/openExternalLink'
 import { ObsidianButton } from '../../common/ObsidianButton'
+import { ObsidianDropdown } from '../../common/ObsidianDropdown'
 import { ObsidianSetting } from '../../common/ObsidianSetting'
+import { ObsidianTextArea } from '../../common/ObsidianTextArea'
 import { ObsidianTextInput } from '../../common/ObsidianTextInput'
 import { ObsidianToggle } from '../../common/ObsidianToggle'
 import { AddChatModelModal } from '../modals/AddChatModelModal'
@@ -1294,6 +1296,106 @@ function EmbeddingModelRow({
 
 type Translator = ReturnType<typeof useLanguage>['t']
 
+const VoiceSettingsSection = () => {
+  const { t } = useLanguage()
+  const { settings, setSettings } = useSettings()
+  const geminiProviders = settings.providers.filter(
+    (p) => p.presetType === 'gemini',
+  )
+  const voice = settings.voice
+  const commitVoiceUpdate = (
+    patch: Partial<typeof voice>,
+    context: string,
+  ) => {
+    void (async () => {
+      try {
+        await setSettings({
+          ...settings,
+          voice: { ...settings.voice, ...patch },
+        })
+      } catch (error: unknown) {
+        console.error(`Failed to update voice settings: ${context}`, error)
+      }
+    })()
+  }
+  const providerOptions: Record<string, string> = {
+    '': t('voiceProviderNone'),
+  }
+  for (const provider of geminiProviders) {
+    providerOptions[provider.id] = provider.id
+  }
+
+  return (
+    <section className="yolo-models-block yolo-voice-block">
+      <div className="yolo-models-block-head">
+        <div className="yolo-models-block-head-title-row">
+          <div className="yolo-settings-sub-header yolo-models-block-title">
+            {t('voiceSectionTitle')}
+          </div>
+        </div>
+      </div>
+
+      <div className="yolo-models-block-content">
+        <ObsidianSetting
+          name={t('voiceProviderLabel')}
+          className="yolo-models-select-card"
+        >
+          <ObsidianDropdown
+            value={voice.providerId ?? ''}
+            options={providerOptions}
+            onChange={(value) => {
+              commitVoiceUpdate(
+                { providerId: value || undefined },
+                'providerId',
+              )
+            }}
+          />
+        </ObsidianSetting>
+
+        <ObsidianSetting
+          name={t('voiceModelLabel')}
+          className="yolo-models-select-card"
+        >
+          <ObsidianTextInput
+            value={voice.model}
+            onChange={(value) => {
+              commitVoiceUpdate({ model: value }, 'model')
+            }}
+          />
+        </ObsidianSetting>
+
+        <ObsidianSetting
+          name={t('voiceNameLabel')}
+          className="yolo-models-select-card"
+        >
+          <ObsidianTextInput
+            value={voice.voiceName}
+            onChange={(value) => {
+              commitVoiceUpdate({ voiceName: value }, 'voiceName')
+            }}
+          />
+        </ObsidianSetting>
+
+        <div className="yolo-models-textarea-card">
+          <ObsidianSetting
+            name={t('voiceSystemPromptLabel')}
+            className="yolo-settings-textarea-header yolo-models-textarea-card-header"
+          />
+
+          <ObsidianSetting className="yolo-settings-textarea yolo-models-textarea-card-body">
+            <ObsidianTextArea
+              value={voice.systemPrompt}
+              onChange={(value: string) => {
+                commitVoiceUpdate({ systemPrompt: value }, 'systemPrompt')
+              }}
+            />
+          </ObsidianSetting>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export function ProvidersAndModelsSection({
   app,
   plugin,
@@ -1847,6 +1949,7 @@ export function ProvidersAndModelsSection({
           </DndContext>
         </div>
       </section>
+      <VoiceSettingsSection />
     </div>
   )
 }
