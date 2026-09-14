@@ -61,7 +61,7 @@ export const useVoiceSession = ({
   const start = useCallback(async () => {
     if (voiceSessionStore.getSnapshot().status !== 'idle') return
     if (!Platform.isDesktop) return
-    const [{ resolveLiveConnection, createGeminiLiveRuntime }] = await Promise.all([
+    const [{ resolveLiveConnection }, { createGeminiLiveRuntime }] = await Promise.all([
       import('../../core/realtime/resolveLiveConnection'),
       import('../../core/realtime'),
     ])
