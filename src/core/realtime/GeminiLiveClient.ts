@@ -1,12 +1,12 @@
 import {
+  type GeminiLiveServerEvent,
+  type GeminiLiveSetupConfig,
   buildAudioMessage,
   buildAudioStreamEndMessage,
   buildSetupMessage,
   buildTextMessage,
   encodeClientMessage,
   parseServerMessage,
-  type GeminiLiveServerEvent,
-  type GeminiLiveSetupConfig,
 } from './geminiLiveProtocol'
 
 export type WebSocketLike = {
@@ -38,7 +38,9 @@ export class GeminiLiveClient {
   private readonly setupMessage: string
 
   constructor(private readonly options: GeminiLiveClientOptions) {
-    this.setupMessage = encodeClientMessage(buildSetupMessage(options.setupConfig))
+    this.setupMessage = encodeClientMessage(
+      buildSetupMessage(options.setupConfig),
+    )
   }
 
   connect(): void {
@@ -55,7 +57,11 @@ export class GeminiLiveClient {
     socket.onclose = (event) => {
       this.socket = null
       this.options.onClosed?.(event)
-      this.options.onEvent({ kind: 'closed', code: event.code, reason: event.reason })
+      this.options.onEvent({
+        kind: 'closed',
+        code: event.code,
+        reason: event.reason,
+      })
     }
   }
 
@@ -80,7 +86,8 @@ export class GeminiLiveClient {
   }
 
   private send(message: string): void {
-    if (this.socket && this.socket.readyState === OPEN) this.socket.send(message)
+    if (this.socket && this.socket.readyState === OPEN)
+      this.socket.send(message)
   }
 
   sendText(text: string): void {

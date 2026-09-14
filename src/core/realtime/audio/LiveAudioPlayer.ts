@@ -1,5 +1,6 @@
-import { base64ToInt16, int16ToFloat32 } from './pcm'
 import { LIVE_OUTPUT_SAMPLE_RATE } from '../geminiLiveProtocol'
+
+import { base64ToInt16, int16ToFloat32 } from './pcm'
 
 export class LiveAudioPlayer {
   private context: AudioContext | null = null
@@ -8,7 +9,8 @@ export class LiveAudioPlayer {
   private disposed = false
 
   private ensureContext(): AudioContext {
-    if (!this.context) this.context = new AudioContext({ sampleRate: LIVE_OUTPUT_SAMPLE_RATE })
+    if (!this.context)
+      this.context = new AudioContext({ sampleRate: LIVE_OUTPUT_SAMPLE_RATE })
     return this.context
   }
 
@@ -16,7 +18,11 @@ export class LiveAudioPlayer {
     if (this.disposed) return
     const context = this.ensureContext()
     const samples = int16ToFloat32(base64ToInt16(dataBase64))
-    const buffer = context.createBuffer(1, samples.length, LIVE_OUTPUT_SAMPLE_RATE)
+    const buffer = context.createBuffer(
+      1,
+      samples.length,
+      LIVE_OUTPUT_SAMPLE_RATE,
+    )
     buffer.copyToChannel(samples, 0)
     const node = context.createBufferSource()
     node.buffer = buffer
@@ -33,6 +39,7 @@ export class LiveAudioPlayer {
       try {
         node.stop()
       } catch {
+        // node already stopped
       }
     }
     this.scheduled.clear()

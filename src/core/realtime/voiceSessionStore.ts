@@ -46,7 +46,8 @@ export class VoiceSessionStore {
   setStatus = (status: VoiceSessionStatus, error: string | null = null): void =>
     this.set({ status, error })
 
-  setConversationId = (conversationId: string | null): void => this.set({ conversationId })
+  setConversationId = (conversationId: string | null): void =>
+    this.set({ conversationId })
 
   setMuted = (muted: boolean): void => this.set({ muted })
 
@@ -56,7 +57,9 @@ export class VoiceSessionStore {
     this.set({ partialUserText: this.snapshot.partialUserText + text })
 
   appendPartialAssistant = (text: string): void =>
-    this.set({ partialAssistantText: this.snapshot.partialAssistantText + text })
+    this.set({
+      partialAssistantText: this.snapshot.partialAssistantText + text,
+    })
 
   clearPartials = (): void =>
     this.set({ partialUserText: '', partialAssistantText: '' })

@@ -20,14 +20,20 @@ export const resolveLiveConnection = ({
   settings: YoloSettings
 }): LiveConnectionResolution => {
   const voice = settings.voice
-  const provider = settings.providers.find((candidate) => candidate.id === voice.providerId)
+  const provider = settings.providers.find(
+    (candidate) => candidate.id === voice.providerId,
+  )
   if (!provider) {
-    return { ok: false, error: 'Select a Gemini provider with an API key in Voice settings.' }
+    return {
+      ok: false,
+      error: 'Select a Gemini provider with an API key in Voice settings.',
+    }
   }
   if (provider.presetType !== 'gemini') {
     return {
       ok: false,
-      error: 'Voice mode requires a Gemini provider configured with an API key (OAuth is not supported yet).',
+      error:
+        'Voice mode requires a Gemini provider configured with an API key (OAuth is not supported yet).',
     }
   }
   if (!provider.apiKey) {

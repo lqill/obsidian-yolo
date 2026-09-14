@@ -1,11 +1,8 @@
-// src/core/realtime/audio/PcmMicCapture.ts
-import {
-  bytesToBase64,
-  float32ToInt16,
-  resampleLinear,
-} from './pcm'
-import { MIC_WORKLET_SOURCE } from './micWorklet'
+/* eslint-disable @typescript-eslint/no-deprecated -- ScriptProcessorNode is the intentional fallback when AudioWorklet.addModule is unavailable */
 import { LIVE_INPUT_SAMPLE_RATE } from '../geminiLiveProtocol'
+
+import { MIC_WORKLET_SOURCE } from './micWorklet'
+import { bytesToBase64, float32ToInt16, resampleLinear } from './pcm'
 
 const FRAME_SIZE = 1600 // ~100 ms at 16 kHz
 
@@ -60,7 +57,11 @@ export class PcmMicCapture {
         const input = event.inputBuffer.getChannelData(0)
         const resampled =
           this.context && this.context.sampleRate !== LIVE_INPUT_SAMPLE_RATE
-            ? resampleLinear(input, this.context.sampleRate, LIVE_INPUT_SAMPLE_RATE)
+            ? resampleLinear(
+                input,
+                this.context.sampleRate,
+                LIVE_INPUT_SAMPLE_RATE,
+              )
             : input
         this.pushFrame(float32ToInt16(resampled))
       }
@@ -72,7 +73,8 @@ export class PcmMicCapture {
   private pushFrame(frame: Int16Array): void {
     if (this.muted) return
     let level = 0
-    for (let i = 0; i < frame.length; i += 1) level = Math.max(level, Math.abs(frame[i]) / 32768)
+    for (let i = 0; i < frame.length; i += 1)
+      level = Math.max(level, Math.abs(frame[i]) / 32768)
     this.options.onLevel(level)
 
     const merged = new Int16Array(this.pending.length + frame.length)
@@ -81,7 +83,11 @@ export class PcmMicCapture {
     let offset = 0
     while (merged.length - offset >= FRAME_SIZE) {
       const slice = merged.subarray(offset, offset + FRAME_SIZE)
-      this.options.onFrame(bytesToBase64(new Uint8Array(slice.buffer, slice.byteOffset, slice.byteLength)))
+      this.options.onFrame(
+        bytesToBase64(
+          new Uint8Array(slice.buffer, slice.byteOffset, slice.byteLength),
+        ),
+      )
       offset += FRAME_SIZE
     }
     this.pending = merged.slice(offset)

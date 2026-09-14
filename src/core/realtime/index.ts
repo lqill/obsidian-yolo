@@ -1,10 +1,10 @@
-import { GeminiLiveClient, type WebSocketLike } from './GeminiLiveClient'
-import { GeminiLiveSession, type VoiceTurn } from './GeminiLiveSession'
-import { buildLiveWebSocketUrl } from './geminiLiveProtocol'
 import { LiveAudioPlayer } from './audio/LiveAudioPlayer'
 import { PcmMicCapture } from './audio/PcmMicCapture'
-import { voiceSessionStore } from './voiceSessionStore'
+import { GeminiLiveClient, type WebSocketLike } from './GeminiLiveClient'
+import { buildLiveWebSocketUrl } from './geminiLiveProtocol'
+import { GeminiLiveSession, type VoiceTurn } from './GeminiLiveSession'
 import type { ResolvedLiveConnection } from './resolveLiveConnection'
+import { voiceSessionStore } from './voiceSessionStore'
 
 export type CreateGeminiLiveRuntimeOptions = {
   connection: ResolvedLiveConnection
@@ -12,7 +12,10 @@ export type CreateGeminiLiveRuntimeOptions = {
   createSocket: (url: string) => WebSocketLike
 }
 
-export const createGeminiLiveRuntime = (options: CreateGeminiLiveRuntimeOptions) => {
+export const createGeminiLiveRuntime = (
+  options: CreateGeminiLiveRuntimeOptions,
+) => {
+  // eslint-disable-next-line prefer-const -- declared before the client so the onEvent closure can reference it
   let session: GeminiLiveSession
   const client = new GeminiLiveClient({
     url: buildLiveWebSocketUrl({
@@ -55,4 +58,7 @@ export { voiceSessionStore, VoiceSessionStore } from './voiceSessionStore'
 export { resolveLiveConnection } from './resolveLiveConnection'
 export type { VoiceTurn } from './GeminiLiveSession'
 export type { ResolvedLiveConnection } from './resolveLiveConnection'
-export type { VoiceSessionSnapshot, VoiceSessionStatus } from './voiceSessionStore'
+export type {
+  VoiceSessionSnapshot,
+  VoiceSessionStatus,
+} from './voiceSessionStore'

@@ -1215,7 +1215,8 @@ export class ChatSessionController {
     this.syncAgentConversationMessages(nextMessages)
     this.persist(nextMessages)
     this.deps.forceScrollToBottom({ deferToNextFrame: true })
-    if (isFirstTurn) void this.deps.generateConversationTitle(conversationId, nextMessages)
+    if (isFirstTurn)
+      void this.deps.generateConversationTitle(conversationId, nextMessages)
   }
 
   /** Equivalent to the original `handleAssistantMessageEditSave`. */

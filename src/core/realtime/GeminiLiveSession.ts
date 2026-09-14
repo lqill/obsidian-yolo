@@ -5,7 +5,10 @@ import type { VoiceSessionStore } from './voiceSessionStore'
 export type VoiceTurn = { userText: string; assistantText: string }
 
 export type VoiceMicrophone = {
-  start(onFrame: (dataBase64: string) => void, onLevel: (level: number) => void): Promise<void>
+  start(
+    onFrame: (dataBase64: string) => void,
+    onLevel: (level: number) => void,
+  ): Promise<void>
   stop(): void
   setMuted(muted: boolean): void
 }

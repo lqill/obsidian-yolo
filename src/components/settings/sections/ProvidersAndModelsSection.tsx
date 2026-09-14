@@ -1303,10 +1303,7 @@ const VoiceSettingsSection = () => {
     (p) => p.presetType === 'gemini',
   )
   const voice = settings.voice
-  const commitVoiceUpdate = (
-    patch: Partial<typeof voice>,
-    context: string,
-  ) => {
+  const commitVoiceUpdate = (patch: Partial<typeof voice>, context: string) => {
     void (async () => {
       try {
         await setSettings({

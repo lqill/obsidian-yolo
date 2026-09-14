@@ -1,4 +1,8 @@
-import { GeminiLiveClient, type GeminiLiveClientEvent, type WebSocketLike } from './GeminiLiveClient'
+import {
+  GeminiLiveClient,
+  type GeminiLiveClientEvent,
+  type WebSocketLike,
+} from './GeminiLiveClient'
 
 class FakeWebSocket implements WebSocketLike {
   readyState = 1
@@ -27,7 +31,11 @@ describe('GeminiLiveClient', () => {
         sockets.push(s)
         return s
       },
-      setupConfig: { model: 'models/m', voiceName: 'Kore', systemPrompt: 'sys' },
+      setupConfig: {
+        model: 'models/m',
+        voiceName: 'Kore',
+        systemPrompt: 'sys',
+      },
       onEvent: (e) => events.push(e),
     })
     return { client, sockets, events }
@@ -58,10 +66,16 @@ describe('GeminiLiveClient', () => {
     client.sendAudio('AAAA')
     client.sendAudioStreamEnd()
     const sent = sockets[0].sent
-    expect(JSON.parse(sent[sent.length - 3])).toEqual({ realtimeInput: { text: 'hi' } })
-    expect(JSON.parse(sent[sent.length - 2])).toEqual({
-      realtimeInput: { audio: { data: 'AAAA', mimeType: 'audio/pcm;rate=16000' } },
+    expect(JSON.parse(sent[sent.length - 3])).toEqual({
+      realtimeInput: { text: 'hi' },
     })
-    expect(JSON.parse(sent[sent.length - 1])).toEqual({ realtimeInput: { audioStreamEnd: true } })
+    expect(JSON.parse(sent[sent.length - 2])).toEqual({
+      realtimeInput: {
+        audio: { data: 'AAAA', mimeType: 'audio/pcm;rate=16000' },
+      },
+    })
+    expect(JSON.parse(sent[sent.length - 1])).toEqual({
+      realtimeInput: { audioStreamEnd: true },
+    })
   })
 })

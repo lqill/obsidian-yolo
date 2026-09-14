@@ -1,12 +1,15 @@
-import { useCallback, useRef } from 'react'
 import { Platform } from 'obsidian'
+import { useCallback, useRef } from 'react'
+
 import { useSettings } from '../../contexts/settings-context'
-import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
 import type { VoiceTurn } from '../../core/realtime'
-import type { ChatSessionController } from './ChatSessionController'
+import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
 import type { ChatAssistantMessage, ChatUserMessage } from '../../types/chat'
 
-const buildId = () => `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+import type { ChatSessionController } from './ChatSessionController'
+
+const buildId = () =>
+  `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
 export const useVoiceSession = ({
   sessionController,
@@ -54,7 +57,10 @@ export const useVoiceSession = ({
           model: settings.chatModels.find((m) => m.id === liveModelId),
         },
       }
-      sessionController.appendConversationMessages(pinned, [userMessage, assistantMessage])
+      sessionController.appendConversationMessages(pinned, [
+        userMessage,
+        assistantMessage,
+      ])
       voiceSessionStore.clearPartials()
     },
     [sessionController, liveModelId, settings.chatModels, stampTimeContext],
@@ -63,10 +69,11 @@ export const useVoiceSession = ({
   const start = useCallback(async () => {
     if (voiceSessionStore.getSnapshot().status !== 'idle') return
     if (!Platform.isDesktop) return
-    const [{ resolveLiveConnection }, { createGeminiLiveRuntime }] = await Promise.all([
-      import('../../core/realtime/resolveLiveConnection'),
-      import('../../core/realtime'),
-    ])
+    const [{ resolveLiveConnection }, { createGeminiLiveRuntime }] =
+      await Promise.all([
+        import('../../core/realtime/resolveLiveConnection'),
+        import('../../core/realtime'),
+      ])
     const resolution = resolveLiveConnection({ settings })
     if (!resolution.ok) {
       voiceSessionStore.setStatus('error', resolution.error)
@@ -91,8 +98,14 @@ export const useVoiceSession = ({
     onVoiceActiveChange(false)
   }, [onVoiceActiveChange])
 
-  const sendText = useCallback((text: string) => runtimeRef.current?.sendText(text), [])
-  const setMuted = useCallback((muted: boolean) => runtimeRef.current?.setMuted(muted), [])
+  const sendText = useCallback(
+    (text: string) => runtimeRef.current?.sendText(text),
+    [],
+  )
+  const setMuted = useCallback(
+    (muted: boolean) => runtimeRef.current?.setMuted(muted),
+    [],
+  )
 
   return { start, stop, sendText, setMuted }
 }

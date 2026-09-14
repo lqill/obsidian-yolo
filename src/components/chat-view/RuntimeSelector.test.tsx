@@ -51,12 +51,13 @@ jest.mock('../../assets/provider-icons/xai.svg', () => ({
 import { Platform } from 'obsidian'
 import { renderToStaticMarkup } from 'react-dom/server'
 
+import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
+
 import {
   RuntimeSelector,
   getRuntimeSelectorRows,
   resolveRuntimeSelectorRowState,
 } from './RuntimeSelector'
-import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
 
 const selectorRow = (primaryId: string) => {
   const row = getRuntimeSelectorRows(true).find(

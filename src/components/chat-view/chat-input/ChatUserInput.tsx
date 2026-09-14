@@ -66,12 +66,12 @@ import { FileUploadButton } from './FileUploadButton'
 import MentionableBadge from './MentionableBadge'
 import MessageInputCore, { type MessageInputCoreRef } from './MessageInputCore'
 import { ModelSelect } from './ModelSelect'
-import { VoiceControlBar } from './VoiceControlBar'
 import { canAcceptDrop } from './plugins/drop/resolveDrop'
 import type { SlashCommand } from './plugins/mention/SkillSlashPlugin'
 import { ReasoningSelect, supportsReasoning } from './ReasoningSelect'
 import { SubmitButton } from './SubmitButton'
 import { editorStateToPlainText } from './utils/editor-state-to-plain-text'
+import { VoiceControlBar } from './VoiceControlBar'
 
 export type ChatUserInputRef = {
   focus: () => void

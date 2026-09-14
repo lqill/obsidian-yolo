@@ -1,6 +1,7 @@
 // src/core/realtime/geminiLiveProtocol.ts
 
-export const BUILD_LIVE_DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com'
+export const BUILD_LIVE_DEFAULT_BASE_URL =
+  'https://generativelanguage.googleapis.com'
 export const LIVE_INPUT_SAMPLE_RATE = 16000
 export const LIVE_OUTPUT_SAMPLE_RATE = 24000
 
@@ -51,7 +52,9 @@ export const buildLiveWebSocketUrl = ({
   return `wss://generativelanguage.googleapis.com${LIVE_WS_PATH}?key=${encodeURIComponent(apiKey)}`
 }
 
-export const buildSetupMessage = (config: GeminiLiveSetupConfig): GeminiLiveClientMessage => ({
+export const buildSetupMessage = (
+  config: GeminiLiveSetupConfig,
+): GeminiLiveClientMessage => ({
   setup: {
     model: normalizeLiveModelName(config.model),
     generationConfig: {
@@ -66,8 +69,12 @@ export const buildSetupMessage = (config: GeminiLiveSetupConfig): GeminiLiveClie
   },
 })
 
-export const buildAudioMessage = (dataBase64: string): GeminiLiveClientMessage => ({
-  realtimeInput: { audio: { data: dataBase64, mimeType: 'audio/pcm;rate=16000' } },
+export const buildAudioMessage = (
+  dataBase64: string,
+): GeminiLiveClientMessage => ({
+  realtimeInput: {
+    audio: { data: dataBase64, mimeType: 'audio/pcm;rate=16000' },
+  },
 })
 
 export const buildTextMessage = (text: string): GeminiLiveClientMessage => ({
@@ -86,7 +93,9 @@ export const encodeClientMessage = (message: GeminiLiveClientMessage): string =>
   JSON.stringify(message)
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
-  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null
+  typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : null
 
 /** Pure parser: server frame -> zero or more normalized events. */
 export const parseServerMessage = (raw: unknown): GeminiLiveServerEvent[] => {
@@ -99,7 +108,9 @@ export const parseServerMessage = (raw: unknown): GeminiLiveServerEvent[] => {
   const content = asRecord(root.serverContent)
   if (content) {
     const modelTurn = asRecord(content.modelTurn)
-    const parts = Array.isArray(modelTurn?.parts) ? (modelTurn!.parts as unknown[]) : []
+    const parts = Array.isArray(modelTurn?.parts)
+      ? (modelTurn.parts as unknown[])
+      : []
     for (const part of parts) {
       const inline = asRecord(asRecord(part)?.inlineData)
       const data = inline?.data
@@ -107,7 +118,10 @@ export const parseServerMessage = (raw: unknown): GeminiLiveServerEvent[] => {
         events.push({
           kind: 'audio',
           dataBase64: data,
-          mimeType: typeof inline?.mimeType === 'string' ? inline.mimeType : 'audio/pcm',
+          mimeType:
+            typeof inline?.mimeType === 'string'
+              ? inline.mimeType
+              : 'audio/pcm',
         })
       }
     }
@@ -124,7 +138,9 @@ export const parseServerMessage = (raw: unknown): GeminiLiveServerEvent[] => {
   }
 
   const toolCall = asRecord(root.toolCall)
-  const calls = Array.isArray(toolCall?.functionCalls) ? (toolCall!.functionCalls as unknown[]) : []
+  const calls = Array.isArray(toolCall?.functionCalls)
+    ? (toolCall.functionCalls as unknown[])
+    : []
   if (calls.length > 0) {
     events.push({
       kind: 'toolCall',
@@ -143,7 +159,10 @@ export const parseServerMessage = (raw: unknown): GeminiLiveServerEvent[] => {
   if (error) {
     events.push({
       kind: 'error',
-      message: typeof error.message === 'string' ? error.message : 'Unknown Live API error',
+      message:
+        typeof error.message === 'string'
+          ? error.message
+          : 'Unknown Live API error',
       raw: error,
     })
   }

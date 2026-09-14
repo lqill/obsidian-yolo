@@ -1,10 +1,13 @@
 // src/core/realtime/GeminiLiveSession.test.ts
-import { GeminiLiveSession } from './GeminiLiveSession'
 import type { GeminiLiveServerEvent } from './geminiLiveProtocol'
+import { GeminiLiveSession } from './GeminiLiveSession'
 import { voiceSessionStore } from './voiceSessionStore'
 
 type Microphone = {
-  start(onFrame: (base64: string) => void, onLevel: (level: number) => void): Promise<void>
+  start(
+    onFrame: (base64: string) => void,
+    onLevel: (level: number) => void,
+  ): Promise<void>
   stop(): void
   setMuted(muted: boolean): void
 }
@@ -41,8 +44,14 @@ describe('GeminiLiveSession per-turn state machine', () => {
   it('commits exactly once and ignores a post-interrupted turnComplete', () => {
     const { session, turns } = makeFakes()
     session.start()
-    session.handleEvent({ kind: 'inputTranscript', text: 'hello' } as GeminiLiveServerEvent)
-    session.handleEvent({ kind: 'outputTranscript', text: 'partial' } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'inputTranscript',
+      text: 'hello',
+    } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'outputTranscript',
+      text: 'partial',
+    } as GeminiLiveServerEvent)
     session.handleEvent({ kind: 'interrupted' })
     session.handleEvent({ kind: 'turnComplete' })
     expect(turns).toEqual([{ userText: 'hello', assistantText: 'partial' }])
@@ -59,10 +68,18 @@ describe('GeminiLiveSession per-turn state machine', () => {
     const { session, turns } = makeFakes()
     session.start()
     session.sendText('typed')
-    session.handleEvent({ kind: 'inputTranscript', text: 'spoken' } as GeminiLiveServerEvent)
-    session.handleEvent({ kind: 'outputTranscript', text: 'reply' } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'inputTranscript',
+      text: 'spoken',
+    } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'outputTranscript',
+      text: 'reply',
+    } as GeminiLiveServerEvent)
     session.handleEvent({ kind: 'turnComplete' })
-    expect(turns).toEqual([{ userText: 'typed\nspoken', assistantText: 'reply' }])
+    expect(turns).toEqual([
+      { userText: 'typed\nspoken', assistantText: 'reply' },
+    ])
   })
 
   it('ignores turnComplete without user input', () => {
@@ -75,11 +92,23 @@ describe('GeminiLiveSession per-turn state machine', () => {
   it('commits two consecutive spoken-only turns', () => {
     const { session, turns } = makeFakes()
     session.start()
-    session.handleEvent({ kind: 'inputTranscript', text: 'first question' } as GeminiLiveServerEvent)
-    session.handleEvent({ kind: 'outputTranscript', text: 'first answer' } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'inputTranscript',
+      text: 'first question',
+    } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'outputTranscript',
+      text: 'first answer',
+    } as GeminiLiveServerEvent)
     session.handleEvent({ kind: 'turnComplete' })
-    session.handleEvent({ kind: 'inputTranscript', text: 'second question' } as GeminiLiveServerEvent)
-    session.handleEvent({ kind: 'outputTranscript', text: 'second answer' } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'inputTranscript',
+      text: 'second question',
+    } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'outputTranscript',
+      text: 'second answer',
+    } as GeminiLiveServerEvent)
     session.handleEvent({ kind: 'turnComplete' })
     expect(turns).toEqual([
       { userText: 'first question', assistantText: 'first answer' },

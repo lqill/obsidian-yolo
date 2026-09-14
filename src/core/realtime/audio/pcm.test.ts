@@ -1,11 +1,11 @@
 // src/core/realtime/audio/pcm.test.ts
 import {
-  int16ToFloat32,
-  float32ToInt16,
-  bytesToBase64,
   base64ToBytes,
-  int16ToBase64,
   base64ToInt16,
+  bytesToBase64,
+  float32ToInt16,
+  int16ToBase64,
+  int16ToFloat32,
   resampleLinear,
 } from './pcm'
 
@@ -19,12 +19,16 @@ describe('pcm', () => {
   })
 
   it('clamps float32ToInt16 out-of-range values', () => {
-    expect(Array.from(float32ToInt16(new Float32Array([2, -2])))).toEqual([32767, -32768])
+    expect(Array.from(float32ToInt16(new Float32Array([2, -2])))).toEqual([
+      32767, -32768,
+    ])
   })
 
   it('round-trips base64 bytes', () => {
     const bytes = new Uint8Array([0, 1, 2, 253, 254, 255])
-    expect(Array.from(base64ToBytes(bytesToBase64(bytes)))).toEqual(Array.from(bytes))
+    expect(Array.from(base64ToBytes(bytesToBase64(bytes)))).toEqual(
+      Array.from(bytes),
+    )
   })
 
   it('round-trips int16 base64', () => {
@@ -35,7 +39,8 @@ describe('pcm', () => {
 
   it('downsamples 48k -> 16k by 3x length', () => {
     const input = new Float32Array(48)
-    for (let k = 0; k < input.length; k += 1) input[k] = Math.sin((k / 48) * Math.PI * 2)
+    for (let k = 0; k < input.length; k += 1)
+      input[k] = Math.sin((k / 48) * Math.PI * 2)
     const out = resampleLinear(input, 48000, 16000)
     expect(out.length).toBe(16)
   })

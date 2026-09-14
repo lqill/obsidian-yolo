@@ -1989,7 +1989,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         showReasoningSelect={mainInputCapabilities.supportsReasoningSelect}
         isVoiceActive={isCliRuntimeActive ? false : isVoiceActive}
         onToggleVoice={isCliRuntimeActive ? undefined : handleToggleVoice}
-        onToggleVoiceMute={isCliRuntimeActive ? undefined : handleToggleVoiceMute}
+        onToggleVoiceMute={
+          isCliRuntimeActive ? undefined : handleToggleVoiceMute
+        }
         onEndVoice={isCliRuntimeActive ? undefined : voiceSession.stop}
         runtimeControls={
           isCliRuntimeActive ? (

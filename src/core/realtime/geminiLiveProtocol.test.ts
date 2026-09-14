@@ -1,13 +1,13 @@
 // src/core/realtime/geminiLiveProtocol.test.ts
 import {
   BUILD_LIVE_DEFAULT_BASE_URL,
+  buildAudioStreamEndMessage,
   buildLiveWebSocketUrl,
   buildSetupMessage,
   buildTextMessage,
-  buildAudioStreamEndMessage,
+  encodeClientMessage,
   normalizeLiveModelName,
   parseServerMessage,
-  encodeClientMessage,
 } from './geminiLiveProtocol'
 
 describe('buildLiveWebSocketUrl', () => {
@@ -23,7 +23,10 @@ describe('buildLiveWebSocketUrl', () => {
 
   it('rejects a non-default base URL', () => {
     expect(() =>
-      buildLiveWebSocketUrl({ baseUrl: 'https://proxy.example.com', apiKey: 'abc' }),
+      buildLiveWebSocketUrl({
+        baseUrl: 'https://proxy.example.com',
+        apiKey: 'abc',
+      }),
     ).toThrow(/Live API/)
   })
 })
@@ -49,7 +52,10 @@ describe('buildSetupMessage', () => {
     const setup = (msg as any).setup
     expect(setup.model).toBe('models/gemini-3.1-flash-live-preview')
     expect(setup.generationConfig.responseModalities).toEqual(['AUDIO'])
-    expect(setup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe('Kore')
+    expect(
+      setup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig
+        .voiceName,
+    ).toBe('Kore')
     expect(setup.inputAudioTranscription).toEqual({})
     expect(setup.outputAudioTranscription).toEqual({})
     expect(setup.systemInstruction.parts[0].text).toBe('Be brief.')
@@ -61,7 +67,9 @@ describe('encodeClientMessage', () => {
     expect(JSON.parse(encodeClientMessage(buildTextMessage('hi')))).toEqual({
       realtimeInput: { text: 'hi' },
     })
-    expect(JSON.parse(encodeClientMessage(buildAudioStreamEndMessage()))).toEqual({
+    expect(
+      JSON.parse(encodeClientMessage(buildAudioStreamEndMessage())),
+    ).toEqual({
       realtimeInput: { audioStreamEnd: true },
     })
   })
@@ -69,37 +77,53 @@ describe('encodeClientMessage', () => {
 
 describe('parseServerMessage', () => {
   it('parses setupComplete', () => {
-    expect(parseServerMessage({ setupComplete: {} })).toEqual([{ kind: 'ready' }])
+    expect(parseServerMessage({ setupComplete: {} })).toEqual([
+      { kind: 'ready' },
+    ])
   })
 
   it('parses model audio inlineData', () => {
     const events = parseServerMessage({
       serverContent: {
-        modelTurn: { parts: [{ inlineData: { data: 'AAAA', mimeType: 'audio/pcm;rate=24000' } }] },
+        modelTurn: {
+          parts: [
+            { inlineData: { data: 'AAAA', mimeType: 'audio/pcm;rate=24000' } },
+          ],
+        },
       },
     })
-    expect(events).toEqual([{ kind: 'audio', dataBase64: 'AAAA', mimeType: 'audio/pcm;rate=24000' }])
+    expect(events).toEqual([
+      { kind: 'audio', dataBase64: 'AAAA', mimeType: 'audio/pcm;rate=24000' },
+    ])
   })
 
   it('parses input/output transcription and turn signals', () => {
     expect(
-      parseServerMessage({ serverContent: { inputTranscription: { text: 'hello' } } }),
+      parseServerMessage({
+        serverContent: { inputTranscription: { text: 'hello' } },
+      }),
     ).toEqual([{ kind: 'inputTranscript', text: 'hello' }])
     expect(
-      parseServerMessage({ serverContent: { outputTranscription: { text: 'hi' } } }),
+      parseServerMessage({
+        serverContent: { outputTranscription: { text: 'hi' } },
+      }),
     ).toEqual([{ kind: 'outputTranscript', text: 'hi' }])
-    expect(parseServerMessage({ serverContent: { interrupted: true } })).toEqual([
-      { kind: 'interrupted' },
-    ])
-    expect(parseServerMessage({ serverContent: { turnComplete: true } })).toEqual([
-      { kind: 'turnComplete' },
-    ])
+    expect(
+      parseServerMessage({ serverContent: { interrupted: true } }),
+    ).toEqual([{ kind: 'interrupted' }])
+    expect(
+      parseServerMessage({ serverContent: { turnComplete: true } }),
+    ).toEqual([{ kind: 'turnComplete' }])
   })
 
   it('parses function calls and error frames', () => {
     expect(
-      parseServerMessage({ toolCall: { functionCalls: [{ id: '1', name: 'foo', args: {} }] } }),
-    ).toEqual([{ kind: 'toolCall', functionCalls: [{ id: '1', name: 'foo', args: {} }] }])
+      parseServerMessage({
+        toolCall: { functionCalls: [{ id: '1', name: 'foo', args: {} }] },
+      }),
+    ).toEqual([
+      { kind: 'toolCall', functionCalls: [{ id: '1', name: 'foo', args: {} }] },
+    ])
     expect(parseServerMessage({ error: { message: 'bad model' } })).toEqual([
       { kind: 'error', message: 'bad model', raw: { message: 'bad model' } },
     ])

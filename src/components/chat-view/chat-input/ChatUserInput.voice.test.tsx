@@ -1,3 +1,4 @@
+/* eslint-disable import/order -- the CLI test module's hoisted jest.mock calls must register before ChatUserInput is evaluated */
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { Platform } from 'obsidian'
