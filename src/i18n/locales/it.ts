@@ -2552,4 +2552,22 @@ export const it: DeepPartial<TranslationKeys> = {
     inactivePlaceholder:
       'Questo tipo di file è fornito da un modulo attualmente non attivo.',
   },
+
+  voiceSectionTitle: 'Voce (Gemini Live)',
+  voiceProviderLabel: 'Provider Gemini (chiave API)',
+  voiceProviderNone: 'Nessuno selezionato',
+  voiceModelLabel: 'Modello Live',
+  voiceNameLabel: 'Voce',
+  voiceSystemPromptLabel: 'Prompt di sistema',
+  voiceMicStart: 'Avvia conversazione vocale',
+  voiceMicStop: 'Termina conversazione vocale',
+  voiceStatusConnecting: 'Connessione…',
+  voiceStatusReady: 'In ascolto',
+  voiceStatusError: 'Errore vocale',
+  voiceMute: 'Silenzia',
+  voiceUnmute: 'Riattiva audio',
+  voiceEnd: 'Termina',
+  voiceDesktopOnly: 'La modalità vocale è disponibile solo su desktop.',
+  voiceUnavailable:
+    'Seleziona un provider Gemini con chiave API nelle Impostazioni per usare la modalità vocale.',
 }

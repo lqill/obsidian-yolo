@@ -2841,4 +2841,22 @@ export const en: TranslationKeys = {
     inactivePlaceholder:
       'This file type is provided by a module that is not currently active.',
   },
+
+  voiceSectionTitle: 'Voice (Gemini Live)',
+  voiceProviderLabel: 'Gemini provider (API key)',
+  voiceProviderNone: 'None selected',
+  voiceModelLabel: 'Live model',
+  voiceNameLabel: 'Voice',
+  voiceSystemPromptLabel: 'System prompt',
+  voiceMicStart: 'Start voice conversation',
+  voiceMicStop: 'End voice conversation',
+  voiceStatusConnecting: 'Connecting…',
+  voiceStatusReady: 'Listening',
+  voiceStatusError: 'Voice error',
+  voiceMute: 'Mute',
+  voiceUnmute: 'Unmute',
+  voiceEnd: 'End',
+  voiceDesktopOnly: 'Voice mode is available on desktop only.',
+  voiceUnavailable:
+    'Select a Gemini API-key provider in Settings to use voice mode.',
 }
