@@ -1,0 +1,107 @@
+// src/core/realtime/audio/PcmMicCapture.ts
+import {
+  bytesToBase64,
+  float32ToInt16,
+  resampleLinear,
+} from './pcm'
+import { MIC_WORKLET_SOURCE } from './micWorklet'
+import { LIVE_INPUT_SAMPLE_RATE } from '../geminiLiveProtocol'
+
+const FRAME_SIZE = 1600 // ~100 ms at 16 kHz
+
+export type PcmMicCaptureOptions = {
+  onFrame: (dataBase64: string) => void
+  onLevel: (level: number) => void
+}
+
+/**
+ * Desktop-only microphone capture at 16 kHz mono, emitted as ~100 ms base64
+ * PCM16 frames. Prefers a native 16 kHz AudioContext; falls back to a linear
+ * resampler and, if AudioWorklet is unavailable, a ScriptProcessorNode.
+ */
+export class PcmMicCapture {
+  private stream: MediaStream | null = null
+  private context: AudioContext | null = null
+  private source: MediaStreamAudioSourceNode | null = null
+  private worklet: AudioWorkletNode | null = null
+  private scriptNode: ScriptProcessorNode | null = null
+  private pending = new Int16Array(0)
+  private muted = false
+
+  constructor(private readonly options: PcmMicCaptureOptions) {}
+
+  async start(): Promise<void> {
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    })
+    this.context = new AudioContext({ sampleRate: LIVE_INPUT_SAMPLE_RATE })
+    this.source = this.context.createMediaStreamSource(this.stream)
+
+    if (typeof this.context.audioWorklet !== 'undefined') {
+      const blobUrl = URL.createObjectURL(
+        new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }),
+      )
+      await this.context.audioWorklet.addModule(blobUrl)
+      URL.revokeObjectURL(blobUrl)
+      this.worklet = new AudioWorkletNode(this.context, 'mic-capture')
+      this.worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+        this.pushFrame(new Int16Array(event.data))
+      }
+      this.source.connect(this.worklet)
+      this.worklet.connect(this.context.destination)
+    } else {
+      this.scriptNode = this.context.createScriptProcessor(FRAME_SIZE, 1, 1)
+      this.scriptNode.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0)
+        const resampled =
+          this.context && this.context.sampleRate !== LIVE_INPUT_SAMPLE_RATE
+            ? resampleLinear(input, this.context.sampleRate, LIVE_INPUT_SAMPLE_RATE)
+            : input
+        this.pushFrame(float32ToInt16(resampled))
+      }
+      this.source.connect(this.scriptNode)
+      this.scriptNode.connect(this.context.destination)
+    }
+  }
+
+  private pushFrame(frame: Int16Array): void {
+    if (this.muted) return
+    let level = 0
+    for (let i = 0; i < frame.length; i += 1) level = Math.max(level, Math.abs(frame[i]) / 32768)
+    this.options.onLevel(level)
+
+    const merged = new Int16Array(this.pending.length + frame.length)
+    merged.set(this.pending)
+    merged.set(frame, this.pending.length)
+    let offset = 0
+    while (merged.length - offset >= FRAME_SIZE) {
+      const slice = merged.subarray(offset, offset + FRAME_SIZE)
+      this.options.onFrame(bytesToBase64(new Uint8Array(slice.buffer, slice.byteOffset, slice.byteLength)))
+      offset += FRAME_SIZE
+    }
+    this.pending = merged.slice(offset)
+  }
+
+  setMuted(muted: boolean): void {
+    this.muted = muted
+  }
+
+  stop(): void {
+    this.worklet?.disconnect()
+    this.scriptNode?.disconnect()
+    this.source?.disconnect()
+    this.stream?.getTracks().forEach((track) => track.stop())
+    void this.context?.close()
+    this.stream = null
+    this.context = null
+    this.source = null
+    this.worklet = null
+    this.scriptNode = null
+    this.pending = new Int16Array(0)
+  }
+}
