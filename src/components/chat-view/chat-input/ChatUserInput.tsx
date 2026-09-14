@@ -1,6 +1,6 @@
 import { SerializedEditorState } from 'lexical'
-import { FilePlus2 } from 'lucide-react'
-import { Notice } from 'obsidian'
+import { FilePlus2, Mic, MicOff } from 'lucide-react'
+import { Notice, Platform } from 'obsidian'
 import {
   type CSSProperties,
   type DragEvent as ReactDragEvent,
@@ -66,6 +66,7 @@ import { FileUploadButton } from './FileUploadButton'
 import MentionableBadge from './MentionableBadge'
 import MessageInputCore, { type MessageInputCoreRef } from './MessageInputCore'
 import { ModelSelect } from './ModelSelect'
+import { VoiceControlBar } from './VoiceControlBar'
 import { canAcceptDrop } from './plugins/drop/resolveDrop'
 import type { SlashCommand } from './plugins/mention/SkillSlashPlugin'
 import { ReasoningSelect, supportsReasoning } from './ReasoningSelect'
@@ -160,6 +161,10 @@ export type ChatUserInputProps = {
   quickAccessSnippetEntries?: SnippetEntry[]
   skipImageModelCapabilityCheck?: boolean
   allowImageAttachments?: boolean
+  isVoiceActive?: boolean
+  onToggleVoice?: () => void
+  onToggleVoiceMute?: () => void
+  onEndVoice?: () => void
 }
 
 const DEFAULT_INPUT_HEIGHT = 80
@@ -223,6 +228,10 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
       quickAccessSnippetEntries,
       skipImageModelCapabilityCheck = false,
       allowImageAttachments = true,
+      isVoiceActive = false,
+      onToggleVoice,
+      onToggleVoiceMute,
+      onEndVoice,
     },
     ref,
   ) => {
@@ -742,6 +751,18 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
       />
     )
 
+    const renderVoiceControl = () =>
+      onToggleVoice && Platform.isDesktop ? (
+        <button
+          type="button"
+          className={`yolo-chat-input-voice-toggle${isVoiceActive ? ' is-active' : ''}`}
+          aria-label={isVoiceActive ? t('voiceMicStop') : t('voiceMicStart')}
+          onClick={onToggleVoice}
+        >
+          {isVoiceActive ? <MicOff size={16} /> : <Mic size={16} />}
+        </button>
+      ) : null
+
     const handleQuickAccessSkillSelect = (skill: {
       name: string
       description: string
@@ -769,6 +790,12 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
         className={`yolo-chat-user-input-wrapper${compact ? ' yolo-chat-user-input-wrapper--compact' : ''}`}
         role="presentation"
       >
+        {!compact && isVoiceActive ? (
+          <VoiceControlBar
+            onToggleMute={() => onToggleVoiceMute?.()}
+            onEnd={() => onEndVoice?.()}
+          />
+        ) : null}
         {enableResize && !compact && (
           <div
             className="yolo-chat-user-input-resize-hitbox"
@@ -938,6 +965,7 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
                   allowImages={allowImageAttachments}
                   onUpload={(files) => coreRef.current?.uploadFiles(files)}
                 />
+                {renderVoiceControl()}
                 {runtimeControls ?? (
                   <>
                     {renderModelControl()}
@@ -958,6 +986,7 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
                 allowImages={allowImageAttachments}
                 onUpload={(files) => coreRef.current?.uploadFiles(files)}
               />
+              {renderVoiceControl()}
               <div className="yolo-chat-user-input-send-row__right">
                 {renderContextUsageControl()}
                 {renderSubmitControl()}
