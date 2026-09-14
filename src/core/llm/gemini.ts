@@ -75,7 +75,7 @@ type GeminiReplayPart = GeminiPart & {
   thoughtSignature?: string
 }
 
-const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com'
+export const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com'
 const GEMINI_API_VERSION = 'v1beta'
 const PROVIDER_LABEL = 'Gemini'
 
