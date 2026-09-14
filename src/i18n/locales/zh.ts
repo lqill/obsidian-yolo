@@ -2678,4 +2678,21 @@ export const zh: TranslationKeys = {
   moduleFileView: {
     inactivePlaceholder: '该文件类型由一个当前未启用的模块提供。',
   },
+
+  voiceSectionTitle: '语音（Gemini Live）',
+  voiceProviderLabel: 'Gemini 提供商（API 密钥）',
+  voiceProviderNone: '未选择',
+  voiceModelLabel: 'Live 模型',
+  voiceNameLabel: '音色',
+  voiceSystemPromptLabel: '系统提示词',
+  voiceMicStart: '开始语音对话',
+  voiceMicStop: '结束语音对话',
+  voiceStatusConnecting: '连接中…',
+  voiceStatusReady: '正在聆听',
+  voiceStatusError: '语音出错',
+  voiceMute: '静音',
+  voiceUnmute: '取消静音',
+  voiceEnd: '结束',
+  voiceDesktopOnly: '语音模式仅支持桌面端。',
+  voiceUnavailable: '请在设置中选择一个 Gemini API 密钥提供商以使用语音模式。',
 }
