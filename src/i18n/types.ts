@@ -2475,4 +2475,21 @@ export type TranslationKeys = {
   moduleFileView: {
     inactivePlaceholder: string
   }
+
+  voiceSectionTitle: string
+  voiceProviderLabel: string
+  voiceProviderNone: string
+  voiceModelLabel: string
+  voiceNameLabel: string
+  voiceSystemPromptLabel: string
+  voiceMicStart: string
+  voiceMicStop: string
+  voiceStatusConnecting: string
+  voiceStatusReady: string
+  voiceStatusError: string
+  voiceMute: string
+  voiceUnmute: string
+  voiceEnd: string
+  voiceDesktopOnly: string
+  voiceUnavailable: string
 }
