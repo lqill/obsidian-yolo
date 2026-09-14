@@ -96,12 +96,12 @@ export class GeminiLiveSession {
         this.options.player.enqueue(event.dataBase64, event.mimeType)
         break
       case 'inputTranscript':
-        this.turnActive = true
+        this.markTurnActive()
         this.spokenUserText += event.text
         this.options.store.appendPartialUser(event.text)
         break
       case 'outputTranscript':
-        this.turnActive = true
+        this.markTurnActive()
         this.assistantText += event.text
         this.options.store.appendPartialAssistant(event.text)
         break

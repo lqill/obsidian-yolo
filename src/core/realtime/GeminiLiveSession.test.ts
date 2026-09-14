@@ -71,4 +71,19 @@ describe('GeminiLiveSession per-turn state machine', () => {
     session.handleEvent({ kind: 'turnComplete' })
     expect(turns).toEqual([])
   })
+
+  it('commits two consecutive spoken-only turns', () => {
+    const { session, turns } = makeFakes()
+    session.start()
+    session.handleEvent({ kind: 'inputTranscript', text: 'first question' } as GeminiLiveServerEvent)
+    session.handleEvent({ kind: 'outputTranscript', text: 'first answer' } as GeminiLiveServerEvent)
+    session.handleEvent({ kind: 'turnComplete' })
+    session.handleEvent({ kind: 'inputTranscript', text: 'second question' } as GeminiLiveServerEvent)
+    session.handleEvent({ kind: 'outputTranscript', text: 'second answer' } as GeminiLiveServerEvent)
+    session.handleEvent({ kind: 'turnComplete' })
+    expect(turns).toEqual([
+      { userText: 'first question', assistantText: 'first answer' },
+      { userText: 'second question', assistantText: 'second answer' },
+    ])
+  })
 })
