@@ -49,6 +49,7 @@ export function resampleLinear(
   inputRate: number,
   outputRate: number,
 ): Float32Array {
+  if (input.length === 0) return new Float32Array(0)
   if (inputRate === outputRate) return input
   const ratio = outputRate / inputRate
   const outLength = Math.max(1, Math.round(input.length * ratio))

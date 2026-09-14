@@ -29,7 +29,7 @@ describe('pcm', () => {
 
   it('round-trips int16 base64', () => {
     const i = new Int16Array([1, -1, 300, -300])
-    expect(int16ToBase64(i)).toBeTruthy()
+    expect(int16ToBase64(new Int16Array([1]))).toBe('AQA=')
     expect(Array.from(base64ToInt16(int16ToBase64(i)))).toEqual(Array.from(i))
   })
 
@@ -43,5 +43,9 @@ describe('pcm', () => {
   it('returns the input unchanged when rates match', () => {
     const input = new Float32Array([0.1, 0.2])
     expect(resampleLinear(input, 16000, 16000)).toBe(input)
+  })
+
+  it('returns an empty array for empty input', () => {
+    expect(resampleLinear(new Float32Array(0), 48000, 16000).length).toBe(0)
   })
 })
