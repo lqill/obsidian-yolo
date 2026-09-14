@@ -165,6 +165,7 @@ export type ChatSessionSubmitResult =
   | { kind: 'blocked_waiting_approval' }
   | { kind: 'blocked_enqueue_awaiting_approval' }
   | { kind: 'blocked_active_tool' }
+  | { kind: 'blocked'; reason: 'voice-active' }
   | { kind: 'enqueued'; message: ChatUserMessage }
   | { kind: 'submitted'; message: ChatUserMessage }
 
@@ -308,6 +309,8 @@ export type ChatSessionControllerDeps = {
    * hook hasn't produced a ready controller/coordinator/scope yet — mirrors
    * the pre-C2 `if (!controller || !coordinator || !scope) return` guard. */
   getCliSubmitContext: () => ChatSessionCliContext | null
+  /** Voice mode mutual exclusion; resolved by the hook layer. */
+  isVoiceActive: () => boolean
 }
 
 type Listener = () => void
@@ -1192,6 +1195,29 @@ export class ChatSessionController {
     return { removedMessages, outcome: { kind: 'persisted', ok } }
   }
 
+  /**
+   * Appends finalized voice-turn messages over the CURRENT snapshot (read at
+   * commit time, mirroring `removeHistoricalUserMessage`) so a mid-turn edit is
+   * never clobbered. No-ops if the conversation changed since the session
+   * started. Scroll + title side effects match the normal submit path.
+   */
+  appendConversationMessages = (
+    conversationId: string,
+    messages: ChatMessage[],
+  ): void => {
+    if (conversationId !== this.snapshot.currentConversationId) {
+      return
+    }
+    if (messages.length === 0) return
+    const isFirstTurn = this.snapshot.chatMessages.length === 0
+    const nextMessages = [...this.snapshot.chatMessages, ...messages]
+    this.setChatMessages(nextMessages)
+    this.syncAgentConversationMessages(nextMessages)
+    this.persist(nextMessages)
+    this.deps.forceScrollToBottom({ deferToNextFrame: true })
+    if (isFirstTurn) void this.deps.generateConversationTitle(conversationId, nextMessages)
+  }
+
   /** Equivalent to the original `handleAssistantMessageEditSave`. */
   handleAssistantMessageEditSave = (
     groupAnchorMessageId: string,
@@ -1469,6 +1495,9 @@ export class ChatSessionController {
    * waiting-for-approval, queueable (enqueue), active, normal submit.
    */
   submit(input: ChatSessionSubmitInput): ChatSessionSubmitResult {
+    if (this.deps.isVoiceActive()) {
+      return { kind: 'blocked', reason: 'voice-active' }
+    }
     if (input.runtimeId !== 'yolo') {
       return this.submitCli(input.message)
     }
@@ -1588,7 +1617,10 @@ export class ChatSessionController {
       AgentConversationRunSummary,
       'isActive' | 'isWaitingApproval'
     >
-  }): Promise<ChatSessionCompactResult> {
+  }): Promise<ChatSessionCompactResult | null> {
+    if (this.deps.isVoiceActive()) {
+      return null
+    }
     if (input.currentConversationRunSummary.isWaitingApproval) {
       return { kind: 'blocked_waiting_approval' }
     }
