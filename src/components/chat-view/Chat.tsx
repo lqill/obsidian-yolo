@@ -42,6 +42,7 @@ import {
   isCliRuntimeAvailable,
 } from '../../core/cli-runtime'
 import { resolveLocalizedText } from '../../core/modules/moduleI18n'
+import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
 import type { ChatLeafPlacement } from '../../features/chat/chatLeafSessionManager'
 import { useChatHighlightSession } from '../../features/editor/selection-highlight/useChatHighlightSession'
 import {
@@ -75,6 +76,7 @@ import {
   createSelectionBlockMentionable,
 } from '../../utils/chat/selection-mentionables'
 import { resolveEffectiveMaxContextTokens } from '../../utils/llm/model-capability-registry'
+import { stampUserMessageTimeContext } from '../../utils/prompt/timeContext'
 import { ObsidianIcon } from '../common/ObsidianIcon'
 
 // removed Prompt Templates feature
@@ -121,6 +123,7 @@ import { useChatRuntimeSnapshot } from './useChatRuntimeSnapshot'
 import { useChatStreamManager } from './useChatStreamManager'
 import { useChatTimelineReadModel } from './useChatTimelineReadModel'
 import { useCliRuntimeOrchestration } from './useCliRuntimeOrchestration'
+import { useVoiceSession } from './useVoiceSession'
 import { useYoloChatSession } from './useYoloChatSession'
 import { YoloChatSurface } from './YoloChatSurface'
 
@@ -579,6 +582,12 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     return late
   }, [])
   const cliSubmitContextRef = useRef<ChatSessionCliContext | null>(null)
+  const [isVoiceActive, setIsVoiceActive] = useState(false)
+  const isVoiceActiveRef = useRef(false)
+  const handleVoiceActiveChange = useCallback((active: boolean) => {
+    isVoiceActiveRef.current = active
+    setIsVoiceActive(active)
+  }, [])
   const sessionControllerDepsRef = useRef<ChatSessionControllerDeps>()
   const sessionControllerDeps = (sessionControllerDepsRef.current ??= {
     getAgentService: () => plugin.getAgentService(),
@@ -610,7 +619,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     setQueryProgress: (action) => setQueryProgress(action),
     runtimeNavigationGenerationRef,
     getCliSubmitContext: () => cliSubmitContextRef.current,
-    isVoiceActive: () => false,
+    isVoiceActive: () => isVoiceActiveRef.current,
   })
   const sessionController = (sessionControllerRef.current ??=
     new ChatSessionController(
@@ -633,6 +642,25 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     sessionController.resumeAgentSubscription()
     return () => sessionController.dispose()
   }, [sessionController])
+
+  const voiceSession = useVoiceSession({
+    sessionController,
+    conversationId: currentConversationId,
+    liveModelId: settings.voice.model,
+    onVoiceActiveChange: handleVoiceActiveChange,
+    stampTimeContext: (message) =>
+      stampUserMessageTimeContext(message, settings.timeContextEnabled),
+  })
+  const handleToggleVoice = useCallback(() => {
+    if (isVoiceActiveRef.current) {
+      voiceSession.stop()
+    } else {
+      void voiceSession.start()
+    }
+  }, [voiceSession])
+  const handleToggleVoiceMute = useCallback(() => {
+    voiceSession.setMuted(!voiceSessionStore.getSnapshot().muted)
+  }, [voiceSession])
 
   const {
     chatMessages,
@@ -1959,6 +1987,10 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         reasoningLevel={reasoningLevel}
         onReasoningChange={handleMainInputReasoningChange}
         showReasoningSelect={mainInputCapabilities.supportsReasoningSelect}
+        isVoiceActive={isCliRuntimeActive ? false : isVoiceActive}
+        onToggleVoice={isCliRuntimeActive ? undefined : handleToggleVoice}
+        onToggleVoiceMute={isCliRuntimeActive ? undefined : handleToggleVoiceMute}
+        onEndVoice={isCliRuntimeActive ? undefined : voiceSession.stop}
         runtimeControls={
           isCliRuntimeActive ? (
             <CliRuntimeControls

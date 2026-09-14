@@ -19,7 +19,7 @@ export const useVoiceSession = ({
   conversationId: string
   liveModelId: string
   onVoiceActiveChange: (active: boolean) => void
-  stampTimeContext?: (message: ChatUserMessage) => void
+  stampTimeContext?: (message: ChatUserMessage) => ChatUserMessage
 }) => {
   const { settings } = useSettings()
   const runtimeRef = useRef<{
@@ -34,7 +34,7 @@ export const useVoiceSession = ({
     (turn: VoiceTurn) => {
       const pinned = pinnedConversationRef.current
       if (!pinned) return
-      const userMessage: ChatUserMessage = {
+      const baseUserMessage: ChatUserMessage = {
         role: 'user',
         id: buildId(),
         content: null,
@@ -42,7 +42,9 @@ export const useVoiceSession = ({
         mentionables: [],
         selectedModelIds: [liveModelId],
       }
-      stampTimeContext?.(userMessage)
+      const userMessage = stampTimeContext
+        ? stampTimeContext(baseUserMessage)
+        : baseUserMessage
       const assistantMessage: ChatAssistantMessage = {
         role: 'assistant',
         id: buildId(),
