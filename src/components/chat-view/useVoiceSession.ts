@@ -1,5 +1,5 @@
 import { Platform } from 'obsidian'
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 import { useSettings } from '../../contexts/settings-context'
 import type { VoiceTurn } from '../../core/realtime'
@@ -32,6 +32,7 @@ export const useVoiceSession = ({
     setMuted(m: boolean): void
   } | null>(null)
   const pinnedConversationRef = useRef<string | null>(null)
+  const startingRef = useRef(false)
 
   const commitTurn = useCallback(
     (turn: VoiceTurn) => {
@@ -67,36 +68,57 @@ export const useVoiceSession = ({
   )
 
   const start = useCallback(async () => {
-    if (voiceSessionStore.getSnapshot().status !== 'idle') return
+    if (startingRef.current) return
+    const currentStatus = voiceSessionStore.getSnapshot().status
+    if (currentStatus !== 'idle' && currentStatus !== 'error') return
     if (!Platform.isDesktop) return
-    const [{ resolveLiveConnection }, { createGeminiLiveRuntime }] =
-      await Promise.all([
-        import('../../core/realtime/resolveLiveConnection'),
-        import('../../core/realtime'),
-      ])
-    const resolution = resolveLiveConnection({ settings })
-    if (!resolution.ok) {
-      voiceSessionStore.setStatus('error', resolution.error)
-      return
+    startingRef.current = true
+    voiceSessionStore.setStatus('connecting')
+    try {
+      const [{ resolveLiveConnection }, { createGeminiLiveRuntime }] =
+        await Promise.all([
+          import('../../core/realtime/resolveLiveConnection'),
+          import('../../core/realtime'),
+        ])
+      const resolution = resolveLiveConnection({ settings })
+      if (!resolution.ok) {
+        voiceSessionStore.setStatus('error', resolution.error)
+        onVoiceActiveChange(true)
+        return
+      }
+      pinnedConversationRef.current = conversationId
+      voiceSessionStore.setConversationId(conversationId)
+      onVoiceActiveChange(true)
+      const runtime = createGeminiLiveRuntime({
+        connection: resolution.value,
+        onTurn: commitTurn,
+        createSocket: (url) => new WebSocket(url),
+      })
+      runtimeRef.current = runtime
+      await runtime.start()
+    } catch (error) {
+      voiceSessionStore.setStatus(
+        'error',
+        error instanceof Error ? error.message : String(error),
+      )
+      onVoiceActiveChange(true)
+    } finally {
+      startingRef.current = false
     }
-    pinnedConversationRef.current = conversationId
-    voiceSessionStore.setConversationId(conversationId)
-    onVoiceActiveChange(true)
-    const runtime = createGeminiLiveRuntime({
-      connection: resolution.value,
-      onTurn: commitTurn,
-      createSocket: (url) => new WebSocket(url),
-    })
-    runtimeRef.current = runtime
-    await runtime.start()
   }, [settings, conversationId, commitTurn, onVoiceActiveChange])
 
   const stop = useCallback(() => {
     runtimeRef.current?.stop()
     runtimeRef.current = null
     pinnedConversationRef.current = null
+    voiceSessionStore.reset()
     onVoiceActiveChange(false)
   }, [onVoiceActiveChange])
+
+  useEffect(() => {
+    const pinned = pinnedConversationRef.current
+    if (pinned && pinned !== conversationId) stop()
+  }, [conversationId, stop])
 
   const sendText = useCallback(
     (text: string) => runtimeRef.current?.sendText(text),

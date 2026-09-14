@@ -661,6 +661,12 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const handleToggleVoiceMute = useCallback(() => {
     voiceSession.setMuted(!voiceSessionStore.getSnapshot().muted)
   }, [voiceSession])
+  const voiceSendTextRef = useRef<((text: string) => boolean) | null>(null)
+  voiceSendTextRef.current = (text) => {
+    if (!isVoiceActiveRef.current) return false
+    voiceSession.sendText(text)
+    return true
+  }
 
   const {
     chatMessages,
@@ -706,6 +712,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     setQueuedMessageEditState,
     getReasoningLevelForModelId,
     persistReasoningLevelForModel,
+    sendVoiceTextRef: voiceSendTextRef,
   })
   const {
     inputMessage,

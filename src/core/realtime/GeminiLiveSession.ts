@@ -42,10 +42,12 @@ export class GeminiLiveSession {
   private typedText = ''
   private spokenUserText = ''
   private assistantText = ''
+  private stopped = false
 
   constructor(private readonly options: GeminiLiveSessionOptions) {}
 
   async start(): Promise<void> {
+    this.stopped = false
     this.options.store.setStatus('connecting')
     await this.options.microphone.start(
       (dataBase64) => this.options.client.sendAudio(dataBase64),
@@ -55,6 +57,7 @@ export class GeminiLiveSession {
   }
 
   stop(): void {
+    this.stopped = true
     this.options.client.sendAudioStreamEnd()
     this.options.microphone.stop()
     this.options.player.flush()
@@ -91,6 +94,7 @@ export class GeminiLiveSession {
   }
 
   handleEvent(event: GeminiLiveClientEvent): void {
+    if (this.stopped) return
     switch (event.kind) {
       case 'ready':
         this.options.store.setStatus('ready')
@@ -119,7 +123,12 @@ export class GeminiLiveSession {
         this.options.store.setStatus('error', event.message)
         break
       case 'toolCall':
+        break
       case 'closed':
+        this.commitTurn()
+        this.options.player.flush()
+        this.options.microphone.stop()
+        this.options.store.setStatus('error', event.reason || null)
         break
     }
   }

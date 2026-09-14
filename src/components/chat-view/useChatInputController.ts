@@ -167,6 +167,7 @@ export type UseChatInputControllerParams = {
     modelId: string,
     level: ReasoningLevel,
   ) => Promise<void>
+  sendVoiceTextRef?: { current: ((text: string) => boolean) | null }
 }
 
 /**
@@ -200,6 +201,7 @@ export function useChatInputController({
   setQueuedMessageEditState,
   getReasoningLevelForModelId,
   persistReasoningLevelForModel,
+  sendVoiceTextRef,
 }: UseChatInputControllerParams) {
   const plugin = usePlugin()
   const app = useApp()
@@ -1137,6 +1139,15 @@ export function useChatInputController({
       }
 
       const late = getLate()
+      const voiceText = editorStateToPlainText(content).trim()
+      if (voiceText && sendVoiceTextRef?.current?.(voiceText)) {
+        replaceInputMessage(
+          buildNewInputMessage(
+            preferencesController.getSnapshot().reasoningLevel,
+          ),
+        )
+        return
+      }
       const message = buildInputMessageForSubmit(content)
       const assistant =
         settings.assistants.find(

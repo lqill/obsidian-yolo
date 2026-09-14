@@ -2,7 +2,12 @@
 import { LIVE_INPUT_SAMPLE_RATE } from '../geminiLiveProtocol'
 
 import { MIC_WORKLET_SOURCE } from './micWorklet'
-import { bytesToBase64, float32ToInt16, resampleLinear } from './pcm'
+import {
+  bytesToBase64,
+  float32ToInt16,
+  int16ToFloat32,
+  resampleLinear,
+} from './pcm'
 
 const FRAME_SIZE = 1600 // ~100 ms at 16 kHz
 
@@ -28,45 +33,62 @@ export class PcmMicCapture {
   constructor(private readonly options: PcmMicCaptureOptions) {}
 
   async start(): Promise<void> {
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    })
-    this.context = new AudioContext({ sampleRate: LIVE_INPUT_SAMPLE_RATE })
-    this.source = this.context.createMediaStreamSource(this.stream)
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
+      this.context = new AudioContext({ sampleRate: LIVE_INPUT_SAMPLE_RATE })
+      this.source = this.context.createMediaStreamSource(this.stream)
 
-    if (typeof this.context.audioWorklet !== 'undefined') {
-      const blobUrl = URL.createObjectURL(
-        new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }),
-      )
-      await this.context.audioWorklet.addModule(blobUrl)
-      URL.revokeObjectURL(blobUrl)
-      this.worklet = new AudioWorkletNode(this.context, 'mic-capture')
-      this.worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-        this.pushFrame(new Int16Array(event.data))
+      if (typeof this.context.audioWorklet !== 'undefined') {
+        const blobUrl = URL.createObjectURL(
+          new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }),
+        )
+        await this.context.audioWorklet.addModule(blobUrl)
+        URL.revokeObjectURL(blobUrl)
+        this.worklet = new AudioWorkletNode(this.context, 'mic-capture')
+        this.worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+          const context = this.context
+          const frame = new Int16Array(event.data)
+          const resampled =
+            context && context.sampleRate !== LIVE_INPUT_SAMPLE_RATE
+              ? float32ToInt16(
+                  resampleLinear(
+                    int16ToFloat32(frame),
+                    context.sampleRate,
+                    LIVE_INPUT_SAMPLE_RATE,
+                  ),
+                )
+              : frame
+          this.pushFrame(resampled)
+        }
+        this.source.connect(this.worklet)
+        this.worklet.connect(this.context.destination)
+      } else {
+        this.scriptNode = this.context.createScriptProcessor(FRAME_SIZE, 1, 1)
+        this.scriptNode.onaudioprocess = (event) => {
+          const input = event.inputBuffer.getChannelData(0)
+          const resampled =
+            this.context && this.context.sampleRate !== LIVE_INPUT_SAMPLE_RATE
+              ? resampleLinear(
+                  input,
+                  this.context.sampleRate,
+                  LIVE_INPUT_SAMPLE_RATE,
+                )
+              : input
+          this.pushFrame(float32ToInt16(resampled))
+        }
+        this.source.connect(this.scriptNode)
+        this.scriptNode.connect(this.context.destination)
       }
-      this.source.connect(this.worklet)
-      this.worklet.connect(this.context.destination)
-    } else {
-      this.scriptNode = this.context.createScriptProcessor(FRAME_SIZE, 1, 1)
-      this.scriptNode.onaudioprocess = (event) => {
-        const input = event.inputBuffer.getChannelData(0)
-        const resampled =
-          this.context && this.context.sampleRate !== LIVE_INPUT_SAMPLE_RATE
-            ? resampleLinear(
-                input,
-                this.context.sampleRate,
-                LIVE_INPUT_SAMPLE_RATE,
-              )
-            : input
-        this.pushFrame(float32ToInt16(resampled))
-      }
-      this.source.connect(this.scriptNode)
-      this.scriptNode.connect(this.context.destination)
+    } catch (error) {
+      this.stop()
+      throw error
     }
   }
 
