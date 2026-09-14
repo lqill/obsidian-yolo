@@ -3,7 +3,7 @@
   Agent-native AI assistant for Obsidian — chat, write, knowledge base, and orchestration, all in one place.
 
 
-  This fork is adding gemini live api functionality. This will not reach upstream as unfortunately I break the rules like [“I asked the AI to fix it again” iteration loops with no human reasoning visible] and [Author can’t explain a non-trivial part of the diff during review] because i only have basic python knowledge. Hopefully it will not eternally like that as i keep learning :D 
+  This fork is adding gemini live api functionality 100% using AI. This will not reach upstream as unfortunately I break the rules like [“I asked the AI to fix it again” iteration loops with no human reasoning visible] and [Author can’t explain a non-trivial part of the diff during review] because i only have basic python knowledge. Hopefully it will not eternally like that as i keep learning :D 
 </p>
 
 <p align="center"><a href="https://github.com/Lapis0x0/obsidian-yolo/commits/main">
