@@ -1219,6 +1219,14 @@ export function useChatInputController({
             ),
           )
           return
+        case 'blocked':
+          new Notice(
+            t(
+              'voiceUnavailable',
+              'Voice mode is active. End the voice session before typing.',
+            ),
+          )
+          return
         case 'enqueued':
         case 'submitted':
           finishSubmitUi(result.message)
@@ -1411,6 +1419,7 @@ export function useChatInputController({
             currentConversationRunSummary: late.currentConversationRunSummary,
           })
           .then((result) => {
+            if (!result) return
             switch (result.kind) {
               case 'blocked_waiting_approval':
                 new Notice(

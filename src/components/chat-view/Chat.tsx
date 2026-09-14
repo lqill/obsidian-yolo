@@ -610,6 +610,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     setQueryProgress: (action) => setQueryProgress(action),
     runtimeNavigationGenerationRef,
     getCliSubmitContext: () => cliSubmitContextRef.current,
+    isVoiceActive: () => false,
   })
   const sessionController = (sessionControllerRef.current ??=
     new ChatSessionController(

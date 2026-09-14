@@ -216,7 +216,10 @@ function createPreferencesController(conversationId: string) {
   )
 }
 
-function createDeps(agentService: ReturnType<typeof createMockAgentService>) {
+function createDeps(
+  agentService: ReturnType<typeof createMockAgentService>,
+  overrides: Partial<ChatSessionControllerDeps> = {},
+) {
   const createOrUpdateConversation = jest.fn(async () => undefined)
   const createOrUpdateConversationImmediately = jest.fn(async () => undefined)
   const updateConversationTitle = jest.fn(async () => undefined)
@@ -255,6 +258,8 @@ function createDeps(agentService: ReturnType<typeof createMockAgentService>) {
     setQueryProgress,
     runtimeNavigationGenerationRef,
     getCliSubmitContext,
+    isVoiceActive: () => false,
+    ...overrides,
   }
   return {
     deps,
@@ -275,10 +280,11 @@ function createDeps(agentService: ReturnType<typeof createMockAgentService>) {
 function createController(
   conversationId: string,
   initialMessages: ChatMessage[] = [],
+  depOverrides: Partial<ChatSessionControllerDeps> = {},
 ) {
   const agentService = createMockAgentService()
   const preferencesController = createPreferencesController(conversationId)
-  const { deps, ...mocks } = createDeps(agentService)
+  const { deps, ...mocks } = createDeps(agentService, depOverrides)
   const controller = new ChatSessionController(
     conversationId,
     {
@@ -945,7 +951,7 @@ describe('ChatSessionController — C2 submit/abortRun/compactContext/retry', ()
         },
       })
 
-      expect(result.kind).toBe('failed')
+      expect(result?.kind).toBe('failed')
       expect(
         controller.getSnapshot().pendingCompactionAnchorMessageId,
       ).toBeNull()
@@ -1194,5 +1200,51 @@ describe('ChatSessionController — C2 submit/abortRun/compactContext/retry', ()
         'c2-anchor',
       )
     })
+  })
+})
+
+describe('appendConversationMessages', () => {
+  it('appends over the current snapshot, syncs the service, persists, scrolls', () => {
+    const { controller, agentService, forceScrollToBottom } =
+      createController('c1')
+    const user = userMessage('u1')
+    const assistant = assistantMessage('a1')
+    controller.appendConversationMessages('c1', [user, assistant])
+    expect(controller.getSnapshot().chatMessages.map((m) => m.id)).toEqual([
+      'u1',
+      'a1',
+    ])
+    expect(agentService.replaceConversationMessages).toHaveBeenCalled()
+    expect(forceScrollToBottom).toHaveBeenCalled()
+  })
+
+  it('no-ops when the conversation id does not match', () => {
+    const { controller } = createController('c1')
+    controller.appendConversationMessages('other', [userMessage('u1')])
+    expect(controller.getSnapshot().chatMessages).toEqual([])
+  })
+})
+
+describe('voice-active guards', () => {
+  it('blocks submit while voice is active', () => {
+    const { controller } = createController('c1', [], {
+      isVoiceActive: () => true,
+    })
+    const result = controller.submit({
+      runtimeId: 'yolo',
+      message: userMessage('draft-1'),
+      assistantTimeContextEnabled: false,
+      currentConversationRunSummary: idleRunSummary,
+    })
+    expect(result.kind).toBe('blocked')
+  })
+
+  it('returns null from compactContext while voice is active', async () => {
+    const { controller } = createController('c1', [], {
+      isVoiceActive: () => true,
+    })
+    await expect(
+      controller.compactContext({ conversationId: 'c1' } as never),
+    ).resolves.toBeNull()
   })
 })
