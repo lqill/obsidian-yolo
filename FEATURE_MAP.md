@@ -28,6 +28,12 @@
 - 依赖子系统：桌面端独占（子进程 + 登录 shell 环境，`desktop.ts`/`login-shell-env.ts`）。`index.ts` 会被移动端一起加载，桌面实现必须留在它的静态图之外。
 - 验证路径：目录内测试与源文件基本一一对应（`registry.test.ts`、`coordinator.test.ts`、`conversation-controller.test.ts`、`permission-profile.test.ts` 等）；`src/components/chat-view/CliChatSurface.test.tsx` 覆盖 UI 侧；真机手测需要本地装好对应 CLI。
 
+## Gemini Live 语音模式（Chat 视图内的第三种执行面）
+- 触发方式：Chat 视图输入框的麦克风按钮（`src/components/chat-view/chat-input/ChatUserInput.tsx`，仅桌面端显示，由 `Platform.isDesktop` 把关）；激活后输入框上方出现 `VoiceControlBar.tsx`（状态/静音/结束 + 实时字幕）。语音用的 Gemini provider 与 Live 模型/音色在设置页 Voice 分区选定（`ProvidersAndModelsSection.tsx` 的 `VoiceSettingsSection`，只列出 `presetType === 'gemini'` 的 provider，读写 `settings.voice`）。
+- 核心代码：`src/core/realtime/`——`index.ts`（`createGeminiLiveRuntime` 工厂 + barrel）、`GeminiLiveClient.ts`（浏览器原生 WebSocket，发 setup 帧并分发服务端事件）、`GeminiLiveSession.ts`（按 `turnComplete` 提交每一轮的逐轮状态机）、`geminiLiveProtocol.ts`（BidiGenerateContent 消息编解码）、`resolveLiveConnection.ts`（从 `settings.voice` + 所选 provider 的 apiKey 解析连接）、`voiceSessionStore.ts`（状态/字幕/电平的 `useSyncExternalStore` 外部存储）、`audio/`（`PcmMicCapture.ts`/`micWorklet.ts` 16kHz 采集、`LiveAudioPlayer.ts` 24kHz 播放、`pcm.ts` 纯函数）。UI 侧 `src/components/chat-view/useVoiceSession.ts` 驱动生命周期，`Chat.tsx` 负责接线。
+- 依赖子系统：与外部 CLI 运行时并列的第三种执行面，**不**调用 `AgentSessionService.run`——AGENTS.md「不要造第二条 agent 编排路径」约束的是 agent 编排内部，这里同样不复制它；每轮结束把 `[user, assistant]` 一对普通消息经 `ChatSessionController.appendConversationMessages`（`src/components/chat-view/ChatSessionController.ts`）写回当前会话，音频不落盘。桌面端独占，移动端不加载实现。
+- 验证路径：`npx jest src/core/realtime --runInBand`（协议/客户端/状态机/存储）与 `npx jest src/components/chat-view/ChatSessionController.test.ts --runInBand`（append 命令与 voice 守卫）；手测需桌面端 dev vault——设置页 Voice 选一个带 key 的 Gemini provider，在聊天里点麦克风授权，确认双向字幕、模型语音、落盘的一对消息、打断（barge-in）、语音进行中键入文本、切换会话与 popout 各自正确。
+
 ## 灵光写作 / Sparkle（单轮编辑器功能族）
 - 产品命名注记：这条线在设置页/侧边栏统一品牌为「灵光写作 / Sparkle」（`fdcc10ff`），代码里没有与之对应的统一目录——`src/features/editor/` 下 Tab 补全、选区改写、续写是并列的兄弟目录，只是共用同一条底层执行路径。不要再用「Write Assist」指代这整条产品线，那是改名前遗留的说法；`continuation` 现在专指续写这一个子能力（见下）。
 - 触发方式：笔记内联的低延迟单轮生成，三个触发点共享同一条实现：Tab 补全（`tab-completion`）、选区改写（`selection-rewrite`）、续写（`continuation`，被 Quick Ask 的「续写」档通过 `plugin.continueWriting()` 调用，见上「Quick Ask」条目）。
