@@ -1,0 +1,240 @@
+/*
+ * Gemini Live voice UI (control bar + input mic toggle).
+ *
+ * Ownership: all voice styles live under `voice/`. Do not scatter
+ * `yolo-voice-*` / `yolo-chat-input-voice-toggle` rules into `chat/input.css`
+ * (same per-file ownership rule as popover variants - see the header comment
+ * in `popover/surface.css`). New voice files register in `src/styles/index.css`
+ * alongside the sibling folder groups.
+ *
+ * Motion: keyframes touch only opacity/transform, durations/easings come from
+ * `tokens/motion.css`. Reduced-motion is covered by the global fallback there,
+ * so no per-component disable block.
+ */
+
+.yolo-voice-control-bar {
+  display: flex;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  animation: yolo-voice-control-bar-in var(--yolo-anim-duration-enter)
+    var(--yolo-anim-ease-out);
+}
+
+@keyframes yolo-voice-control-bar-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.yolo-voice-control-bar__status {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+  gap: var(--size-2-2);
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yolo-voice-control-bar__status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+
+.yolo-voice-control-bar__meter {
+  position: relative;
+  overflow: hidden;
+  flex: 1 1 64px;
+  min-width: 48px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    var(--background-modifier-border) 70%,
+    transparent
+  );
+}
+
+.yolo-voice-control-bar__meter::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--interactive-accent);
+}
+
+.yolo-voice-control-bar__meter[data-level='0']::after {
+  opacity: 0.25;
+}
+
+.yolo-voice-control-bar__meter:not([data-level='0'])::after {
+  animation: yolo-voice-meter-sweep calc(var(--yolo-anim-duration-enter) * 6)
+    var(--yolo-anim-ease-linear) infinite;
+}
+
+@keyframes yolo-voice-meter-sweep {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(280%);
+  }
+}
+
+.yolo-voice-control-bar__captions {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.yolo-voice-control-bar__caption {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yolo-voice-control-bar__caption:empty {
+  display: none;
+}
+
+/* First caption is the partial user transcript — keep it at full weight. */
+.yolo-voice-control-bar__caption:first-child:not(:empty) {
+  color: var(--text-normal);
+}
+
+/*
+ * Mute / End buttons. `button` prefix keeps parity with Obsidian's
+ * `button:not(.clickable-icon)` the same way
+ * `button.yolo-chat-user-input-submit-button-circle` does in chat/input.css.
+ */
+.yolo-voice-control-bar > button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--background-modifier-border) !important;
+  border-radius: var(--radius-s);
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+  transition:
+    color var(--yolo-anim-duration-feedback) ease,
+    background-color var(--yolo-anim-duration-feedback) ease,
+    border-color var(--yolo-anim-duration-feedback) ease,
+    transform var(--yolo-anim-duration-feedback) ease;
+}
+
+.yolo-voice-control-bar > button:hover {
+  background: var(--background-modifier-hover) !important;
+  color: var(--text-normal);
+}
+
+.yolo-voice-control-bar > button:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--interactive-accent) 65%, transparent);
+  outline-offset: 2px;
+}
+
+.yolo-voice-control-bar > button:active {
+  transform: scale(0.97);
+}
+
+/* DOM order is mute, end — the last button ends the session. */
+.yolo-voice-control-bar > button:last-of-type {
+  border-color: color-mix(in srgb, var(--text-error) 40%, transparent);
+  color: var(--text-error);
+}
+
+.yolo-voice-control-bar > button:last-of-type:hover {
+  background: color-mix(in srgb, var(--text-error) 12%, transparent) !important;
+  color: var(--text-error);
+}
+
+/*
+ * Mic toggle in the input toolbar. Same 20px footprint as the sibling
+ * `yolo-chat-user-input-upload-button` (Plus 14); the lucide Mic ships
+ * size 16 inline, so pin it to 14 here — Obsidian's global `svg` rule would
+ * otherwise stretch it (same reason the submit circle pins its svg).
+ */
+button.yolo-chat-input-voice-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-4-5);
+  height: var(--size-4-5);
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    color var(--yolo-anim-duration-feedback) ease,
+    background-color var(--yolo-anim-duration-feedback) ease,
+    transform var(--yolo-anim-duration-feedback) ease;
+}
+
+button.yolo-chat-input-voice-toggle svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+button.yolo-chat-input-voice-toggle:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+button.yolo-chat-input-voice-toggle:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--interactive-accent) 65%, transparent);
+  outline-offset: 2px;
+}
+
+button.yolo-chat-input-voice-toggle:active {
+  transform: scale(0.94);
+}
+
+button.yolo-chat-input-voice-toggle.is-active {
+  background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+  color: var(--interactive-accent);
+}
+
+button.yolo-chat-input-voice-toggle.is-active:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+  color: var(--interactive-accent);
+}
