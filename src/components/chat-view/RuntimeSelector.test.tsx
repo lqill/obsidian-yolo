@@ -56,6 +56,7 @@ import {
   getRuntimeSelectorRows,
   resolveRuntimeSelectorRowState,
 } from './RuntimeSelector'
+import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
 
 const selectorRow = (primaryId: string) => {
   const row = getRuntimeSelectorRows(true).find(
@@ -70,6 +71,7 @@ describe('RuntimeSelector', () => {
 
   afterEach(() => {
     Platform.isDesktop = originalIsDesktop
+    voiceSessionStore.reset()
   })
 
   it('exposes no provider without desktop capability', () => {
@@ -200,5 +202,26 @@ describe('RuntimeSelector', () => {
     expect(html).toBe('')
     expect(html).not.toContain('yolo-runtime-selector')
     expect(html).not.toContain('CLI')
+  })
+
+  it('leaves the trigger enabled while voice is idle', () => {
+    Platform.isDesktop = true
+
+    const html = renderToStaticMarkup(
+      <RuntimeSelector currentRuntimeId="codex" onRuntimeChange={() => {}} />,
+    )
+
+    expect(html).not.toContain('disabled')
+  })
+
+  it('disables the trigger while a voice session is active', () => {
+    Platform.isDesktop = true
+    voiceSessionStore.setStatus('connecting')
+
+    const html = renderToStaticMarkup(
+      <RuntimeSelector currentRuntimeId="codex" onRuntimeChange={() => {}} />,
+    )
+
+    expect(html).toContain('disabled=""')
   })
 })

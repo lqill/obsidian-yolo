@@ -1,6 +1,13 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Check, ChevronDown } from 'lucide-react'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 
 import { useLanguage } from '../../contexts/language-context'
 import {
@@ -11,6 +18,7 @@ import {
   getCliRuntimeDescriptor,
   isCliRuntimeAvailable,
 } from '../../core/cli-runtime'
+import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
 import { getNodeWindow } from '../../utils/dom/window-context'
 import { YoloDropdownContent } from '../common/popover'
 
@@ -107,6 +115,12 @@ export function RuntimeSelector({
   const [isOpen, setIsOpen] = useState(false)
   const menuLabelId = useId()
   const cliRuntimeAvailable = isCliRuntimeAvailable()
+  const voiceSnapshot = useSyncExternalStore(
+    voiceSessionStore.subscribe,
+    voiceSessionStore.getSnapshot,
+    voiceSessionStore.getSnapshot,
+  )
+  const voiceActive = voiceSnapshot.status !== 'idle'
   const hoverCloseTimeoutRef = useRef<number | null>(null)
   const itemRefs = useRef<Partial<Record<NavKey, HTMLElement | null>>>({})
 
@@ -305,12 +319,12 @@ export function RuntimeSelector({
         ref={triggerRef}
         type="button"
         className={`yolo-runtime-selector${className ? ` ${className}` : ''}`}
-        disabled={disabled}
+        disabled={disabled || voiceActive}
         aria-label={accessibleLabel}
         data-runtime-id={currentRuntimeId}
         data-compact={isCompact || undefined}
         onMouseEnter={() => {
-          if (disabled) return
+          if (disabled || voiceActive) return
           clearHoverCloseTimeout()
           setIsOpen(true)
         }}
