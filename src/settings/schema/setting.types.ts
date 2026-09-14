@@ -205,6 +205,12 @@ export const DEFAULT_TAB_COMPLETION_OPTIONS: TabCompletionOptionDefaults = {
 export const DEFAULT_MODEL_REQUEST_TIMEOUT_MS = 60000
 export const MAX_MODEL_REQUEST_TIMEOUT_MS = 60 * 60 * 1000
 
+export const DEFAULT_VOICE_SETTINGS = {
+  model: 'gemini-3.1-flash-live-preview',
+  voiceName: 'Kore',
+  systemPrompt: '',
+} as const
+
 const notificationOptionsSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -411,6 +417,17 @@ export const yoloSettingsSchema = z.object({
   // 时间感知:开启后,每条新用户消息发送时固定当前时间并以 <current_time> 前缀注入。
   // 只影响之后的新消息,历史消息已固定不变。
   timeContextEnabled: z.boolean().catch(true),
+
+  // Gemini Live voice mode (desktop only). `providerId` selects an existing
+  // Gemini API-key provider; model/voice are free-text with sensible defaults.
+  voice: z
+    .object({
+      providerId: z.string().optional(),
+      model: z.string().default(DEFAULT_VOICE_SETTINGS.model),
+      voiceName: z.string().default(DEFAULT_VOICE_SETTINGS.voiceName),
+      systemPrompt: z.string().default(DEFAULT_VOICE_SETTINGS.systemPrompt),
+    })
+    .catch({ ...DEFAULT_VOICE_SETTINGS }),
 
   // 更新提示:同版本第一次关闭后记录软关闭版本,下次启动仍提示一次。
   softDismissedUpdateVersion: z.string().catch(''),
