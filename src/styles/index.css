@@ -34,6 +34,8 @@
 @import './chat/cli-chat-surface.css';
 @import './chat/runtime-badge.css';
 
+@import './voice/control-bar.css';
+
 @import './panels/continuation.css';
 @import './panels/quick-ask.css';
 @import './panels/sparkle.css';

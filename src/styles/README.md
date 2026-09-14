@@ -29,3 +29,11 @@ dropdown、滚动条共享样式（因为 Smart Space 是这些样式最早的�
 
 `styles.css` 是 PostCSS 从 `index.css` 编译产物，**不要直接编辑**。
 改完源文件运行 `npm run styles:build`（或 `npm run styles:watch`）。
+
+## 5. voice/ 目录归属
+
+Gemini Live 语音 UI 的样式一律归 `voice/` 所有（当前 `voice/control-bar.css`
+管 `.yolo-voice-control-bar*` 控制条与 `.yolo-chat-input-voice-toggle`
+麦克风开关）。不要把语音规则散进 `chat/input.css` —— 与第 3 节 popover
+变体按文件归属的约定同理。新增语音样式文件时，在 `index.css` 里按同级
+文件夹的分组格式追加 `@import './voice/<file>.css';`。
