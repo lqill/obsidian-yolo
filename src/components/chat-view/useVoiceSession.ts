@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef } from 'react'
 
 import { useSettings } from '../../contexts/settings-context'
 import type { VoiceTurn } from '../../core/realtime'
-import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
+import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 import type { ChatAssistantMessage, ChatUserMessage } from '../../types/chat'
 
 import type { ChatSessionController } from './ChatSessionController'
@@ -118,7 +118,13 @@ export const useVoiceSession = ({
     } finally {
       startingRef.current = false
     }
-  }, [settings, conversationId, commitTurn, onVoiceActiveChange, resolveToolBridge])
+  }, [
+    settings,
+    conversationId,
+    commitTurn,
+    onVoiceActiveChange,
+    resolveToolBridge,
+  ])
 
   const stop = useCallback(() => {
     runtimeRef.current?.stop()
