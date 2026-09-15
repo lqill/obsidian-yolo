@@ -27,4 +27,18 @@ describe('voiceSessionStore', () => {
     voiceSessionStore.clearPartials()
     expect(voiceSessionStore.getSnapshot().partialUserText).toBe('')
   })
+
+  it('tracks and clears the active tool name', () => {
+    expect(voiceSessionStore.getSnapshot().activeToolName).toBeNull()
+    voiceSessionStore.setActiveTool('fs_read')
+    expect(voiceSessionStore.getSnapshot().activeToolName).toBe('fs_read')
+    voiceSessionStore.setActiveTool(null)
+    expect(voiceSessionStore.getSnapshot().activeToolName).toBeNull()
+  })
+
+  it('clears the active tool on reset', () => {
+    voiceSessionStore.setActiveTool('fs_read')
+    voiceSessionStore.reset()
+    expect(voiceSessionStore.getSnapshot().activeToolName).toBeNull()
+  })
 })
