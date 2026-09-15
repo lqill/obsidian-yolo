@@ -1,10 +1,12 @@
 import {
+  type GeminiLiveFunctionResponse,
   type GeminiLiveServerEvent,
   type GeminiLiveSetupConfig,
   buildAudioMessage,
   buildAudioStreamEndMessage,
   buildSetupMessage,
   buildTextMessage,
+  buildToolResponseMessage,
   encodeClientMessage,
   parseServerMessage,
 } from './geminiLiveProtocol'
@@ -100,6 +102,10 @@ export class GeminiLiveClient {
 
   sendAudioStreamEnd(): void {
     this.send(encodeClientMessage(buildAudioStreamEndMessage()))
+  }
+
+  sendToolResponse(functionResponses: GeminiLiveFunctionResponse[]): void {
+    this.send(encodeClientMessage(buildToolResponseMessage(functionResponses)))
   }
 
   close(): void {
