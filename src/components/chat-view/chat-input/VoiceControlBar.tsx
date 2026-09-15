@@ -26,6 +26,11 @@ export const VoiceControlBar = ({
             ? `${t('voiceStatusError')}: ${snapshot.error ?? ''}`
             : t('voiceStatusReady')}
       </span>
+      {snapshot.activeToolName ? (
+        <span className="yolo-voice-control-bar__tool">
+          {t('voiceToolRunning')}: {snapshot.activeToolName}
+        </span>
+      ) : null}
       <div
         className="yolo-voice-control-bar__meter"
         data-level={Math.round(snapshot.micLevel * 100)}
