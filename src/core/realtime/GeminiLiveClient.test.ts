@@ -78,4 +78,21 @@ describe('GeminiLiveClient', () => {
       realtimeInput: { audioStreamEnd: true },
     })
   })
+
+  it('sends a tool response frame', () => {
+    const { client, sockets } = make()
+    client.connect()
+    sockets[0].onopen?.({})
+    client.sendToolResponse([
+      { id: '1', name: 'fs_read', response: { result: 'ok' } },
+    ])
+    const sent = sockets[0].sent
+    expect(JSON.parse(sent[sent.length - 1])).toEqual({
+      toolResponse: {
+        functionResponses: [
+          { id: '1', name: 'fs_read', response: { result: 'ok' } },
+        ],
+      },
+    })
+  })
 })
