@@ -5,6 +5,7 @@ import {
   buildLiveWebSocketUrl,
   buildSetupMessage,
   buildTextMessage,
+  buildToolResponseMessage,
   encodeClientMessage,
   normalizeLiveModelName,
   parseServerMessage,
@@ -132,5 +133,51 @@ describe('parseServerMessage', () => {
   it('returns [] for empty/unknown payloads', () => {
     expect(parseServerMessage({})).toEqual([])
     expect(parseServerMessage(null)).toEqual([])
+  })
+})
+
+describe('buildSetupMessage with tools', () => {
+  it('omits tools when no declarations are provided', () => {
+    const msg = buildSetupMessage({
+      model: 'm',
+      voiceName: 'Kore',
+      systemPrompt: 's',
+    })
+    expect((msg as any).setup.tools).toBeUndefined()
+  })
+
+  it('emits a single functionDeclarations entry with the provided declarations', () => {
+    const declarations = [
+      {
+        name: 'fs_read',
+        description: 'Read a file',
+        parameters: { type: 'object', properties: {} },
+      },
+    ]
+    const msg = buildSetupMessage({
+      model: 'm',
+      voiceName: 'Kore',
+      systemPrompt: 's',
+      functionDeclarations: declarations,
+    })
+    expect((msg as any).setup.tools).toEqual([
+      { functionDeclarations: declarations },
+    ])
+  })
+})
+
+describe('buildToolResponseMessage', () => {
+  it('wraps function responses in a toolResponse envelope', () => {
+    expect(
+      buildToolResponseMessage([
+        { id: '1', name: 'fs_read', response: { result: 'ok' } },
+      ]),
+    ).toEqual({
+      toolResponse: {
+        functionResponses: [
+          { id: '1', name: 'fs_read', response: { result: 'ok' } },
+        ],
+      },
+    })
   })
 })
