@@ -123,24 +123,26 @@ const toToolResponsePayload = (
   }
 }
 
-const toDeclaration = (
-  tool: { name: string; description?: string; inputSchema?: unknown },
-): GeminiLiveFunctionDeclaration => {
+const toDeclaration = (tool: {
+  name: string
+  description?: string
+  inputSchema?: unknown
+}): GeminiLiveFunctionDeclaration => {
   const schema = (tool.inputSchema ?? { type: 'object' }) as Record<
     string,
     unknown
   >
   const withProperties = {
     ...schema,
-    properties: (schema.properties as Record<string, unknown> | undefined) ?? {},
+    properties:
+      (schema.properties as Record<string, unknown> | undefined) ?? {},
   }
   return {
     name: toModelToolName(tool.name),
     description: tool.description,
-    parameters: GeminiProvider.sanitizeSchemaForGemini(withProperties) as Record<
-      string,
-      unknown
-    >,
+    parameters: GeminiProvider.sanitizeSchemaForGemini(
+      withProperties,
+    ) as Record<string, unknown>,
   }
 }
 

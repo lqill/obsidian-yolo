@@ -143,9 +143,7 @@ export class GeminiLiveSession {
     }
   }
 
-  private async handleToolCall(
-    calls: GeminiLiveFunctionCall[],
-  ): Promise<void> {
+  private async handleToolCall(calls: GeminiLiveFunctionCall[]): Promise<void> {
     if (this.stopped || !this.options.toolHandler || calls.length === 0) return
     this.options.store.setActiveTool(calls.map((call) => call.name).join(', '))
     try {

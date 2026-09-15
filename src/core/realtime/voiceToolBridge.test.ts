@@ -66,7 +66,11 @@ const makeMcpManager = () =>
     listAvailableTools: jest.fn(async () => [
       fsReadTool,
       mcpTool,
-      { name: invokeFqn, description: 'invoke', inputSchema: { type: 'object' } },
+      {
+        name: invokeFqn,
+        description: 'invoke',
+        inputSchema: { type: 'object' },
+      },
       { name: loadFqn, description: 'load', inputSchema: { type: 'object' } },
     ]),
     getJsSandboxSettings: jest.fn(() => ({})),

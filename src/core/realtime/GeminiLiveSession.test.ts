@@ -176,7 +176,11 @@ describe('GeminiLiveSession per-turn state machine', () => {
     const toolHandler = jest.fn(
       () =>
         new Promise<
-          Array<{ id?: string; name: string; response: Record<string, unknown> }>
+          Array<{
+            id?: string
+            name: string
+            response: Record<string, unknown>
+          }>
         >((resolve) => {
           pending.resolve = () =>
             resolve([{ name: 'fs_read', response: { result: 'ok' } }])
