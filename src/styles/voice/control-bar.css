@@ -106,6 +106,15 @@
   }
 }
 
+.yolo-voice-control-bar__tool {
+  opacity: 0.8;
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16rem;
+}
+
 .yolo-voice-control-bar__captions {
   display: flex;
   flex-basis: 100%;
