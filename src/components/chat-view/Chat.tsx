@@ -43,6 +43,7 @@ import {
 } from '../../core/cli-runtime'
 import { resolveLocalizedText } from '../../core/modules/moduleI18n'
 import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
+import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 import type { ChatLeafPlacement } from '../../features/chat/chatLeafSessionManager'
 import { useChatHighlightSession } from '../../features/editor/selection-highlight/useChatHighlightSession'
 import {
@@ -643,6 +644,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     return () => sessionController.dispose()
   }, [sessionController])
 
+  const voiceToolBridgeFactoryRef = useRef<
+    (() => Promise<VoiceToolBridge>) | null
+  >(null)
   const voiceSession = useVoiceSession({
     sessionController,
     conversationId: currentConversationId,
@@ -650,6 +654,10 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     onVoiceActiveChange: handleVoiceActiveChange,
     stampTimeContext: (message) =>
       stampUserMessageTimeContext(message, settings.timeContextEnabled),
+    resolveToolBridge: () =>
+      voiceToolBridgeFactoryRef.current
+        ? voiceToolBridgeFactoryRef.current()
+        : Promise.resolve(null),
   })
   const handleToggleVoice = useCallback(() => {
     if (isVoiceActiveRef.current) {
@@ -1235,6 +1243,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     currentConversationRunSummary,
     submitChatMutation,
     buildContextBreakdownInputs,
+    buildVoiceToolBridgeForConversation,
   } = useChatStreamManager({
     autoScrollToBottom: triggerAutoScrollToBottom,
     requestContextBuilder,
@@ -1249,6 +1258,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     assistantIdOverride: conversationAssistantId,
     compaction: effectiveCompactionState,
   })
+  voiceToolBridgeFactoryRef.current = buildVoiceToolBridgeForConversation
   const isCurrentConversationRunActive = currentConversationRunSummary.isActive
   // Hydrate the C2 run-deps late ref every render — see its declaration for
   // why this can't be captured once at construction time.

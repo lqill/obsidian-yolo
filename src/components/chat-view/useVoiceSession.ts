@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from 'react'
 
 import { useSettings } from '../../contexts/settings-context'
 import type { VoiceTurn } from '../../core/realtime'
+import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
 import type { ChatAssistantMessage, ChatUserMessage } from '../../types/chat'
 
@@ -17,12 +18,14 @@ export const useVoiceSession = ({
   liveModelId,
   onVoiceActiveChange,
   stampTimeContext,
+  resolveToolBridge,
 }: {
   sessionController: ChatSessionController
   conversationId: string
   liveModelId: string
   onVoiceActiveChange: (active: boolean) => void
   stampTimeContext?: (message: ChatUserMessage) => ChatUserMessage
+  resolveToolBridge?: () => Promise<VoiceToolBridge | null>
 }) => {
   const { settings } = useSettings()
   const runtimeRef = useRef<{
@@ -89,10 +92,20 @@ export const useVoiceSession = ({
       pinnedConversationRef.current = conversationId
       voiceSessionStore.setConversationId(conversationId)
       onVoiceActiveChange(true)
+      let toolBridge: VoiceToolBridge | null = null
+      try {
+        toolBridge = (await resolveToolBridge?.()) ?? null
+      } catch (error) {
+        console.warn(
+          '[YOLO][Voice] failed to resolve voice tools; continuing without tools',
+          error,
+        )
+      }
       const runtime = createGeminiLiveRuntime({
         connection: resolution.value,
         onTurn: commitTurn,
         createSocket: (url) => new WebSocket(url),
+        toolBridge: toolBridge ?? undefined,
       })
       runtimeRef.current = runtime
       await runtime.start()
@@ -105,7 +118,7 @@ export const useVoiceSession = ({
     } finally {
       startingRef.current = false
     }
-  }, [settings, conversationId, commitTurn, onVoiceActiveChange])
+  }, [settings, conversationId, commitTurn, onVoiceActiveChange, resolveToolBridge])
 
   const stop = useCallback(() => {
     runtimeRef.current?.stop()
