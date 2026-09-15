@@ -1,5 +1,9 @@
 // src/core/realtime/GeminiLiveSession.ts
 import type { GeminiLiveClientEvent } from './GeminiLiveClient'
+import type {
+  GeminiLiveFunctionCall,
+  GeminiLiveFunctionResponse,
+} from './geminiLiveProtocol'
 import type { VoiceSessionStore } from './voiceSessionStore'
 
 export type VoiceTurn = { userText: string; assistantText: string }
@@ -25,6 +29,7 @@ export type VoiceLiveClient = {
   sendText(text: string): void
   sendAudio(dataBase64: string): void
   sendAudioStreamEnd(): void
+  sendToolResponse(functionResponses: GeminiLiveFunctionResponse[]): void
   isOpen: boolean
 }
 
@@ -34,6 +39,9 @@ export type GeminiLiveSessionOptions = {
   player: VoiceAudioPlayer
   store: VoiceSessionStore
   onTurn: (turn: VoiceTurn) => void
+  toolHandler?: (
+    calls: GeminiLiveFunctionCall[],
+  ) => Promise<GeminiLiveFunctionResponse[]>
 }
 
 export class GeminiLiveSession {
@@ -63,6 +71,7 @@ export class GeminiLiveSession {
     this.options.player.flush()
     this.options.client.close()
     this.options.player.dispose()
+    this.options.store.setActiveTool(null)
     this.options.store.reset()
   }
 
@@ -123,6 +132,7 @@ export class GeminiLiveSession {
         this.options.store.setStatus('error', event.message)
         break
       case 'toolCall':
+        void this.handleToolCall(event.functionCalls)
         break
       case 'closed':
         this.commitTurn()
@@ -130,6 +140,26 @@ export class GeminiLiveSession {
         this.options.microphone.stop()
         this.options.store.setStatus('error', event.reason || null)
         break
+    }
+  }
+
+  private async handleToolCall(
+    calls: GeminiLiveFunctionCall[],
+  ): Promise<void> {
+    if (this.stopped || !this.options.toolHandler || calls.length === 0) return
+    this.options.store.setActiveTool(calls.map((call) => call.name).join(', '))
+    try {
+      const responses = await this.options.toolHandler(calls)
+      if (this.stopped) return
+      this.options.client.sendToolResponse(responses)
+    } catch (error) {
+      if (this.stopped) return
+      this.options.store.setStatus(
+        'error',
+        error instanceof Error ? error.message : String(error),
+      )
+    } finally {
+      if (!this.stopped) this.options.store.setActiveTool(null)
     }
   }
 
@@ -144,6 +174,7 @@ export class GeminiLiveSession {
     this.spokenUserText = ''
     this.assistantText = ''
     this.options.store.clearPartials()
+    this.options.store.setActiveTool(null)
     if (!userText && !assistantText) return
     this.options.onTurn({ userText, assistantText })
   }
