@@ -14,6 +14,18 @@ export type GeminiLiveFunctionCall = {
   args?: Record<string, unknown>
 }
 
+export type GeminiLiveFunctionDeclaration = {
+  name: string
+  description?: string
+  parameters?: Record<string, unknown>
+}
+
+export type GeminiLiveFunctionResponse = {
+  id?: string
+  name: string
+  response: Record<string, unknown>
+}
+
 export type GeminiLiveServerEvent =
   | { kind: 'ready' }
   | { kind: 'audio'; dataBase64: string; mimeType: string }
@@ -28,6 +40,7 @@ export type GeminiLiveSetupConfig = {
   model: string
   voiceName: string
   systemPrompt: string
+  functionDeclarations?: GeminiLiveFunctionDeclaration[]
 }
 
 export type GeminiLiveClientMessage = Record<string, unknown>
@@ -54,8 +67,8 @@ export const buildLiveWebSocketUrl = ({
 
 export const buildSetupMessage = (
   config: GeminiLiveSetupConfig,
-): GeminiLiveClientMessage => ({
-  setup: {
+): GeminiLiveClientMessage => {
+  const setup: Record<string, unknown> = {
     model: normalizeLiveModelName(config.model),
     generationConfig: {
       responseModalities: ['AUDIO'],
@@ -66,8 +79,12 @@ export const buildSetupMessage = (
     systemInstruction: { parts: [{ text: config.systemPrompt }] },
     inputAudioTranscription: {},
     outputAudioTranscription: {},
-  },
-})
+  }
+  if (config.functionDeclarations && config.functionDeclarations.length > 0) {
+    setup.tools = [{ functionDeclarations: config.functionDeclarations }]
+  }
+  return { setup }
+}
 
 export const buildAudioMessage = (
   dataBase64: string,
@@ -86,7 +103,7 @@ export const buildAudioStreamEndMessage = (): GeminiLiveClientMessage => ({
 })
 
 export const buildToolResponseMessage = (
-  functionResponses: Array<{ id?: string; name: string; response: unknown }>,
+  functionResponses: GeminiLiveFunctionResponse[],
 ): GeminiLiveClientMessage => ({ toolResponse: { functionResponses } })
 
 export const encodeClientMessage = (message: GeminiLiveClientMessage): string =>
