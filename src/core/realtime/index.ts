@@ -5,11 +5,13 @@ import { buildLiveWebSocketUrl } from './geminiLiveProtocol'
 import { GeminiLiveSession, type VoiceTurn } from './GeminiLiveSession'
 import type { ResolvedLiveConnection } from './resolveLiveConnection'
 import { voiceSessionStore } from './voiceSessionStore'
+import type { VoiceToolBridge } from './voiceToolBridge'
 
 export type CreateGeminiLiveRuntimeOptions = {
   connection: ResolvedLiveConnection
   onTurn: (turn: VoiceTurn) => void
   createSocket: (url: string) => WebSocketLike
+  toolBridge?: VoiceToolBridge
 }
 
 export const createGeminiLiveRuntime = (
@@ -17,6 +19,7 @@ export const createGeminiLiveRuntime = (
 ) => {
   // eslint-disable-next-line prefer-const -- declared before the client so the onEvent closure can reference it
   let session: GeminiLiveSession
+  const toolBridge = options.toolBridge
   const client = new GeminiLiveClient({
     url: buildLiveWebSocketUrl({
       baseUrl: options.connection.baseUrl,
@@ -26,6 +29,7 @@ export const createGeminiLiveRuntime = (
       model: options.connection.model,
       voiceName: options.connection.voiceName,
       systemPrompt: options.connection.systemPrompt,
+      functionDeclarations: toolBridge?.declarations ?? [],
     },
     createSocket: options.createSocket,
     onEvent: (event) => session.handleEvent(event),
@@ -43,6 +47,9 @@ export const createGeminiLiveRuntime = (
     player,
     store: voiceSessionStore,
     onTurn: options.onTurn,
+    toolHandler: toolBridge
+      ? (calls) => toolBridge.handleFunctionCalls(calls)
+      : undefined,
   })
 
   return {
@@ -62,3 +69,4 @@ export type {
   VoiceSessionSnapshot,
   VoiceSessionStatus,
 } from './voiceSessionStore'
+export type { VoiceToolBridge } from './voiceToolBridge'
