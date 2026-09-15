@@ -51,6 +51,11 @@ export class GeminiLiveSession {
   private spokenUserText = ''
   private assistantText = ''
   private stopped = false
+  // Serializes tool-call batches: the Live API can push a second `toolCall`
+  // frame while the first batch is still executing, and running them
+  // concurrently would let the later batch overwrite the active-tool chip and
+  // send responses out of request order.
+  private toolCallChain: Promise<void> = Promise.resolve()
 
   constructor(private readonly options: GeminiLiveSessionOptions) {}
 
@@ -132,7 +137,9 @@ export class GeminiLiveSession {
         this.options.store.setStatus('error', event.message)
         break
       case 'toolCall':
-        void this.handleToolCall(event.functionCalls)
+        this.toolCallChain = this.toolCallChain
+          .catch(() => undefined)
+          .then(() => this.handleToolCall(event.functionCalls))
         break
       case 'closed':
         this.commitTurn()
@@ -152,9 +159,17 @@ export class GeminiLiveSession {
       this.options.client.sendToolResponse(responses)
     } catch (error) {
       if (this.stopped) return
-      this.options.store.setStatus(
-        'error',
-        error instanceof Error ? error.message : String(error),
+      const message = error instanceof Error ? error.message : String(error)
+      this.options.store.setStatus('error', message)
+      // The Live API blocks until every function call has a response, so a
+      // failure here must still answer each call — otherwise the session stalls
+      // with no further audio even though the UI reports an error.
+      this.options.client.sendToolResponse(
+        calls.map((call) => ({
+          id: call.id,
+          name: call.name,
+          response: { error: message },
+        })),
       )
     } finally {
       if (!this.stopped) this.options.store.setActiveTool(null)

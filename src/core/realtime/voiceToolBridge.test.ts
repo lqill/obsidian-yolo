@@ -226,6 +226,36 @@ describe('buildVoiceToolBridge', () => {
     )
   })
 
+  it('answers each call with its own result even when two calls share an id', async () => {
+    const mcpManager = makeMcpManager()
+    const gateway = makeGateway()
+    const bridge = await buildVoiceToolBridge({
+      mcpManager,
+      conversationId: 'c1',
+      chatModeRuntime: makeRuntime(),
+      settings: makeSettings(),
+      createGateway: () => gateway,
+    })
+
+    const responses = await bridge.handleFunctionCalls([
+      { id: 'dup', name: 'fs_read', args: {} },
+      { id: 'dup', name: 'fs_write', args: {} },
+    ])
+
+    expect(responses).toEqual([
+      {
+        id: 'dup',
+        name: 'fs_read',
+        response: { result: 'ok:yolo_local__fs_read' },
+      },
+      {
+        id: 'dup',
+        name: 'fs_write',
+        response: { result: 'ok:yolo_local__fs_write' },
+      },
+    ])
+  })
+
   it('forces server disclosure to always so on-demand MCP tools are directly callable', async () => {
     const mcpManager = makeMcpManager()
     const gateway = makeGateway()

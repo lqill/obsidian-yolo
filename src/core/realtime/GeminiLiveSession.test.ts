@@ -155,7 +155,7 @@ describe('GeminiLiveSession per-turn state machine', () => {
     expect(client.sendToolResponse).not.toHaveBeenCalled()
   })
 
-  it('surfaces a handler failure as a store error and clears the active tool', async () => {
+  it('answers a handler failure with an error response so the model is not left waiting', async () => {
     const toolHandler = jest.fn(async () => {
       throw new Error('boom')
     })
@@ -163,12 +163,61 @@ describe('GeminiLiveSession per-turn state machine', () => {
     session.start()
     session.handleEvent({
       kind: 'toolCall',
-      functionCalls: [{ name: 'fs_read' }],
+      functionCalls: [{ id: '1', name: 'fs_read' }],
     } as GeminiLiveServerEvent)
     await flushAsync()
     expect(voiceSessionStore.getSnapshot().error).toBe('boom')
     expect(voiceSessionStore.getSnapshot().activeToolName).toBeNull()
-    expect(client.sendToolResponse).not.toHaveBeenCalled()
+    expect(client.sendToolResponse).toHaveBeenCalledWith([
+      { id: '1', name: 'fs_read', response: { error: 'boom' } },
+    ])
+  })
+
+  it('serializes overlapping tool-call batches in arrival order', async () => {
+    const releases: Array<() => void> = []
+    const toolHandler = jest.fn(
+      (calls: Array<{ id?: string; name: string }>) =>
+        new Promise<
+          Array<{
+            id?: string
+            name: string
+            response: Record<string, unknown>
+          }>
+        >((resolve) => {
+          releases.push(() =>
+            resolve([
+              {
+                id: calls[0].id,
+                name: calls[0].name,
+                response: { result: calls[0].name },
+              },
+            ]),
+          )
+        }),
+    )
+    const { session, client } = makeFakes({ toolHandler })
+    session.start()
+    session.handleEvent({
+      kind: 'toolCall',
+      functionCalls: [{ id: '1', name: 'fs_read' }],
+    } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'toolCall',
+      functionCalls: [{ id: '2', name: 'fs_write' }],
+    } as GeminiLiveServerEvent)
+    // Only the first batch may be in flight; the second waits its turn.
+    await flushAsync()
+    expect(toolHandler).toHaveBeenCalledTimes(1)
+    releases[0]()
+    await flushAsync()
+    expect(toolHandler).toHaveBeenCalledTimes(2)
+    releases[1]()
+    await flushAsync()
+    expect(
+      client.sendToolResponse.mock.calls.map(
+        ([responses]) => responses[0].name,
+      ),
+    ).toEqual(['fs_read', 'fs_write'])
   })
 
   it('does not send a tool response after stop', async () => {

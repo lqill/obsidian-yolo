@@ -284,23 +284,29 @@ export async function buildVoiceToolBridge(
       signal,
     })
 
-    const payloadById = new Map(
-      executed.toolCalls.map(({ request, response }) => [
-        request.id,
-        toToolResponsePayload(response),
-      ]),
-    )
+    // Queue rather than a plain map: two calls can legitimately carry the same
+    // explicit server id, and a map would collapse their distinct results into
+    // one payload. Consume one payload per request, in call order.
+    const payloadsById = new Map<
+      string,
+      Array<ReturnType<typeof toToolResponsePayload>>
+    >()
+    for (const { request, response } of executed.toolCalls) {
+      const payload = toToolResponsePayload(response)
+      const queued = payloadsById.get(request.id)
+      if (queued) queued.push(payload)
+      else payloadsById.set(request.id, [payload])
+    }
 
     // Always answer every function call exactly once, even if the gateway
     // merged same-file edit calls into a single execution entry.
     return calls.map((call, index) => {
       const request = toolCallRequests[index]
+      const payload = payloadsById.get(request.id)?.shift()
       return {
         id: call.id,
         name: call.name,
-        response: payloadById.get(request.id) ?? {
-          error: 'Tool call did not complete.',
-        },
+        response: payload ?? { error: 'Tool call did not complete.' },
       }
     })
   }
