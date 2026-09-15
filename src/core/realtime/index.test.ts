@@ -43,9 +43,10 @@ describe('createGeminiLiveRuntime', () => {
   })
 
   it('advertises tool declarations from the bridge in the setup frame', async () => {
-    let socket: {
-      onopen: ((ev: unknown) => void) | null
-    } | null = null
+    // Collected in an array: a bare `let socket` is control-flow narrowed to
+    // `null` at the use site because the assignment happens inside the
+    // `createSocket` callback.
+    const sockets: Array<{ onopen: ((ev: unknown) => void) | null }> = []
     const sent: string[] = []
     const declarations = [
       {
@@ -73,7 +74,7 @@ describe('createGeminiLiveRuntime', () => {
           onerror: null,
           onclose: null,
         }
-        socket = fake
+        sockets.push(fake)
         return fake
       },
       toolBridge: {
@@ -82,7 +83,7 @@ describe('createGeminiLiveRuntime', () => {
       },
     })
     await runtime.start()
-    socket?.onopen?.({})
+    sockets[0]?.onopen?.({})
     expect(JSON.parse(sent[0]).setup.tools).toEqual([
       { functionDeclarations: declarations },
     ])
