@@ -1,17 +1,18 @@
 // src/core/realtime/voiceToolBridge.test.ts
-import { INVOKE_TOOL_NAME } from '../tools/internal/invoke_tool/definition'
-import { getToolNamesForCapability } from '../tools/registry'
+import {
+  type ToolCallRequest,
+  ToolCallResponseStatus,
+} from '../../types/tool-call.types'
 import {
   LOAD_TOOL_SCHEMAS_LOCAL_TOOL_NAME,
   getLocalFileToolServerName,
 } from '../mcp/localFileTools'
+import { INVOKE_TOOL_NAME } from '../tools/internal/invoke_tool/definition'
+import { getToolNamesForCapability } from '../tools/registry'
+
 import {
-  ToolCallResponseStatus,
-  type ToolCallRequest,
-} from '../../types/tool-call.types'
-import {
-  buildVoiceToolBridge,
   type VoiceToolGatewayLike,
+  buildVoiceToolBridge,
 } from './voiceToolBridge'
 
 const localServer = getLocalFileToolServerName()
@@ -147,6 +148,7 @@ describe('buildVoiceToolBridge', () => {
       { id: 'call1', name: 'fs_read', args: { path: 'a.md' } },
     ])
 
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- jest mock on a plain fake object; it is never invoked detached from `gateway`
     expect(gateway.createToolMessage).toHaveBeenCalledWith({
       toolCallRequests: [
         {

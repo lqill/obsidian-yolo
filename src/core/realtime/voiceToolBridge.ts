@@ -9,24 +9,23 @@ import type {
 import type { ChatMessage, ChatToolMessage } from '../../types/chat'
 import type { LLMProviderApiType } from '../../types/provider.types'
 import {
-  ToolCallResponseStatus,
-  createCompleteToolCallArguments,
   type ToolCallRequest,
   type ToolCallResponse,
+  ToolCallResponseStatus,
+  createCompleteToolCallArguments,
 } from '../../types/tool-call.types'
+import type { ChatMode } from '../agent/chat-mode'
 import {
   type ChatModeRuntime,
   resolveChatModeRuntime,
 } from '../agent/chat-runtime-profiles'
-import type { ChatMode } from '../agent/chat-mode'
+import { AgentToolGateway } from '../agent/tool-gateway'
 import { getEnabledAssistantToolNames } from '../agent/tool-preferences'
 import {
   isInvokeToolName,
   isLoadToolSchemasToolName,
   selectAllowedTools,
 } from '../agent/tool-selection'
-import { getToolNamesForCapability } from '../tools/registry'
-import { AgentToolGateway } from '../agent/tool-gateway'
 import { GeminiProvider } from '../llm/gemini'
 import {
   fromModelToolName,
@@ -40,6 +39,7 @@ import {
   type RegisteredModuleToolSetV1,
   toModuleToolSetEnablement,
 } from '../modules/moduleToolSetRegistry'
+import { getToolNamesForCapability } from '../tools/registry'
 
 import type {
   GeminiLiveFunctionCall,

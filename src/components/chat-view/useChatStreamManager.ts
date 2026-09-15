@@ -52,6 +52,7 @@ import { promoteProviderTransportModeToObsidian } from '../../core/llm/transport
 import { getLocalFileToolServerName } from '../../core/mcp/localFileTools'
 import { getToolName } from '../../core/mcp/tool-name-utils'
 import { toModuleToolSetEnablement } from '../../core/modules/moduleToolSetRegistry'
+import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 import { listLiteSkillEntries } from '../../core/skills/liteSkills'
 import { isSkillEnabledForAssistant } from '../../core/skills/skillPolicy'
 import { useChatManager } from '../../hooks/useJsonManagers'
@@ -82,7 +83,6 @@ import {
 } from './providerSessionAccessor'
 import { useAgentConversationState } from './useAgentConversationState'
 import type { ContextBreakdownInputs } from './useContextBreakdown'
-import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 
 type UseChatStreamManagerParams = {
   autoScrollToBottom: () => void
