@@ -82,6 +82,7 @@ import {
 } from './providerSessionAccessor'
 import { useAgentConversationState } from './useAgentConversationState'
 import type { ContextBreakdownInputs } from './useContextBreakdown'
+import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 
 type UseChatStreamManagerParams = {
   autoScrollToBottom: () => void
@@ -182,6 +183,7 @@ export type UseChatStreamManager = {
   buildContextBreakdownInputs: (
     messages: ChatMessage[],
   ) => Promise<ContextBreakdownInputs | null>
+  buildVoiceToolBridgeForConversation: () => Promise<VoiceToolBridge>
   submitChatMutation: UseMutationResult<
     { aborted: boolean },
     Error,
@@ -1137,11 +1139,47 @@ export function useChatStreamManager({
     ],
   )
 
+  const buildVoiceToolBridgeForConversation = useCallback(async () => {
+    const effectiveAssistantId =
+      assistantIdOverride ?? settings.currentAssistantId
+    const selectedAssistant = effectiveAssistantId
+      ? (settings.assistants || []).find(
+          (assistant) => assistant.id === effectiveAssistantId,
+        ) || null
+      : null
+    const mcpManager = await getMcpManager()
+    const { buildVoiceToolBridgeFromChat } = await import(
+      '../../core/realtime/voiceToolBridge'
+    )
+    return buildVoiceToolBridgeFromChat({
+      mcpManager,
+      conversationId: currentConversationId,
+      settings,
+      chatMode,
+      yoloEnabled,
+      app,
+      selectedAssistant,
+      moduleToolSets: moduleToolSetSnapshot,
+      moduleChatMode: resolveModuleChatMode(),
+    })
+  }, [
+    app,
+    assistantIdOverride,
+    chatMode,
+    currentConversationId,
+    getMcpManager,
+    moduleToolSetSnapshot,
+    resolveModuleChatMode,
+    settings,
+    yoloEnabled,
+  ])
+
   return {
     abortConversationRun,
     currentConversationRunSummary,
     compactConversation,
     submitChatMutation,
     buildContextBreakdownInputs,
+    buildVoiceToolBridgeForConversation,
   }
 }
