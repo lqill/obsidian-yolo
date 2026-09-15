@@ -1388,6 +1388,18 @@ const VoiceSettingsSection = () => {
             />
           </ObsidianSetting>
         </div>
+        <ObsidianSetting
+          name={t('voiceToolsEnabledLabel')}
+          desc={t('voiceToolsEnabledDesc')}
+          className="yolo-models-select-card"
+        >
+          <ObsidianToggle
+            value={voice.toolsEnabled}
+            onChange={(value) => {
+              commitVoiceUpdate({ toolsEnabled: value }, 'toolsEnabled')
+            }}
+          />
+        </ObsidianSetting>
       </div>
     </section>
   )

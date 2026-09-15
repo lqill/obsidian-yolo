@@ -2693,6 +2693,10 @@ export const zh: TranslationKeys = {
   voiceMute: '静音',
   voiceUnmute: '取消静音',
   voiceEnd: '结束',
+  voiceToolsEnabledLabel: '启用仓库工具',
+  voiceToolsEnabledDesc:
+    '允许语音模型调用与文本代理相同的工具。需要审批的工具仅在当前模式开启 YOLO 时才会执行。',
+  voiceToolRunning: '正在使用工具',
   voiceDesktopOnly: '语音模式仅支持桌面端。',
   voiceUnavailable: '请在设置中选择一个 Gemini API 密钥提供商以使用语音模式。',
 }

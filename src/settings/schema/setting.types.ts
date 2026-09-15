@@ -209,6 +209,7 @@ export const DEFAULT_VOICE_SETTINGS = {
   model: 'gemini-3.1-flash-live-preview',
   voiceName: 'Kore',
   systemPrompt: '',
+  toolsEnabled: true,
 } as const
 
 const notificationOptionsSchema = z
@@ -426,6 +427,9 @@ export const yoloSettingsSchema = z.object({
       model: z.string().default(DEFAULT_VOICE_SETTINGS.model),
       voiceName: z.string().default(DEFAULT_VOICE_SETTINGS.voiceName),
       systemPrompt: z.string().default(DEFAULT_VOICE_SETTINGS.systemPrompt),
+      toolsEnabled: z
+        .boolean()
+        .default(DEFAULT_VOICE_SETTINGS.toolsEnabled),
     })
     .catch({ ...DEFAULT_VOICE_SETTINGS }),
 
