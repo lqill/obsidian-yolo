@@ -9,6 +9,7 @@ export type VoiceSessionSnapshot = {
   partialUserText: string
   partialAssistantText: string
   error: string | null
+  activeToolName: string | null
   conversationId: string | null
 }
 
@@ -19,6 +20,7 @@ const IDLE: VoiceSessionSnapshot = {
   partialUserText: '',
   partialAssistantText: '',
   error: null,
+  activeToolName: null,
   conversationId: null,
 }
 
@@ -52,6 +54,9 @@ export class VoiceSessionStore {
   setMuted = (muted: boolean): void => this.set({ muted })
 
   setMicLevel = (micLevel: number): void => this.set({ micLevel })
+
+  setActiveTool = (activeToolName: string | null): void =>
+    this.set({ activeToolName })
 
   appendPartialUser = (text: string): void =>
     this.set({ partialUserText: this.snapshot.partialUserText + text })
