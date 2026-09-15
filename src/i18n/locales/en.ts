@@ -2856,6 +2856,10 @@ export const en: TranslationKeys = {
   voiceMute: 'Mute',
   voiceUnmute: 'Unmute',
   voiceEnd: 'End',
+  voiceToolsEnabledLabel: 'Enable vault tools',
+  voiceToolsEnabledDesc:
+    'Let the voice model call the same tools the text agent can. Tools that need approval run only when YOLO is on for the active mode.',
+  voiceToolRunning: 'Using tool',
   voiceDesktopOnly: 'Voice mode is available on desktop only.',
   voiceUnavailable:
     'Select a Gemini API-key provider in Settings to use voice mode.',

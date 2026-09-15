@@ -2490,6 +2490,9 @@ export type TranslationKeys = {
   voiceMute: string
   voiceUnmute: string
   voiceEnd: string
+  voiceToolsEnabledLabel: string
+  voiceToolsEnabledDesc: string
+  voiceToolRunning: string
   voiceDesktopOnly: string
   voiceUnavailable: string
 }

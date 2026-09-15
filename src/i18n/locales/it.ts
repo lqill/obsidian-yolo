@@ -2567,6 +2567,10 @@ export const it: DeepPartial<TranslationKeys> = {
   voiceMute: 'Silenzia',
   voiceUnmute: 'Riattiva audio',
   voiceEnd: 'Termina',
+  voiceToolsEnabledLabel: 'Abilita gli strumenti del vault',
+  voiceToolsEnabledDesc:
+    'Consenti al modello vocale di usare gli stessi strumenti dell’agente testuale. Gli strumenti che richiedono approvazione vengono eseguiti solo con YOLO attivo nella modalità corrente.',
+  voiceToolRunning: 'Strumento in uso',
   voiceDesktopOnly: 'La modalità vocale è disponibile solo su desktop.',
   voiceUnavailable:
     'Seleziona un provider Gemini con chiave API nelle Impostazioni per usare la modalità vocale.',
