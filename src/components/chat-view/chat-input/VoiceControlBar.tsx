@@ -35,14 +35,6 @@ export const VoiceControlBar = ({
         className="yolo-voice-control-bar__meter"
         data-level={Math.round(snapshot.micLevel * 100)}
       />
-      <div className="yolo-voice-control-bar__captions">
-        <div className="yolo-voice-control-bar__caption">
-          {snapshot.partialUserText}
-        </div>
-        <div className="yolo-voice-control-bar__caption">
-          {snapshot.partialAssistantText}
-        </div>
-      </div>
       <button type="button" onClick={onToggleMute}>
         {snapshot.muted ? t('voiceUnmute') : t('voiceMute')}
       </button>

@@ -15,6 +15,7 @@ type ToolHandler = (
 const makeFakes = (overrides?: {
   toolHandler?: ToolHandler
   initialHistory?: GeminiLiveHistoryTurn[]
+  onTurnOpen?: () => void
 }) => {
   const microphone = {
     start: jest.fn(async () => {}),
@@ -38,6 +39,7 @@ const makeFakes = (overrides?: {
     player: player as any,
     store: voiceSessionStore,
     onTurn: (turn) => turns.push(turn),
+    onTurnOpen: overrides?.onTurnOpen,
     toolHandler: overrides?.toolHandler,
     initialHistory: overrides?.initialHistory,
   })
@@ -95,6 +97,37 @@ describe('GeminiLiveSession per-turn state machine', () => {
     session.start()
     session.handleEvent({ kind: 'turnComplete' })
     expect(turns).toEqual([])
+  })
+
+  it('signals each turn open exactly once, before any of its text', () => {
+    const opened: string[] = []
+    const { session } = makeFakes({
+      onTurnOpen: () =>
+        opened.push(voiceSessionStore.getSnapshot().partialUserText),
+    })
+    session.start()
+    session.handleEvent({
+      kind: 'inputTranscript',
+      text: 'first',
+    } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'inputTranscript',
+      text: ' question',
+    } as GeminiLiveServerEvent)
+    session.handleEvent({
+      kind: 'outputTranscript',
+      text: 'answer',
+    } as GeminiLiveServerEvent)
+    session.handleEvent({ kind: 'turnComplete' })
+    session.handleEvent({
+      kind: 'inputTranscript',
+      text: 'second',
+    } as GeminiLiveServerEvent)
+    session.handleEvent({ kind: 'turnComplete' })
+
+    // Once per turn, and the store is still textless at that moment: the
+    // caller creates the turn's messages before the transcript lands in them.
+    expect(opened).toEqual(['', ''])
   })
 
   it('commits two consecutive spoken-only turns', () => {

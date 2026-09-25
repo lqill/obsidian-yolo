@@ -115,32 +115,6 @@
   max-width: 16rem;
 }
 
-.yolo-voice-control-bar__captions {
-  display: flex;
-  flex-basis: 100%;
-  flex-direction: column;
-  min-width: 0;
-  gap: 2px;
-}
-
-.yolo-voice-control-bar__caption {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.yolo-voice-control-bar__caption:empty {
-  display: none;
-}
-
-/* First caption is the partial user transcript — keep it at full weight. */
-.yolo-voice-control-bar__caption:first-child:not(:empty) {
-  color: var(--text-normal);
-}
-
 /*
  * Mute / End buttons. `button` prefix keeps parity with Obsidian's
  * `button:not(.clickable-icon)` the same way

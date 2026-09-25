@@ -13,6 +13,7 @@ import type { ChatUserInputRef } from './chat-input/ChatUserInput'
 import { editorStateToPlainText } from './chat-input/utils/editor-state-to-plain-text'
 import EditableUserMessageItem from './EditableUserMessageItem'
 import UserMessageCard from './UserMessageCard'
+import { useVoiceLiveUserText } from './useVoiceLiveText'
 
 export type UserMessageItemProps = {
   message: ChatUserMessage
@@ -180,24 +181,36 @@ function UserMessageItem({
   onControlPopoverOpenChange,
   allowAgentModeOption,
 }: UserMessageItemProps) {
-  const snapshot = useMemo<UserMessageDisplaySnapshot>(
-    () => ({
+  // A live voice turn's user message is added to the conversation the moment
+  // the turn opens, so the transcript has a bubble to stream into; its text
+  // comes from the session's partial transcript rather than the message.
+  const liveText = useVoiceLiveUserText(message.id)
+
+  const snapshot = useMemo<UserMessageDisplaySnapshot>(() => {
+    const base: UserMessageDisplaySnapshot = {
       content: message.content,
       text: message.content ? editorStateToPlainText(message.content) : '',
       mentionables: displayMentionables ?? message.mentionables,
       selectedSkills: message.selectedSkills ?? [],
       modelId,
       reasoningLevel,
-    }),
-    [
-      displayMentionables,
-      message.content,
-      message.mentionables,
-      message.selectedSkills,
-      modelId,
-      reasoningLevel,
-    ],
-  )
+    }
+    return liveText === null ? base : { ...base, content: null, text: liveText }
+  }, [
+    displayMentionables,
+    liveText,
+    message.content,
+    message.mentionables,
+    message.selectedSkills,
+    modelId,
+    reasoningLevel,
+  ])
+
+  // Nothing has been said into the turn yet: the card would show its empty
+  // "Click to edit..." placeholder, which is not what a live turn looks like.
+  if (liveText !== null && liveText.length === 0) {
+    return null
+  }
 
   return (
     <div className="yolo-chat-messages-user" data-user-message-id={message.id}>

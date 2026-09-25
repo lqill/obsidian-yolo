@@ -14,6 +14,8 @@ import type { VoiceToolBridge } from './voiceToolBridge'
 export type CreateGeminiLiveRuntimeOptions = {
   connection: ResolvedLiveConnection
   onTurn: (turn: VoiceTurn) => void
+  /** Fired once per turn when it opens; see `GeminiLiveSessionOptions`. */
+  onTurnOpen?: () => void
   createSocket: (url: string) => WebSocketLike
   toolBridge?: VoiceToolBridge
   /** Prior conversation turns replayed so a restarted session keeps context. */
@@ -54,6 +56,7 @@ export const createGeminiLiveRuntime = (
     player: new LiveAudioPlayer(),
     store: voiceSessionStore,
     onTurn: options.onTurn,
+    onTurnOpen: options.onTurnOpen,
     toolHandler: toolBridge
       ? (calls) => toolBridge.handleFunctionCalls(calls)
       : undefined,
@@ -73,6 +76,8 @@ export type { VoiceTurn } from './GeminiLiveSession'
 export type { GeminiLiveHistoryTurn } from './geminiLiveProtocol'
 export type { ResolvedLiveConnection } from './resolveLiveConnection'
 export type {
+  VoiceLiveTurn,
+  VoicePartialTextKind,
   VoiceSessionSnapshot,
   VoiceSessionStatus,
 } from './voiceSessionStore'

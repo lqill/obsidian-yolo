@@ -38,6 +38,12 @@ export type GeminiLiveSessionOptions = {
   player: VoiceAudioPlayer
   store: VoiceSessionStore
   onTurn: (turn: VoiceTurn) => void
+  /**
+   * Fired once when a turn opens, before its first transcript delta reaches the
+   * store. The caller uses it to put the turn's (still textless) messages into
+   * the conversation so the bubbles can stream into them.
+   */
+  onTurnOpen?: () => void
   toolHandler?: (
     calls: GeminiLiveFunctionCall[],
   ) => Promise<GeminiLiveFunctionResponse[]>
@@ -98,8 +104,13 @@ export class GeminiLiveSession {
     this.options.client.sendText(trimmed)
   }
 
-  /** Opens the turn, discarding the previous turn's accumulated text if it already committed. */
+  /**
+   * Opens the turn, discarding the previous turn's accumulated text if it
+   * already committed, and signals a first open so the caller can create the
+   * turn's messages before any of its text reaches the screen.
+   */
   private beginTurn(): void {
+    const opensTurn = this.turnState !== 'open'
     if (this.turnState === 'committed') {
       this.typedText = ''
       this.spokenUserText = ''
@@ -107,6 +118,7 @@ export class GeminiLiveSession {
       this.options.store.clearPartials()
     }
     this.turnState = 'open'
+    if (opensTurn) this.options.onTurnOpen?.()
   }
 
   /**

@@ -2,15 +2,17 @@ import { Platform } from 'obsidian'
 import { useCallback, useEffect, useRef } from 'react'
 
 import { useSettings } from '../../contexts/settings-context'
-import type { VoiceTurn } from '../../core/realtime'
+import type { VoiceLiveTurn, VoiceTurn } from '../../core/realtime'
 import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
 import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
-import type { ChatAssistantMessage, ChatUserMessage } from '../../types/chat'
+import type { ChatUserMessage } from '../../types/chat'
 
 import type { ChatSessionController } from './ChatSessionController'
-
-const buildId = () =>
-  `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+import {
+  buildFinalTurnMessages,
+  buildLiveTurnMessages,
+  createVoiceLiveTurn,
+} from './voiceTurnMessages'
 
 export const useVoiceSession = ({
   sessionController,
@@ -36,37 +38,52 @@ export const useVoiceSession = ({
   } | null>(null)
   const pinnedConversationRef = useRef<string | null>(null)
   const startingRef = useRef(false)
+  /** The turn being spoken right now; null between turns. */
+  const liveTurnRef = useRef<VoiceLiveTurn | null>(null)
 
+  /**
+   * A turn opens on its first transcript delta. Put its messages into the
+   * conversation immediately — still textless — so the bubbles exist and the
+   * store's partial transcript has somewhere to stream into.
+   */
+  const openTurn = useCallback(() => {
+    const conversationId = pinnedConversationRef.current
+    if (!conversationId) return
+    const liveTurn = createVoiceLiveTurn(conversationId)
+    liveTurnRef.current = liveTurn
+    voiceSessionStore.setLiveTurn(liveTurn)
+    sessionController.beginVoiceTurn(
+      conversationId,
+      buildLiveTurnMessages({
+        liveTurn,
+        liveModelId,
+        model: settings.chatModels.find((m) => m.id === liveModelId),
+      }),
+    )
+  }, [liveModelId, sessionController, settings.chatModels])
+
+  /**
+   * Finalizes the live turn in place: the messages that streamed become the
+   * persisted messages, same ids, so nothing remounts and no text is re-typed.
+   */
   const commitTurn = useCallback(
     (turn: VoiceTurn) => {
-      const pinned = pinnedConversationRef.current
-      if (!pinned) return
-      const baseUserMessage: ChatUserMessage = {
-        role: 'user',
-        id: buildId(),
-        content: null,
-        promptContent: turn.userText,
-        mentionables: [],
-        selectedModelIds: [liveModelId],
-      }
-      const userMessage = stampTimeContext
-        ? stampTimeContext(baseUserMessage)
-        : baseUserMessage
-      const assistantMessage: ChatAssistantMessage = {
-        role: 'assistant',
-        id: buildId(),
-        content: turn.assistantText,
-        metadata: {
-          generationState: 'completed',
+      const liveTurn = liveTurnRef.current
+      liveTurnRef.current = null
+      voiceSessionStore.setLiveTurn(null)
+      if (!liveTurn) return
+      sessionController.finalizeVoiceTurn(
+        liveTurn.conversationId,
+        buildFinalTurnMessages({
+          liveTurn,
+          turn,
+          liveModelId,
           model: settings.chatModels.find((m) => m.id === liveModelId),
-        },
-      }
-      sessionController.appendConversationMessages(pinned, [
-        userMessage,
-        assistantMessage,
-      ])
+          stampTimeContext,
+        }),
+      )
     },
-    [sessionController, liveModelId, settings.chatModels, stampTimeContext],
+    [liveModelId, sessionController, settings.chatModels, stampTimeContext],
   )
 
   const start = useCallback(async () => {
@@ -105,6 +122,7 @@ export const useVoiceSession = ({
       const runtime = createGeminiLiveRuntime({
         connection: resolution.value,
         onTurn: commitTurn,
+        onTurnOpen: openTurn,
         createSocket: (url) => new WebSocket(url),
         toolBridge: toolBridge ?? undefined,
         initialHistory: buildVoiceHistoryTurns(
@@ -127,16 +145,29 @@ export const useVoiceSession = ({
     conversationId,
     commitTurn,
     onVoiceActiveChange,
+    openTurn,
     resolveToolBridge,
+    sessionController,
   ])
 
   const stop = useCallback(() => {
     runtimeRef.current?.stop()
     runtimeRef.current = null
     pinnedConversationRef.current = null
+    const liveTurn = liveTurnRef.current
+    liveTurnRef.current = null
+    if (liveTurn) {
+      // The turn never committed: drop the messages it was streaming into,
+      // matching the pre-live behaviour of persisting nothing until
+      // `turnComplete`.
+      sessionController.discardVoiceTurn(liveTurn.conversationId, [
+        liveTurn.userMessageId,
+        liveTurn.assistantMessageId,
+      ])
+    }
     voiceSessionStore.reset()
     onVoiceActiveChange(false)
-  }, [onVoiceActiveChange])
+  }, [onVoiceActiveChange, sessionController])
 
   useEffect(() => {
     const pinned = pinnedConversationRef.current

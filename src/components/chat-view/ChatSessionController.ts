@@ -60,6 +60,32 @@ function resolveNext<T>(action: SetStateActionLike<T>, prev: T): T {
     : action
 }
 
+/**
+ * Swaps messages in place by id, keeping each replacement at the position the
+ * original occupied, and appends any replacement whose id is absent — the live
+ * turn's messages are normally present, but the user may have deleted them
+ * mid-turn.
+ */
+function replaceOrAppendMessages(
+  messages: ChatMessage[],
+  replacements: readonly ChatMessage[],
+): ChatMessage[] {
+  const replacementById = new Map(
+    replacements.map((message) => [message.id, message]),
+  )
+  const replaced = new Set<string>()
+  const next = messages.map((message) => {
+    const replacement = replacementById.get(message.id)
+    if (!replacement) return message
+    replaced.add(message.id)
+    return replacement
+  })
+  for (const replacement of replacements) {
+    if (!replaced.has(replacement.id)) next.push(replacement)
+  }
+  return next
+}
+
 function deleteMapKey<V>(map: Map<string, V>, key: string): Map<string, V> {
   if (!map.has(key)) return map
   const next = new Map(map)
@@ -377,6 +403,15 @@ export class ChatSessionController {
    * to the pre-C2 `assistantContinuationPendingRef` in
    * `useChatDomainActions.ts`, now a plain field instead of a React ref. */
   private assistantContinuationPending = false
+  /**
+   * The voice turn whose transcript is currently streaming, if any. It exists
+   * only to be reclaimed when its conversation is left — see
+   * `settleLiveVoiceTurnForSwitch`.
+   */
+  private liveVoiceTurn: {
+    conversationId: string
+    messageIds: readonly [string, string]
+  } | null = null
 
   readonly chatMessagesStateRef: { current: ChatMessage[] }
   readonly activeBranchByUserMessageIdRef: { current: Map<string, string> }
@@ -1119,11 +1154,13 @@ export class ChatSessionController {
 
   /**
    * Changing the conversation identity re-points the AgentSessionService
-   * subscription — every other setter is a plain field write.
+   * subscription and ends any voice turn streaming into the conversation being
+   * left — every other setter is a plain field write.
    */
   setCurrentConversationId = (action: SetStateActionLike<string>): void => {
     const next = resolveNext(action, this.snapshot.currentConversationId)
     if (next === this.snapshot.currentConversationId) return
+    this.settleLiveVoiceTurnForSwitch()
     this.commit({ currentConversationId: next })
     this.subscribeAgentService(next)
   }
@@ -1196,27 +1233,109 @@ export class ChatSessionController {
   }
 
   /**
-   * Appends finalized voice-turn messages over the CURRENT snapshot (read at
-   * commit time, mirroring `removeHistoricalUserMessage`) so a mid-turn edit is
-   * never clobbered. No-ops if the conversation changed since the session
-   * started. Scroll + title side effects match the normal submit path.
+   * Puts the current voice turn's messages into the conversation as soon as the
+   * turn opens, while they are still textless: the bubbles mount on them and
+   * `voiceSessionStore` streams the transcript into them. Read at call time over
+   * the CURRENT snapshot (mirroring `removeHistoricalUserMessage`) so a mid-turn
+   * edit is never clobbered. No-ops if the conversation changed since the session
+   * started, or if the turn's messages are already present.
    */
-  appendConversationMessages = (
+  beginVoiceTurn = (
     conversationId: string,
-    messages: ChatMessage[],
+    messages: readonly [ChatUserMessage, ChatAssistantMessage],
   ): void => {
     if (conversationId !== this.snapshot.currentConversationId) {
       return
     }
-    if (messages.length === 0) return
-    const isFirstTurn = this.snapshot.chatMessages.length === 0
+    this.liveVoiceTurn = {
+      conversationId,
+      messageIds: [messages[0].id, messages[1].id],
+    }
+    const liveIds = new Set(messages.map((message) => message.id))
+    if (this.snapshot.chatMessages.some((message) => liveIds.has(message.id))) {
+      return
+    }
     const nextMessages = [...this.snapshot.chatMessages, ...messages]
     this.setChatMessages(nextMessages)
     this.syncAgentConversationMessages(nextMessages)
     this.persist(nextMessages)
     this.deps.forceScrollToBottom({ deferToNextFrame: true })
-    if (isFirstTurn)
+  }
+
+  /**
+   * Replaces the live turn's messages with their finalized text IN PLACE — same
+   * ids, so the bubble that streamed becomes the persisted message without a
+   * remount or a re-typed answer. Falls back to appending when the live messages
+   * were deleted mid-turn. Scroll + title side effects match the normal submit
+   * path; no-ops if the conversation changed since the session started.
+   */
+  finalizeVoiceTurn = (
+    conversationId: string,
+    messages: readonly [ChatUserMessage, ChatAssistantMessage],
+  ): void => {
+    if (conversationId !== this.snapshot.currentConversationId) {
+      return
+    }
+    this.liveVoiceTurn = null
+    const previous = this.snapshot.chatMessages
+    const liveIds = new Set(messages.map((message) => message.id))
+    const isFirstTurn = previous.every(
+      (message) => message.role !== 'user' || liveIds.has(message.id),
+    )
+    const nextMessages = replaceOrAppendMessages(previous, messages)
+    this.setChatMessages(nextMessages)
+    this.syncAgentConversationMessages(nextMessages)
+    this.persist(nextMessages)
+    this.deps.forceScrollToBottom({ deferToNextFrame: true })
+    if (isFirstTurn) {
       void this.deps.generateConversationTitle(conversationId, nextMessages)
+    }
+  }
+
+  /**
+   * Drops a voice turn that ended without committing (session ended mid-turn):
+   * its partial transcript is discarded, matching the pre-live behaviour where
+   * nothing was persisted until `turnComplete`.
+   */
+  discardVoiceTurn = (
+    conversationId: string,
+    messageIds: readonly string[],
+  ): void => {
+    if (conversationId !== this.snapshot.currentConversationId) {
+      return
+    }
+    this.liveVoiceTurn = null
+    this.removeMessages(messageIds)
+  }
+
+  /**
+   * Leaving a conversation ends the voice turn streaming into it: its messages
+   * existed only as targets for that transcript, so they must not survive in a
+   * conversation the user has walked away from. Called before the id changes,
+   * while the outgoing conversation is still current, so the removal persists to
+   * the conversation that actually holds them.
+   */
+  private settleLiveVoiceTurnForSwitch(): void {
+    const liveTurn = this.liveVoiceTurn
+    this.liveVoiceTurn = null
+    if (!liveTurn) return
+    if (liveTurn.conversationId !== this.snapshot.currentConversationId) return
+    this.removeMessages(liveTurn.messageIds)
+  }
+
+  /** Drops messages from the current conversation and persists the removal. */
+  private removeMessages(messageIds: readonly string[]): void {
+    const discarded = new Set(messageIds)
+    const previous = this.snapshot.chatMessages
+    const nextMessages = previous.filter(
+      (message) => !discarded.has(message.id),
+    )
+    if (nextMessages.length === previous.length) {
+      return
+    }
+    this.setChatMessages(nextMessages)
+    this.syncAgentConversationMessages(nextMessages)
+    this.persist(nextMessages)
   }
 
   /** Equivalent to the original `handleAssistantMessageEditSave`. */
