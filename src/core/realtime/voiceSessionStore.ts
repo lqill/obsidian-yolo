@@ -1,8 +1,27 @@
 // src/core/realtime/voiceSessionStore.ts
+import type { LiveConnectionFailure } from './resolveLiveConnection'
 
 export type VoiceSessionStatus = 'idle' | 'connecting' | 'ready' | 'error'
 
 export type VoicePartialTextKind = 'user' | 'assistant'
+
+/**
+ * Why a voice session failed. Core names the failure; the UI owns the wording,
+ * so the store never carries a user-visible string of our own. `detail` holds
+ * text we did not write (the server's message, a DOM exception).
+ */
+export type VoiceFailure =
+  | LiveConnectionFailure
+  | 'mic_unavailable'
+  | 'server'
+  | 'session_closed'
+  | 'tools_unavailable'
+  | 'start_failed'
+
+export type VoiceError = Readonly<{
+  failure: VoiceFailure
+  detail?: string
+}>
 
 /**
  * The conversation messages of the turn currently being spoken. The turn's
@@ -23,7 +42,7 @@ export type VoiceSessionSnapshot = {
   partialUserText: string
   partialAssistantText: string
   liveTurn: VoiceLiveTurn | null
-  error: string | null
+  error: VoiceError | null
   activeToolName: string | null
   conversationId: string | null
 }
@@ -94,8 +113,10 @@ export class VoiceSessionStore {
     for (const listener of this.listeners) listener()
   }
 
-  setStatus = (status: VoiceSessionStatus, error: string | null = null): void =>
-    this.set({ status, error })
+  setStatus = (
+    status: VoiceSessionStatus,
+    error: VoiceError | null = null,
+  ): void => this.set({ status, error })
 
   setConversationId = (conversationId: string | null): void =>
     this.set({ conversationId })

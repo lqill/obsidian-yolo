@@ -103,7 +103,7 @@ export const useVoiceSession = ({
       ])
       const resolution = resolveLiveConnection({ settings })
       if (!resolution.ok) {
-        voiceSessionStore.setStatus('error', resolution.error)
+        voiceSessionStore.setStatus('error', { failure: resolution.reason })
         onVoiceActiveChange(true)
         return
       }
@@ -114,10 +114,14 @@ export const useVoiceSession = ({
       try {
         toolBridge = (await resolveToolBridge?.()) ?? null
       } catch (error) {
-        console.warn(
-          '[YOLO][Voice] failed to resolve voice tools; continuing without tools',
-          error,
-        )
+        // Fail loud: a session started without its resolved tools would silently
+        // diverge from the text agent's surface.
+        voiceSessionStore.setStatus('error', {
+          failure: 'tools_unavailable',
+          detail: error instanceof Error ? error.message : String(error),
+        })
+        onVoiceActiveChange(true)
+        return
       }
       const runtime = createGeminiLiveRuntime({
         connection: resolution.value,
@@ -132,10 +136,10 @@ export const useVoiceSession = ({
       runtimeRef.current = runtime
       await runtime.start()
     } catch (error) {
-      voiceSessionStore.setStatus(
-        'error',
-        error instanceof Error ? error.message : String(error),
-      )
+      voiceSessionStore.setStatus('error', {
+        failure: 'start_failed',
+        detail: error instanceof Error ? error.message : String(error),
+      })
       onVoiceActiveChange(true)
     } finally {
       startingRef.current = false

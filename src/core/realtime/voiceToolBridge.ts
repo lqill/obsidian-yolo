@@ -7,6 +7,7 @@ import type {
   AssistantToolServerPreference,
 } from '../../types/assistant.types'
 import type { ChatMessage, ChatToolMessage } from '../../types/chat'
+import type { RequestTool } from '../../types/llm/request'
 import type { LLMProviderApiType } from '../../types/provider.types'
 import {
   type ToolCallRequest,
@@ -14,7 +15,12 @@ import {
   ToolCallResponseStatus,
   createCompleteToolCallArguments,
 } from '../../types/tool-call.types'
+import { resolveAllowedSkillPaths } from '../agent/agent-api'
 import type { ChatMode } from '../agent/chat-mode'
+import {
+  resolveBlockedCommandPrefixes,
+  resolveWorkspaceScopeForRuntimeInput,
+} from '../agent/chat-runtime-inputs'
 import {
   type ChatModeRuntime,
   resolveChatModeRuntime,
@@ -22,6 +28,7 @@ import {
 import { AgentToolGateway } from '../agent/tool-gateway'
 import { getEnabledAssistantToolNames } from '../agent/tool-preferences'
 import {
+  buildRequestTools,
   isInvokeToolName,
   isLoadToolSchemasToolName,
   selectAllowedTools,
@@ -30,7 +37,6 @@ import { GeminiProvider } from '../llm/gemini'
 import {
   fromModelToolName,
   getLocalFileToolServerName,
-  toModelToolName,
 } from '../mcp/localFileTools'
 import type { McpManager } from '../mcp/mcpManager'
 import { parseToolName } from '../mcp/tool-name-utils'
@@ -77,6 +83,9 @@ export type BuildVoiceToolBridgeOptions = {
   conversationId: string
   chatModeRuntime: ChatModeRuntime
   settings: YoloSettings
+  /** Needed for the skill-path boundary; the assistant owns the allowed set. */
+  app: App
+  assistant: Assistant | null
   apiType?: LLMProviderApiType | null
   createGateway?: (
     mcpManager: McpManager,
@@ -123,28 +132,18 @@ const toToolResponsePayload = (
   }
 }
 
-const toDeclaration = (tool: {
-  name: string
-  description?: string
-  inputSchema?: unknown
-}): GeminiLiveFunctionDeclaration => {
-  const schema = (tool.inputSchema ?? { type: 'object' }) as Record<
-    string,
-    unknown
-  >
-  const withProperties = {
-    ...schema,
-    properties:
-      (schema.properties as Record<string, unknown> | undefined) ?? {},
-  }
-  return {
-    name: toModelToolName(tool.name),
-    description: tool.description,
-    parameters: GeminiProvider.sanitizeSchemaForGemini(
-      withProperties,
-    ) as Record<string, unknown>,
-  }
-}
+/**
+ * The request's tool shape (`buildRequestTools`: model-facing name + prepared
+ * schema) restated as a Live function declaration, whose `parameters` slot
+ * additionally has to survive Gemini's schema sanitizer.
+ */
+const toDeclaration = (tool: RequestTool): GeminiLiveFunctionDeclaration => ({
+  name: tool.function.name,
+  description: tool.function.description,
+  parameters: GeminiProvider.sanitizeSchemaForGemini(
+    tool.function.parameters as Record<string, unknown>,
+  ) as Record<string, unknown>,
+})
 
 export async function buildVoiceToolBridge(
   options: BuildVoiceToolBridgeOptions,
@@ -212,14 +211,27 @@ export async function buildVoiceToolBridge(
     settings,
   })
 
-  const declarations = filteredTools
-    .filter(
-      (tool) =>
-        !isInvokeToolName(tool.name) &&
-        !isLoadToolSchemasToolName(tool.name) &&
-        !voiceExcludedToolNames.has(tool.name),
-    )
-    .map(toDeclaration)
+  const declaredTools = filteredTools.filter(
+    (tool) =>
+      !isInvokeToolName(tool.name) &&
+      !isLoadToolSchemasToolName(tool.name) &&
+      !voiceExcludedToolNames.has(tool.name),
+  )
+  const declarations = (buildRequestTools(declaredTools) ?? []).map(
+    toDeclaration,
+  )
+
+  // The same boundary the text agent runs under in this mode: the assistant's
+  // workspace scope (skipped in a module mode, which takes no part of the
+  // assistant), the skill paths it may read, and the terminal blocklist.
+  const isModuleMode = chatModeRuntime.moduleChatModeId !== undefined
+  const allowedSkillPaths = isModuleMode
+    ? []
+    : await resolveAllowedSkillPaths({
+        app: options.app,
+        settings,
+        assistant: options.assistant,
+      })
 
   const createGateway = options.createGateway ?? defaultCreateGateway
   const gateway = createGateway(mcpManager, {
@@ -235,6 +247,11 @@ export async function buildVoiceToolBridge(
     capabilityOverrides: chatModeRuntime.capabilityOverrides,
     vaultPathBoundary: chatModeRuntime.vaultPathBoundary,
     toolApprovalConversationId: options.conversationId,
+    workspaceScope: isModuleMode
+      ? undefined
+      : resolveWorkspaceScopeForRuntimeInput(options.assistant),
+    allowedSkillPaths,
+    blockedCommandPrefixes: resolveBlockedCommandPrefixes(settings),
   })
 
   let callCounter = 0
@@ -327,6 +344,8 @@ export async function buildVoiceToolBridgeFromChat(
     conversationId: options.conversationId,
     chatModeRuntime,
     settings: options.settings,
+    app: options.app,
+    assistant: options.selectedAssistant,
     apiType: 'gemini',
   })
 }

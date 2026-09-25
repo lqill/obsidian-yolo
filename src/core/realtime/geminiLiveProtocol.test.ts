@@ -1,6 +1,4 @@
 // src/core/realtime/geminiLiveProtocol.test.ts
-import { DEFAULT_GEMINI_BASE_URL } from '../llm/gemini'
-
 import {
   buildAudioStreamEndMessage,
   buildClientContentHistoryMessage,
@@ -9,38 +7,17 @@ import {
   buildTextMessage,
   buildToolResponseMessage,
   encodeClientMessage,
-  normalizeLiveModelName,
   parseServerMessage,
 } from './geminiLiveProtocol'
 
 describe('buildLiveWebSocketUrl', () => {
   it('builds the default wss endpoint with the api key', () => {
     const url = buildLiveWebSocketUrl({
-      baseUrl: DEFAULT_GEMINI_BASE_URL,
+      baseUrl: 'https://generativelanguage.googleapis.com',
       apiKey: 'abc',
     })
     expect(url).toBe(
       'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=abc',
-    )
-  })
-
-  it('rejects a non-default base URL', () => {
-    expect(() =>
-      buildLiveWebSocketUrl({
-        baseUrl: 'https://proxy.example.com',
-        apiKey: 'abc',
-      }),
-    ).toThrow(/Live API/)
-  })
-})
-
-describe('normalizeLiveModelName', () => {
-  it('adds the models/ prefix once', () => {
-    expect(normalizeLiveModelName('gemini-3.1-flash-live-preview')).toBe(
-      'models/gemini-3.1-flash-live-preview',
-    )
-    expect(normalizeLiveModelName('models/gemini-3.1-flash-live-preview')).toBe(
-      'models/gemini-3.1-flash-live-preview',
     )
   })
 })

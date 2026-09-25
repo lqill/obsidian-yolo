@@ -75,7 +75,8 @@ type GeminiReplayPart = GeminiPart & {
   thoughtSignature?: string
 }
 
-export const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com'
+export const DEFAULT_GEMINI_BASE_URL =
+  'https://generativelanguage.googleapis.com'
 const GEMINI_API_VERSION = 'v1beta'
 const PROVIDER_LABEL = 'Gemini'
 
@@ -1246,7 +1247,7 @@ export class GeminiProvider extends BaseLLMProvider<LLMProvider> {
     return normalizeGeminiProviderBaseUrl(raw)
   }
 
-  private static normalizeModelPath(model: string): string {
+  static normalizeModelPath(model: string): string {
     if (model.startsWith('models/') || model.startsWith('tunedModels/')) {
       return model
     }

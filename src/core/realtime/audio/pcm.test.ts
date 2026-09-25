@@ -1,8 +1,6 @@
 // src/core/realtime/audio/pcm.test.ts
 import {
-  base64ToBytes,
   base64ToInt16,
-  bytesToBase64,
   float32ToInt16,
   int16ToBase64,
   int16ToFloat32,
@@ -22,13 +20,6 @@ describe('pcm', () => {
     expect(Array.from(float32ToInt16(new Float32Array([2, -2])))).toEqual([
       32767, -32768,
     ])
-  })
-
-  it('round-trips base64 bytes', () => {
-    const bytes = new Uint8Array([0, 1, 2, 253, 254, 255])
-    expect(Array.from(base64ToBytes(bytesToBase64(bytes)))).toEqual(
-      Array.from(bytes),
-    )
   })
 
   it('round-trips int16 base64', () => {

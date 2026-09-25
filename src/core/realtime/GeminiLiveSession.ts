@@ -132,10 +132,10 @@ export class GeminiLiveSession {
       await this.options.microphone.start()
     } catch (error) {
       if (this.stopped) return
-      this.options.store.setStatus(
-        'error',
-        error instanceof Error ? error.message : String(error),
-      )
+      this.options.store.setStatus('error', {
+        failure: 'mic_unavailable',
+        detail: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -167,7 +167,10 @@ export class GeminiLiveSession {
         this.commitTurn()
         break
       case 'error':
-        this.options.store.setStatus('error', event.message)
+        this.options.store.setStatus('error', {
+          failure: 'server',
+          detail: event.message,
+        })
         break
       case 'toolCall':
         this.toolCallChain = this.toolCallChain
@@ -178,7 +181,10 @@ export class GeminiLiveSession {
         this.commitTurn()
         this.options.player.flush()
         this.options.microphone.stop()
-        this.options.store.setStatus('error', event.reason || null)
+        this.options.store.setStatus('error', {
+          failure: 'session_closed',
+          ...(event.reason ? { detail: event.reason } : {}),
+        })
         break
     }
   }
@@ -193,7 +199,10 @@ export class GeminiLiveSession {
     } catch (error) {
       if (this.stopped) return
       const message = error instanceof Error ? error.message : String(error)
-      this.options.store.setStatus('error', message)
+      this.options.store.setStatus('error', {
+        failure: 'tools_unavailable',
+        detail: message,
+      })
       // The Live API blocks until every function call has a response, so a
       // failure here must still answer each call — otherwise the session stalls
       // with no further audio even though the UI reports an error.

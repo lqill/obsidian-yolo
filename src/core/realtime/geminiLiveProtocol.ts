@@ -1,5 +1,5 @@
 // src/core/realtime/geminiLiveProtocol.ts
-import { DEFAULT_GEMINI_BASE_URL } from '../llm/gemini'
+import { GeminiProvider } from '../llm/gemini'
 
 export const LIVE_INPUT_SAMPLE_RATE = 16000
 export const LIVE_OUTPUT_SAMPLE_RATE = 24000
@@ -56,10 +56,11 @@ export type GeminiLiveSetupConfig = {
 
 export type GeminiLiveClientMessage = Record<string, unknown>
 
-export const normalizeLiveModelName = (model: string): string =>
-  model.startsWith('models/') ? model : `models/${model}`
-
-/** Builds the Live WSS URL; refuses non-default base URLs (proxies do not serve the Live path). */
+/**
+ * Builds the Live WSS URL. `baseUrl` is expected to be the resolved Gemini
+ * endpoint (`resolveLiveConnection` refuses anything else), so only its host is
+ * needed here.
+ */
 export const buildLiveWebSocketUrl = ({
   baseUrl,
   apiKey,
@@ -67,20 +68,15 @@ export const buildLiveWebSocketUrl = ({
   baseUrl: string
   apiKey: string
 }): string => {
-  const normalized = baseUrl.replace(/\/+$/, '')
-  if (normalized !== DEFAULT_GEMINI_BASE_URL) {
-    throw new Error(
-      'Voice mode requires the default Gemini base URL; custom base URLs / proxies are not supported by the Live API.',
-    )
-  }
-  return `wss://generativelanguage.googleapis.com${LIVE_WS_PATH}?key=${encodeURIComponent(apiKey)}`
+  const host = new URL(baseUrl).host
+  return `wss://${host}${LIVE_WS_PATH}?key=${encodeURIComponent(apiKey)}`
 }
 
 export const buildSetupMessage = (
   config: GeminiLiveSetupConfig,
 ): GeminiLiveClientMessage => {
   const setup: Record<string, unknown> = {
-    model: normalizeLiveModelName(config.model),
+    model: GeminiProvider.normalizeModelPath(config.model),
     generationConfig: {
       responseModalities: ['AUDIO'],
       speechConfig: {

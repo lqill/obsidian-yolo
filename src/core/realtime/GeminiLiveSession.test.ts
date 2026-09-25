@@ -197,7 +197,10 @@ describe('GeminiLiveSession per-turn state machine', () => {
       functionCalls: [{ id: '1', name: 'fs_read' }],
     } as GeminiLiveServerEvent)
     await flushAsync()
-    expect(voiceSessionStore.getSnapshot().error).toBe('boom')
+    expect(voiceSessionStore.getSnapshot().error).toEqual({
+      failure: 'tools_unavailable',
+      detail: 'boom',
+    })
     expect(voiceSessionStore.getSnapshot().activeToolName).toBeNull()
     expect(client.sendToolResponse).toHaveBeenCalledWith([
       { id: '1', name: 'fs_read', response: { error: 'boom' } },
@@ -329,7 +332,10 @@ describe('GeminiLiveSession initial history', () => {
     session.handleEvent({ kind: 'ready' })
     await flushAsync()
     expect(voiceSessionStore.getSnapshot().status).toBe('error')
-    expect(voiceSessionStore.getSnapshot().error).toBe('denied')
+    expect(voiceSessionStore.getSnapshot().error).toEqual({
+      failure: 'mic_unavailable',
+      detail: 'denied',
+    })
   })
 
   it('does not replay history after stop', async () => {

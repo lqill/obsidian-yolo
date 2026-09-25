@@ -2495,4 +2495,11 @@ export type TranslationKeys = {
   voiceToolRunning: string
   voiceDesktopOnly: string
   voiceUnavailable: string
+  voiceProviderUnsupported: string
+  voiceApiKeyMissing: string
+  voiceModelMissing: string
+  voiceCustomBaseUrlUnsupported: string
+  voiceMicUnavailable: string
+  voiceSessionClosed: string
+  voiceToolsUnavailable: string
 }

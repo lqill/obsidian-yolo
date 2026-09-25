@@ -15,6 +15,13 @@ import {
   buildVoiceToolBridge,
 } from './voiceToolBridge'
 
+// The skill-path lookup reads the vault through `app`, which these tests do not
+// have; what matters here is that its result reaches the gateway.
+jest.mock('../agent/agent-api', () => ({
+  ...jest.requireActual('../agent/agent-api'),
+  resolveAllowedSkillPaths: jest.fn(async () => ['Skills/pkg/SKILL.md']),
+}))
+
 const localServer = getLocalFileToolServerName()
 const invokeFqn = `${localServer}__${INVOKE_TOOL_NAME}`
 const loadFqn = `${localServer}__${LOAD_TOOL_SCHEMAS_LOCAL_TOOL_NAME}`
@@ -39,7 +46,7 @@ const makeSettings = (toolsEnabled = true) =>
   ({
     voice: { toolsEnabled },
     knowledgeBases: [],
-    mcp: { servers: [], discoveredCatalogs: {} },
+    mcp: { servers: [], discoveredCatalogs: {}, builtinCapabilityOptions: {} },
     chatModels: [],
     providers: [],
     jsSandbox: {},
@@ -116,6 +123,10 @@ describe('buildVoiceToolBridge', () => {
     const bridge = await buildVoiceToolBridge({
       mcpManager,
       conversationId: 'c1',
+      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
+      // never touched.
+      app: {} as any,
+      assistant: null,
       chatModeRuntime: makeRuntime(),
       settings: makeSettings(),
       createGateway: () => gateway,
@@ -139,6 +150,10 @@ describe('buildVoiceToolBridge', () => {
     const bridge = await buildVoiceToolBridge({
       mcpManager,
       conversationId: 'c1',
+      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
+      // never touched.
+      app: {} as any,
+      assistant: null,
       chatModeRuntime: makeRuntime(),
       settings: makeSettings(),
       createGateway: () => gateway,
@@ -182,6 +197,10 @@ describe('buildVoiceToolBridge', () => {
     const bridge = await buildVoiceToolBridge({
       mcpManager,
       conversationId: 'c1',
+      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
+      // never touched.
+      app: {} as any,
+      assistant: null,
       chatModeRuntime: makeRuntime(),
       settings: makeSettings(),
       createGateway: () => gateway,
@@ -210,6 +229,10 @@ describe('buildVoiceToolBridge', () => {
     const bridge = await buildVoiceToolBridge({
       mcpManager,
       conversationId: 'c1',
+      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
+      // never touched.
+      app: {} as any,
+      assistant: null,
       chatModeRuntime: makeRuntime(),
       settings: makeSettings(),
       createGateway: () => gateway,
@@ -232,6 +255,10 @@ describe('buildVoiceToolBridge', () => {
     const bridge = await buildVoiceToolBridge({
       mcpManager,
       conversationId: 'c1',
+      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
+      // never touched.
+      app: {} as any,
+      assistant: null,
       chatModeRuntime: makeRuntime(),
       settings: makeSettings(),
       createGateway: () => gateway,
@@ -263,6 +290,10 @@ describe('buildVoiceToolBridge', () => {
     await buildVoiceToolBridge({
       mcpManager,
       conversationId: 'c1',
+      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
+      // never touched.
+      app: {} as any,
+      assistant: null,
       chatModeRuntime: makeRuntime(),
       settings: makeSettings(),
       createGateway,
@@ -283,6 +314,10 @@ describe('buildVoiceToolBridge', () => {
     await buildVoiceToolBridge({
       mcpManager,
       conversationId: 'c1',
+      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
+      // never touched.
+      app: {} as any,
+      assistant: null,
       chatModeRuntime: makeRuntime({
         toolServerPreferences: { srv: { approvalMode: 'full_access' } },
       }),
@@ -314,6 +349,10 @@ describe('buildVoiceToolBridge', () => {
     const bridge = await buildVoiceToolBridge({
       mcpManager,
       conversationId: 'c1',
+      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
+      // never touched.
+      app: {} as any,
+      assistant: null,
       chatModeRuntime: makeRuntime({
         allowedToolNames: [fsReadTool.name, excludedFqn],
       }),
@@ -333,10 +372,18 @@ describe('buildVoiceToolBridge', () => {
     await buildVoiceToolBridge({
       mcpManager,
       conversationId: 'c1',
+      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
+      // never touched.
+      app: {} as any,
+      assistant: null,
       chatModeRuntime: makeRuntime(),
       settings: {
         ...makeSettings(),
-        mcp: { servers: [{ id: 'offline' }], discoveredCatalogs: {} },
+        mcp: {
+          servers: [{ id: 'offline' }],
+          discoveredCatalogs: {},
+          builtinCapabilityOptions: {},
+        },
       },
       createGateway,
     })
@@ -352,12 +399,76 @@ describe('buildVoiceToolBridge', () => {
     )
   })
 
+  it('hands the gateway the same boundary the text agent runs under', async () => {
+    const mcpManager = makeMcpManager()
+    const createGateway = jest.fn(() => makeGateway())
+    await buildVoiceToolBridge({
+      mcpManager,
+      conversationId: 'c1',
+      app: {} as any,
+      assistant: {
+        id: 'a1',
+        workspaceScope: { enabled: true, include: ['ref/'], exclude: [] },
+      } as any,
+      chatModeRuntime: makeRuntime(),
+      settings: {
+        ...makeSettings(),
+        mcp: {
+          servers: [],
+          discoveredCatalogs: {},
+          builtinCapabilityOptions: {
+            terminal: { blockedPrefixes: ['rm -rf'] },
+          },
+        },
+      },
+      createGateway,
+    })
+
+    expect(createGateway).toHaveBeenCalledWith(
+      mcpManager,
+      expect.objectContaining({
+        workspaceScope: { enabled: true, include: ['ref/'], exclude: [] },
+        allowedSkillPaths: ['Skills/pkg/SKILL.md'],
+        blockedCommandPrefixes: ['rm -rf'],
+      }),
+    )
+  })
+
+  it('drops the assistant boundary in a module chat mode', async () => {
+    const mcpManager = makeMcpManager()
+    const createGateway = jest.fn(() => makeGateway())
+    await buildVoiceToolBridge({
+      mcpManager,
+      conversationId: 'c1',
+      app: {} as any,
+      assistant: {
+        id: 'a1',
+        workspaceScope: { enabled: true, include: ['ref/'], exclude: [] },
+      } as any,
+      chatModeRuntime: makeRuntime({ moduleChatModeId: 'mod:mode' }),
+      settings: makeSettings(),
+      createGateway,
+    })
+
+    expect(createGateway).toHaveBeenCalledWith(
+      mcpManager,
+      expect.objectContaining({
+        workspaceScope: undefined,
+        allowedSkillPaths: [],
+      }),
+    )
+  })
+
   it('is inert when voice tools are disabled', async () => {
     const mcpManager = makeMcpManager()
     const gateway = makeGateway()
     const bridge = await buildVoiceToolBridge({
       mcpManager,
       conversationId: 'c1',
+      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
+      // never touched.
+      app: {} as any,
+      assistant: null,
       chatModeRuntime: makeRuntime(),
       settings: makeSettings(false),
       createGateway: () => gateway,

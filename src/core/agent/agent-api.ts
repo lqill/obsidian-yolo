@@ -914,7 +914,7 @@ function mapToolStatus(
   }
 }
 
-async function resolveAllowedSkillPaths({
+export async function resolveAllowedSkillPaths({
   app,
   settings,
   assistant,

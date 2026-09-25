@@ -3,8 +3,8 @@ import { LIVE_INPUT_SAMPLE_RATE } from '../geminiLiveProtocol'
 
 import { MIC_WORKLET_SOURCE } from './micWorklet'
 import {
-  bytesToBase64,
   float32ToInt16,
+  int16ToBase64,
   int16ToFloat32,
   resampleLinear,
 } from './pcm'
@@ -104,11 +104,8 @@ export class PcmMicCapture {
     merged.set(frame, this.pending.length)
     let offset = 0
     while (merged.length - offset >= FRAME_SIZE) {
-      const slice = merged.subarray(offset, offset + FRAME_SIZE)
       this.options.onFrame(
-        bytesToBase64(
-          new Uint8Array(slice.buffer, slice.byteOffset, slice.byteLength),
-        ),
+        int16ToBase64(merged.subarray(offset, offset + FRAME_SIZE)),
       )
       offset += FRAME_SIZE
     }

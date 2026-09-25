@@ -2699,4 +2699,13 @@ export const zh: TranslationKeys = {
   voiceToolRunning: '正在使用工具',
   voiceDesktopOnly: '语音模式仅支持桌面端。',
   voiceUnavailable: '请在设置中选择一个 Gemini API 密钥提供商以使用语音模式。',
+  voiceProviderUnsupported:
+    '语音模式需要配置了 API 密钥的 Gemini 提供商；暂不支持 OAuth 提供商。',
+  voiceApiKeyMissing: '所选的 Gemini 提供商没有 API 密钥。',
+  voiceModelMissing: '请在语音设置中填写 Live 模型。',
+  voiceCustomBaseUrlUnsupported:
+    '语音模式需要使用 Gemini 默认基础地址；自定义地址与代理无法承载 Live API。',
+  voiceMicUnavailable: '无法启动麦克风。',
+  voiceSessionClosed: '语音会话已关闭。',
+  voiceToolsUnavailable: '语音工具不可用。',
 }

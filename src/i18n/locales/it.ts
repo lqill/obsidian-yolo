@@ -2574,4 +2574,13 @@ export const it: DeepPartial<TranslationKeys> = {
   voiceDesktopOnly: 'La modalità vocale è disponibile solo su desktop.',
   voiceUnavailable:
     'Seleziona un provider Gemini con chiave API nelle Impostazioni per usare la modalità vocale.',
+  voiceProviderUnsupported:
+    'La modalità vocale richiede un provider Gemini con chiave API; i provider OAuth non sono supportati.',
+  voiceApiKeyMissing: 'Il provider Gemini selezionato non ha una chiave API.',
+  voiceModelMissing: 'Imposta un modello Live nelle impostazioni vocali.',
+  voiceCustomBaseUrlUnsupported:
+    'La modalità vocale richiede l’URL di base Gemini predefinito; URL personalizzati e proxy non possono trasportare la Live API.',
+  voiceMicUnavailable: 'Impossibile avviare il microfono.',
+  voiceSessionClosed: 'La sessione vocale è stata chiusa.',
+  voiceToolsUnavailable: 'Gli strumenti vocali non sono disponibili.',
 }

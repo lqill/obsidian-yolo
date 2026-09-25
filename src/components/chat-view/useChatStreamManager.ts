@@ -13,10 +13,12 @@ import { useMcp } from '../../contexts/mcp-context'
 import { usePlugin } from '../../contexts/plugin-context'
 import { useSettings } from '../../contexts/settings-context'
 import { resolveAssistantIncludeCurrentFileContent } from '../../core/agent/assistant-capabilities'
-import { DEFAULT_BLOCKED_PREFIXES } from '../../core/agent/bash/command-classifier'
 import type { ChatMode } from '../../core/agent/chat-mode'
 import { isModuleChatMode } from '../../core/agent/chat-mode'
-import { resolveWorkspaceScopeForRuntimeInput } from '../../core/agent/chat-runtime-inputs'
+import {
+  resolveBlockedCommandPrefixes,
+  resolveWorkspaceScopeForRuntimeInput,
+} from '../../core/agent/chat-runtime-inputs'
 import {
   type ChatModeRuntime,
   resolveChatModeRuntime,
@@ -801,8 +803,7 @@ export function useChatStreamManager({
           toolServerPreferences: chatModeRuntime.toolServerPreferences,
           runtimeMode: chatModeRuntime.runtimeMode,
           bypassToolApproval: chatModeRuntime.bypassToolApproval,
-          blockedCommandPrefixes: settings.mcp.builtinCapabilityOptions.terminal
-            ?.blockedPrefixes ?? [...DEFAULT_BLOCKED_PREFIXES],
+          blockedCommandPrefixes: resolveBlockedCommandPrefixes(settings),
           // The assistant selector stays populated in settings even while a
           // module chat mode is active (D4 hides it in the UI); its
           // workspace scope must not leak into a run where the assistant

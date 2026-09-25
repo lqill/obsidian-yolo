@@ -2863,4 +2863,13 @@ export const en: TranslationKeys = {
   voiceDesktopOnly: 'Voice mode is available on desktop only.',
   voiceUnavailable:
     'Select a Gemini API-key provider in Settings to use voice mode.',
+  voiceProviderUnsupported:
+    'Voice mode needs a Gemini provider configured with an API key; OAuth providers are not supported.',
+  voiceApiKeyMissing: 'The selected Gemini provider has no API key.',
+  voiceModelMissing: 'Set a Live model in Voice settings.',
+  voiceCustomBaseUrlUnsupported:
+    'Voice mode requires the default Gemini base URL; custom base URLs and proxies cannot carry the Live API.',
+  voiceMicUnavailable: 'Could not start the microphone.',
+  voiceSessionClosed: 'The voice session closed.',
+  voiceToolsUnavailable: 'Voice tools are unavailable.',
 }
