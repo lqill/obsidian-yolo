@@ -18,14 +18,12 @@ export const useVoiceSession = ({
   sessionController,
   conversationId,
   liveModelId,
-  onVoiceActiveChange,
   stampTimeContext,
   resolveToolBridge,
 }: {
   sessionController: ChatSessionController
   conversationId: string
   liveModelId: string
-  onVoiceActiveChange: (active: boolean) => void
   stampTimeContext?: (message: ChatUserMessage) => ChatUserMessage
   resolveToolBridge?: () => Promise<VoiceToolBridge | null>
 }) => {
@@ -104,12 +102,10 @@ export const useVoiceSession = ({
       const resolution = resolveLiveConnection({ settings })
       if (!resolution.ok) {
         voiceSessionStore.setStatus('error', { failure: resolution.reason })
-        onVoiceActiveChange(true)
         return
       }
       pinnedConversationRef.current = conversationId
       voiceSessionStore.setConversationId(conversationId)
-      onVoiceActiveChange(true)
       let toolBridge: VoiceToolBridge | null = null
       try {
         toolBridge = (await resolveToolBridge?.()) ?? null
@@ -120,7 +116,6 @@ export const useVoiceSession = ({
           failure: 'tools_unavailable',
           detail: error instanceof Error ? error.message : String(error),
         })
-        onVoiceActiveChange(true)
         return
       }
       const runtime = createGeminiLiveRuntime({
@@ -140,7 +135,6 @@ export const useVoiceSession = ({
         failure: 'start_failed',
         detail: error instanceof Error ? error.message : String(error),
       })
-      onVoiceActiveChange(true)
     } finally {
       startingRef.current = false
     }
@@ -148,7 +142,6 @@ export const useVoiceSession = ({
     settings,
     conversationId,
     commitTurn,
-    onVoiceActiveChange,
     openTurn,
     resolveToolBridge,
     sessionController,
@@ -170,8 +163,7 @@ export const useVoiceSession = ({
       ])
     }
     voiceSessionStore.reset()
-    onVoiceActiveChange(false)
-  }, [onVoiceActiveChange, sessionController])
+  }, [sessionController])
 
   useEffect(() => {
     const pinned = pinnedConversationRef.current

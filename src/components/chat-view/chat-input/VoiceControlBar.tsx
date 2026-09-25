@@ -1,8 +1,6 @@
-import { useSyncExternalStore } from 'react'
-
 import { useLanguage } from '../../../contexts/language-context'
+import { useRealtimeVoiceSnapshot } from '../../../core/realtime'
 import type { VoiceFailure } from '../../../core/realtime/voiceSessionStore'
-import { voiceSessionStore } from '../../../core/realtime/voiceSessionStore'
 
 /** Core names the failure; the wording lives here, resolved at render time. */
 const FAILURE_KEY: Record<VoiceFailure, string> = {
@@ -26,11 +24,7 @@ export const VoiceControlBar = ({
   onEnd: () => void
 }) => {
   const { t } = useLanguage()
-  const snapshot = useSyncExternalStore(
-    voiceSessionStore.subscribe,
-    voiceSessionStore.getSnapshot,
-    voiceSessionStore.getSnapshot,
-  )
+  const snapshot = useRealtimeVoiceSnapshot()
   if (snapshot.status === 'idle') return null
   const error = snapshot.error
   const errorText = error

@@ -46,6 +46,8 @@ export type ChatHeaderProps = {
   onChangeSparkleView: (view: SparkleView) => void
   activeRuntimeId: ChatRuntimeId
   handleRuntimeChange: (runtimeId: ChatRuntimeId) => void
+  /** Locks the runtime picker (e.g. while a realtime session owns the surface). */
+  runtimeSelectorDisabled?: boolean
   lastCliRuntimeIdRef: MutableRefObject<CliRuntimeId>
   cliRuntimeAvailable: boolean
   cliRuntimeScope: CliRuntimeScope | undefined
@@ -113,6 +115,7 @@ export function ChatHeader({
   onChangeSparkleView,
   activeRuntimeId,
   handleRuntimeChange,
+  runtimeSelectorDisabled = false,
   lastCliRuntimeIdRef,
   cliRuntimeAvailable,
   cliRuntimeScope,
@@ -229,6 +232,7 @@ export function ChatHeader({
           <RuntimeSelector
             currentRuntimeId={activeRuntimeId}
             onRuntimeChange={handleRuntimeChange}
+            disabled={runtimeSelectorDisabled}
           />
         ) : null}
       </div>

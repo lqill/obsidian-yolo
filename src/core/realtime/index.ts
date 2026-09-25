@@ -66,19 +66,26 @@ export const createGeminiLiveRuntime = (
   return session
 }
 
-export { voiceSessionStore, VoiceSessionStore } from './voiceSessionStore'
 export { resolveLiveConnection } from './resolveLiveConnection'
 export {
   buildVoiceHistoryTurns,
   normalizeVoiceHistoryTurns,
 } from './voiceHistory'
+export {
+  useRealtimeUserText,
+  useRealtimeVoiceSnapshot,
+  useRealtimeVoiceStatus,
+} from './useRealtimeVoice'
 export type { VoiceTurn } from './GeminiLiveSession'
 export type { GeminiLiveHistoryTurn } from './geminiLiveProtocol'
 export type { ResolvedLiveConnection } from './resolveLiveConnection'
 export type {
+  VoiceError,
+  VoiceFailure,
   VoiceLiveTurn,
   VoicePartialTextKind,
   VoiceSessionSnapshot,
   VoiceSessionStatus,
+  VoiceStatusSnapshot,
 } from './voiceSessionStore'
 export type { VoiceToolBridge } from './voiceToolBridge'

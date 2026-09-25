@@ -6,14 +6,10 @@ jest.mock('../../../contexts/language-context', () => ({
   }),
 }))
 
-import { voiceSessionStore } from '../../../core/realtime/voiceSessionStore'
-
 import { ChatModeSelect } from './ChatModeSelect'
 
-describe('ChatModeSelect voice lock', () => {
-  afterEach(() => voiceSessionStore.reset())
-
-  it('leaves the trigger enabled while voice is idle', () => {
+describe('ChatModeSelect lock', () => {
+  it('leaves the trigger enabled by default', () => {
     const html = renderToStaticMarkup(
       <ChatModeSelect
         mode="agent"
@@ -26,15 +22,14 @@ describe('ChatModeSelect voice lock', () => {
     expect(html).not.toContain('disabled')
   })
 
-  it('disables the trigger while a voice session is active', () => {
-    voiceSessionStore.setStatus('connecting')
-
+  it('disables the trigger when the surface locks it', () => {
     const html = renderToStaticMarkup(
       <ChatModeSelect
         mode="agent"
         onChange={() => {}}
         yoloByMode={{}}
         onYoloChange={() => {}}
+        disabled
       />,
     )
 

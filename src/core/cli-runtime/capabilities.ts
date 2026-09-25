@@ -47,6 +47,11 @@ export type ChatRuntimeCapabilities = Readonly<{
   supportsImageAttachments: boolean
   /** Main input allows queueing a message while a run is in flight (B1). */
   supportsQueueWhileGenerating: boolean
+  /**
+   * Runs a realtime voice session (Gemini Live) alongside the chat: shows the
+   * mic control, and locks the runtime and mode pickers while one is live.
+   */
+  supportsRealtimeVoice: boolean
 }>
 
 export const RUNTIME_CAPABILITIES: Record<
@@ -70,6 +75,7 @@ export const RUNTIME_CAPABILITIES: Record<
     skipsImageModelCapabilityCheck: false,
     supportsImageAttachments: true,
     supportsQueueWhileGenerating: true,
+    supportsRealtimeVoice: true,
   },
   'claude-code': {
     supportsPlanMode: true,
@@ -88,6 +94,7 @@ export const RUNTIME_CAPABILITIES: Record<
     skipsImageModelCapabilityCheck: true,
     supportsImageAttachments: true,
     supportsQueueWhileGenerating: false,
+    supportsRealtimeVoice: false,
   },
   codex: {
     supportsPlanMode: false,
@@ -106,6 +113,7 @@ export const RUNTIME_CAPABILITIES: Record<
     skipsImageModelCapabilityCheck: true,
     supportsImageAttachments: true,
     supportsQueueWhileGenerating: false,
+    supportsRealtimeVoice: false,
   },
   hermes: {
     supportsPlanMode: false,
@@ -124,6 +132,7 @@ export const RUNTIME_CAPABILITIES: Record<
     skipsImageModelCapabilityCheck: true,
     supportsImageAttachments: true,
     supportsQueueWhileGenerating: false,
+    supportsRealtimeVoice: false,
   },
   pi: {
     supportsPlanMode: false,
@@ -148,6 +157,7 @@ export const RUNTIME_CAPABILITIES: Record<
     skipsImageModelCapabilityCheck: true,
     supportsImageAttachments: true,
     supportsQueueWhileGenerating: false,
+    supportsRealtimeVoice: false,
   },
   // oh-my-pi is a hard fork of pi speaking the same RPC protocol, so it
   // exposes exactly the same product surface — kept field-for-field identical
@@ -169,6 +179,7 @@ export const RUNTIME_CAPABILITIES: Record<
     skipsImageModelCapabilityCheck: true,
     supportsImageAttachments: true,
     supportsQueueWhileGenerating: false,
+    supportsRealtimeVoice: false,
   },
   grok: {
     supportsPlanMode: false,
@@ -187,6 +198,7 @@ export const RUNTIME_CAPABILITIES: Record<
     skipsImageModelCapabilityCheck: true,
     supportsImageAttachments: false,
     supportsQueueWhileGenerating: false,
+    supportsRealtimeVoice: false,
   },
 }
 

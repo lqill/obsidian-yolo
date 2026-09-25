@@ -4,6 +4,7 @@ import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import { useLanguage } from '../../contexts/language-context'
+import { useRealtimeUserText } from '../../core/realtime'
 import { ChatSelectedSkill, ChatUserMessage } from '../../types/chat'
 import { UserMessageDisplaySnapshot } from '../../types/chat-timeline'
 import { Mentionable } from '../../types/mentionable'
@@ -13,7 +14,6 @@ import type { ChatUserInputRef } from './chat-input/ChatUserInput'
 import { editorStateToPlainText } from './chat-input/utils/editor-state-to-plain-text'
 import EditableUserMessageItem from './EditableUserMessageItem'
 import UserMessageCard from './UserMessageCard'
-import { useVoiceLiveUserText } from './useVoiceLiveText'
 
 export type UserMessageItemProps = {
   message: ChatUserMessage
@@ -184,7 +184,7 @@ function UserMessageItem({
   // A live voice turn's user message is added to the conversation the moment
   // the turn opens, so the transcript has a bubble to stream into; its text
   // comes from the session's partial transcript rather than the message.
-  const liveText = useVoiceLiveUserText(message.id)
+  const liveText = useRealtimeUserText(message.id)
 
   const snapshot = useMemo<UserMessageDisplaySnapshot>(() => {
     const base: UserMessageDisplaySnapshot = {

@@ -51,8 +51,6 @@ jest.mock('../../assets/provider-icons/xai.svg', () => ({
 import { Platform } from 'obsidian'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
-
 import {
   RuntimeSelector,
   getRuntimeSelectorRows,
@@ -72,7 +70,6 @@ describe('RuntimeSelector', () => {
 
   afterEach(() => {
     Platform.isDesktop = originalIsDesktop
-    voiceSessionStore.reset()
   })
 
   it('exposes no provider without desktop capability', () => {
@@ -205,7 +202,7 @@ describe('RuntimeSelector', () => {
     expect(html).not.toContain('CLI')
   })
 
-  it('leaves the trigger enabled while voice is idle', () => {
+  it('leaves the trigger enabled by default', () => {
     Platform.isDesktop = true
 
     const html = renderToStaticMarkup(
@@ -215,12 +212,15 @@ describe('RuntimeSelector', () => {
     expect(html).not.toContain('disabled')
   })
 
-  it('disables the trigger while a voice session is active', () => {
+  it('locks the trigger when the surface locks it', () => {
     Platform.isDesktop = true
-    voiceSessionStore.setStatus('connecting')
 
     const html = renderToStaticMarkup(
-      <RuntimeSelector currentRuntimeId="codex" onRuntimeChange={() => {}} />,
+      <RuntimeSelector
+        currentRuntimeId="codex"
+        onRuntimeChange={() => {}}
+        disabled
+      />,
     )
 
     expect(html).toContain('disabled=""')

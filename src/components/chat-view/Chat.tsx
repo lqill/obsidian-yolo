@@ -42,7 +42,7 @@ import {
   isCliRuntimeAvailable,
 } from '../../core/cli-runtime'
 import { resolveLocalizedText } from '../../core/modules/moduleI18n'
-import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
+import { useRealtimeVoiceStatus } from '../../core/realtime'
 import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 import type { ChatLeafPlacement } from '../../features/chat/chatLeafSessionManager'
 import { useChatHighlightSession } from '../../features/editor/selection-highlight/useChatHighlightSession'
@@ -583,12 +583,12 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     return late
   }, [])
   const cliSubmitContextRef = useRef<ChatSessionCliContext | null>(null)
-  const [isVoiceActive, setIsVoiceActive] = useState(false)
-  const isVoiceActiveRef = useRef(false)
-  const handleVoiceActiveChange = useCallback((active: boolean) => {
-    isVoiceActiveRef.current = active
-    setIsVoiceActive(active)
-  }, [])
+  // The session's own state is the single source of truth for "voice is on";
+  // the controller reads it through a getter, so the lock and the mic control
+  // can never disagree with what the session is actually doing.
+  const realtimeVoice = useRealtimeVoiceStatus()
+  const realtimeActiveRef = useRef(false)
+  realtimeActiveRef.current = realtimeVoice.isActive
   const sessionControllerDepsRef = useRef<ChatSessionControllerDeps>()
   const sessionControllerDeps = (sessionControllerDepsRef.current ??= {
     getAgentService: () => plugin.getAgentService(),
@@ -620,7 +620,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     setQueryProgress: (action) => setQueryProgress(action),
     runtimeNavigationGenerationRef,
     getCliSubmitContext: () => cliSubmitContextRef.current,
-    isVoiceActive: () => isVoiceActiveRef.current,
+    isVoiceActive: () => realtimeActiveRef.current,
   })
   const sessionController = (sessionControllerRef.current ??=
     new ChatSessionController(
@@ -651,7 +651,6 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     sessionController,
     conversationId: currentConversationId,
     liveModelId: settings.voice.model,
-    onVoiceActiveChange: handleVoiceActiveChange,
     stampTimeContext: (message) =>
       stampUserMessageTimeContext(message, settings.timeContextEnabled),
     resolveToolBridge: () =>
@@ -660,18 +659,18 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         : Promise.resolve(null),
   })
   const handleToggleVoice = useCallback(() => {
-    if (isVoiceActiveRef.current) {
+    if (realtimeActiveRef.current) {
       voiceSession.stop()
     } else {
       void voiceSession.start()
     }
   }, [voiceSession])
   const handleToggleVoiceMute = useCallback(() => {
-    voiceSession.setMuted(!voiceSessionStore.getSnapshot().muted)
-  }, [voiceSession])
+    voiceSession.setMuted(!realtimeVoice.muted)
+  }, [realtimeVoice.muted, voiceSession])
   const voiceSendTextRef = useRef<((text: string) => boolean) | null>(null)
   voiceSendTextRef.current = (text) => {
-    if (!isVoiceActiveRef.current) return false
+    if (!realtimeActiveRef.current) return false
     voiceSession.sendText(text)
     return true
   }
@@ -1690,6 +1689,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
       onChangeSparkleView={setSparkleView}
       activeRuntimeId={activeRuntimeId}
       handleRuntimeChange={handleRuntimeChange}
+      runtimeSelectorDisabled={realtimeVoice.isActive}
       lastCliRuntimeIdRef={lastCliRuntimeIdRef}
       cliRuntimeAvailable={cliRuntimeAvailable}
       cliRuntimeScope={cliRuntimeScope}
@@ -1863,6 +1863,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   // capability table (see B1/B2 in the step-2 runtime-contract plan) rather
   // than branched inline; only "which data source" ternaries stay here.
   const mainInputCapabilities = RUNTIME_CAPABILITIES[activeRuntimeId]
+  const realtimeVoiceSupported = mainInputCapabilities.supportsRealtimeVoice
   const activeSurfaceEmpty = isCliRuntimeActive
     ? (activeCliConversationSnapshot?.messages.length ?? 0) === 0 &&
       !isCliRunActive
@@ -2004,12 +2005,12 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         reasoningLevel={reasoningLevel}
         onReasoningChange={handleMainInputReasoningChange}
         showReasoningSelect={mainInputCapabilities.supportsReasoningSelect}
-        isVoiceActive={isCliRuntimeActive ? false : isVoiceActive}
-        onToggleVoice={isCliRuntimeActive ? undefined : handleToggleVoice}
+        isVoiceActive={realtimeVoiceSupported && realtimeVoice.isActive}
+        onToggleVoice={realtimeVoiceSupported ? handleToggleVoice : undefined}
         onToggleVoiceMute={
-          isCliRuntimeActive ? undefined : handleToggleVoiceMute
+          realtimeVoiceSupported ? handleToggleVoiceMute : undefined
         }
-        onEndVoice={isCliRuntimeActive ? undefined : voiceSession.stop}
+        onEndVoice={realtimeVoiceSupported ? voiceSession.stop : undefined}
         runtimeControls={
           isCliRuntimeActive ? (
             <CliRuntimeControls

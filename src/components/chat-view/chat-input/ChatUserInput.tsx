@@ -696,6 +696,7 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
           showYoloToggle={showYoloToggle}
           side="top"
           sideOffset={8}
+          disabled={isVoiceActive === true}
         />
       ) : null
 

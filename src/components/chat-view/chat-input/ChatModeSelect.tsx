@@ -17,7 +17,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react'
 
 import { useLanguage } from '../../../contexts/language-context'
@@ -35,7 +34,6 @@ import {
   isToolChatMode,
 } from '../../../core/agent/chat-mode'
 import type { RegisteredModuleChatModeV1 } from '../../../core/modules/moduleChatModeRegistry'
-import { voiceSessionStore } from '../../../core/realtime/voiceSessionStore'
 import { getNodeWindow } from '../../../utils/dom/window-context'
 import { ObsidianIcon } from '../../common/ObsidianIcon'
 import { YoloDropdownContent } from '../../common/popover'
@@ -372,6 +370,8 @@ export const ChatModeSelect = forwardRef<
     sideOffset?: number
     align?: 'start' | 'center' | 'end'
     alignOffset?: number
+    /** Locks the picker (e.g. while a realtime session owns the chat surface). */
+    disabled?: boolean
   }
 >(
   (
@@ -393,17 +393,12 @@ export const ChatModeSelect = forwardRef<
       sideOffset = 4,
       align = 'start',
       alignOffset = -12,
+      disabled = false,
     },
     ref,
   ) => {
     const { t } = useLanguage()
     const [isOpen, setIsOpen] = useState(false)
-    const voiceSnapshot = useSyncExternalStore(
-      voiceSessionStore.subscribe,
-      voiceSessionStore.getSnapshot,
-      voiceSessionStore.getSnapshot,
-    )
-    const voiceActive = voiceSnapshot.status !== 'idle'
     const triggerRef = useRef<HTMLButtonElement | null>(null)
     const visibleOptions = useMemo(
       () =>
@@ -569,7 +564,7 @@ export const ChatModeSelect = forwardRef<
           className="yolo-chat-input-model-select yolo-chat-mode-select"
           data-mode={mode}
           data-yolo={isYoloActive ? 'on' : 'off'}
-          disabled={voiceActive}
+          disabled={disabled}
           onKeyDown={handleTriggerKeyDown}
         >
           <div className="yolo-chat-input-model-select__model-name">

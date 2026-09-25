@@ -60,12 +60,50 @@ const IDLE: VoiceSessionSnapshot = {
 }
 
 /**
+ * The coarse facts about a session, without the per-frame ones. Consumers that
+ * only need to know whether a session is live (the chat shell, the picker
+ * locks) subscribe to this: the mic meter and the transcripts write at frame
+ * cadence and must not re-render the chat tree.
+ */
+export type VoiceStatusSnapshot = Readonly<{
+  status: VoiceSessionStatus
+  /** A session exists — running, starting, or showing an error. */
+  isActive: boolean
+  muted: boolean
+  activeToolName: string | null
+  error: VoiceError | null
+  /** Which messages the live transcript streams into; null between turns. */
+  liveTurn: VoiceLiveTurn | null
+}>
+
+const statusOf = (snapshot: VoiceSessionSnapshot): VoiceStatusSnapshot => ({
+  status: snapshot.status,
+  isActive: snapshot.status !== 'idle',
+  muted: snapshot.muted,
+  activeToolName: snapshot.activeToolName,
+  error: snapshot.error,
+  liveTurn: snapshot.liveTurn,
+})
+
+const isSameStatus = (
+  previous: VoiceStatusSnapshot,
+  next: VoiceStatusSnapshot,
+): boolean =>
+  previous.status === next.status &&
+  previous.isActive === next.isActive &&
+  previous.muted === next.muted &&
+  previous.activeToolName === next.activeToolName &&
+  previous.error === next.error &&
+  previous.liveTurn === next.liveTurn
+
+/**
  * Module-level singleton. Popouts share the plugin JS realm, so one store
  * coordinates the single-session lock across windows without touching main.ts.
  * Transient only — never conversation state.
  */
 export class VoiceSessionStore {
   private snapshot: VoiceSessionSnapshot = IDLE
+  private statusSnapshot: VoiceStatusSnapshot = statusOf(IDLE)
   private readonly listeners = new Set<() => void>()
   /**
    * Partial transcripts get their own listeners: the mic-level meter writes to
@@ -76,12 +114,23 @@ export class VoiceSessionStore {
     VoicePartialTextKind,
     Set<() => void>
   > = { user: new Set(), assistant: new Set() }
+  private readonly statusListeners = new Set<() => void>()
 
   getSnapshot = (): VoiceSessionSnapshot => this.snapshot
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /** Referentially stable while only frame-rate fields change. */
+  getStatusSnapshot = (): VoiceStatusSnapshot => this.statusSnapshot
+
+  subscribeStatus = (listener: () => void): (() => void) => {
+    this.statusListeners.add(listener)
+    return () => {
+      this.statusListeners.delete(listener)
+    }
   }
 
   /** The live text of one role; '' outside a live turn. */
@@ -109,6 +158,11 @@ export class VoiceSessionStore {
     }
     if (this.snapshot.partialAssistantText !== previous.partialAssistantText) {
       for (const listener of [...this.partialListeners.assistant]) listener()
+    }
+    const status = statusOf(this.snapshot)
+    if (!isSameStatus(this.statusSnapshot, status)) {
+      this.statusSnapshot = status
+      for (const listener of [...this.statusListeners]) listener()
     }
     for (const listener of this.listeners) listener()
   }
