@@ -1038,6 +1038,8 @@ export class AgentSessionService {
    * tool boundary、完成、分支这些生命周期都由本单例掌握。
    */
   private readonly assistantRenderStreams = new AssistantRenderStreamStore()
+  /** Messages streamed by a surface that is not an agent run — see below. */
+  private readonly externalAssistantStreams = new Map<string, Set<string>>()
 
   constructor(private readonly options: AgentSessionServiceOptions = {}) {}
 
@@ -1049,6 +1051,43 @@ export class AgentSessionService {
       conversationId,
       messageId,
     )
+  }
+
+  /**
+   * Registers an assistant message whose text is produced outside an agent run
+   * (a realtime voice session). While registered, the message counts as
+   * streaming: the structural fold-back leaves its entry alone instead of
+   * overwriting it with the — still empty — conversation content, and the
+   * terminal pass keeps it live until the surface ends it.
+   */
+  beginExternalAssistantStream(
+    conversationId: string,
+    messageId: string,
+  ): void {
+    const messageIds =
+      this.externalAssistantStreams.get(conversationId) ?? new Set<string>()
+    messageIds.add(messageId)
+    this.externalAssistantStreams.set(conversationId, messageIds)
+  }
+
+  endExternalAssistantStream(conversationId: string, messageId: string): void {
+    const messageIds = this.externalAssistantStreams.get(conversationId)
+    if (!messageIds) {
+      return
+    }
+    messageIds.delete(messageId)
+    if (messageIds.size === 0) {
+      this.externalAssistantStreams.delete(conversationId)
+    }
+  }
+
+  /** One display update from such a surface; no conversation state is touched. */
+  publishExternalAssistantStream(input: {
+    conversationId: string
+    messageId: string
+    content: string
+  }): void {
+    this.assistantRenderStreams.publish({ ...input, reasoning: '' })
   }
 
   subscribeAssistantRenderStream(
@@ -1085,6 +1124,7 @@ export class AgentSessionService {
     this.droppedConversationIds.add(conversationId)
     this.evictSystemPromptSnapshot(conversationId)
     this.assistantRenderStreams.dropConversation(conversationId)
+    this.externalAssistantStreams.delete(conversationId)
     this.cancelPersistTimer(conversationId)
 
     const entry = this.conversationEntries.get(conversationId)
@@ -2781,9 +2821,17 @@ export class AgentSessionService {
   private syncAssistantRenderStreamValues(
     state: AgentConversationState,
   ): ReadonlySet<string> {
-    const streamingMessageIds = new Set<string>()
+    const externalMessageIds = this.externalAssistantStreams.get(
+      state.conversationId,
+    )
+    const streamingMessageIds = new Set<string>(externalMessageIds ?? [])
     for (const message of state.messages) {
       if (message.role !== 'assistant') {
+        continue
+      }
+      // An externally streamed message owns its own text: folding the (still
+      // empty) conversation content back would wipe what the surface published.
+      if (externalMessageIds?.has(message.id)) {
         continue
       }
       // 会话没在跑就不可能有活的流。这一条同时覆盖了"最后一条消息的

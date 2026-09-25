@@ -22,8 +22,8 @@ const getNoText = (): string => ''
  * Module-level so `useSyncExternalStore` sees a stable identity across renders.
  */
 const subscribeUserText = (listener: () => void): (() => void) =>
-  voiceSessionStore.subscribePartialText('user', listener)
-const getUserText = (): string => voiceSessionStore.getPartialText('user')
+  voiceSessionStore.subscribePartialUser(listener)
+const getUserText = (): string => voiceSessionStore.getPartialUserText()
 
 /**
  * Whether a session is live, plus the facts the chat surface reads from it

@@ -20,7 +20,6 @@ import {
   type StreamingContentSource,
   useAssistantStreamedContent,
 } from './useAssistantRenderStream'
-import { useVoiceLiveAssistantContent } from './useVoiceLiveText'
 
 function hasRenderableAssistantContent(blocks: ParsedTagContent[]): boolean {
   return blocks.some((block) => {
@@ -93,23 +92,14 @@ export default function AssistantMessageContent({
   // 生成中的正文不再随会话快照到达：它是一条按 conversationId + messageId
   // 索引的展示流。annotations 会重写正文（注记标记插入），所以它一旦存在就
   // 必须关闭命令式源，退回按快照渲染。
-  const streamedByAgent = useAssistantStreamedContent({
-    conversationId,
-    messageId,
-    isStreaming: generationState === 'streaming',
-    content,
-    allowLiveSource: !annotations,
-  })
-  // Voice is a separate execution surface with its own live channel (the
-  // session's partial transcripts), so a voice turn never publishes into the
-  // agent's render stream. When this message is the one being spoken, its live
-  // text comes from there instead.
-  const streamedByVoice = useVoiceLiveAssistantContent({
-    conversationId,
-    messageId,
-  })
   const { content: streamedContent, contentSource } =
-    streamedByVoice ?? streamedByAgent
+    useAssistantStreamedContent({
+      conversationId,
+      messageId,
+      isStreaming: generationState === 'streaming',
+      content,
+      allowLiveSource: !annotations,
+    })
 
   const annotatedContent = useMemo(
     () => injectAnnotationMarkers(streamedContent, annotations),

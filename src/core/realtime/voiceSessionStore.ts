@@ -3,8 +3,6 @@ import type { LiveConnectionFailure } from './resolveLiveConnection'
 
 export type VoiceSessionStatus = 'idle' | 'connecting' | 'ready' | 'error'
 
-export type VoicePartialTextKind = 'user' | 'assistant'
-
 /**
  * Why a voice session failed. Core names the failure; the UI owns the wording,
  * so the store never carries a user-visible string of our own. `detail` holds
@@ -39,8 +37,13 @@ export type VoiceSessionSnapshot = {
   status: VoiceSessionStatus
   muted: boolean
   micLevel: number
+  /**
+   * The spoken user text of the live turn. The assistant's side of the
+   * transcript is not here: it streams through the agent's own render stream
+   * (`AssistantRenderStreamStore`), so both text chat and voice drive the same
+   * bubble.
+   */
   partialUserText: string
-  partialAssistantText: string
   liveTurn: VoiceLiveTurn | null
   error: VoiceError | null
   activeToolName: string | null
@@ -52,7 +55,6 @@ const IDLE: VoiceSessionSnapshot = {
   muted: false,
   micLevel: 0,
   partialUserText: '',
-  partialAssistantText: '',
   liveTurn: null,
   error: null,
   activeToolName: null,
@@ -106,14 +108,11 @@ export class VoiceSessionStore {
   private statusSnapshot: VoiceStatusSnapshot = statusOf(IDLE)
   private readonly listeners = new Set<() => void>()
   /**
-   * Partial transcripts get their own listeners: the mic-level meter writes to
+   * The user transcript has its own listener set: the mic-level meter writes to
    * the same store at frame cadence, and a subscriber that only cares about the
    * text must not be woken (or re-render) for level updates.
    */
-  private readonly partialListeners: Record<
-    VoicePartialTextKind,
-    Set<() => void>
-  > = { user: new Set(), assistant: new Set() }
+  private readonly userTextListeners = new Set<() => void>()
   private readonly statusListeners = new Set<() => void>()
 
   getSnapshot = (): VoiceSessionSnapshot => this.snapshot
@@ -133,20 +132,13 @@ export class VoiceSessionStore {
     }
   }
 
-  /** The live text of one role; '' outside a live turn. */
-  getPartialText = (kind: VoicePartialTextKind): string =>
-    kind === 'user'
-      ? this.snapshot.partialUserText
-      : this.snapshot.partialAssistantText
+  /** The spoken user text of the live turn; '' outside a live turn. */
+  getPartialUserText = (): string => this.snapshot.partialUserText
 
-  subscribePartialText = (
-    kind: VoicePartialTextKind,
-    listener: () => void,
-  ): (() => void) => {
-    const listeners = this.partialListeners[kind]
-    listeners.add(listener)
+  subscribePartialUser = (listener: () => void): (() => void) => {
+    this.userTextListeners.add(listener)
     return () => {
-      listeners.delete(listener)
+      this.userTextListeners.delete(listener)
     }
   }
 
@@ -154,10 +146,7 @@ export class VoiceSessionStore {
     const previous = this.snapshot
     this.snapshot = { ...previous, ...patch }
     if (this.snapshot.partialUserText !== previous.partialUserText) {
-      for (const listener of [...this.partialListeners.user]) listener()
-    }
-    if (this.snapshot.partialAssistantText !== previous.partialAssistantText) {
-      for (const listener of [...this.partialListeners.assistant]) listener()
+      for (const listener of [...this.userTextListeners]) listener()
     }
     const status = statusOf(this.snapshot)
     if (!isSameStatus(this.statusSnapshot, status)) {
@@ -187,13 +176,7 @@ export class VoiceSessionStore {
   appendPartialUser = (text: string): void =>
     this.set({ partialUserText: this.snapshot.partialUserText + text })
 
-  appendPartialAssistant = (text: string): void =>
-    this.set({
-      partialAssistantText: this.snapshot.partialAssistantText + text,
-    })
-
-  clearPartials = (): void =>
-    this.set({ partialUserText: '', partialAssistantText: '' })
+  clearPartialUser = (): void => this.set({ partialUserText: '' })
 
   reset = (): void => this.set({ ...IDLE })
 }

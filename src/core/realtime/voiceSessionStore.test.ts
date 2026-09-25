@@ -24,7 +24,7 @@ describe('voiceSessionStore', () => {
     voiceSessionStore.appendPartialUser('hello')
     voiceSessionStore.appendPartialUser(' world')
     expect(voiceSessionStore.getSnapshot().partialUserText).toBe('hello world')
-    voiceSessionStore.clearPartials()
+    voiceSessionStore.clearPartialUser()
     expect(voiceSessionStore.getSnapshot().partialUserText).toBe('')
   })
 
@@ -55,39 +55,40 @@ describe('voiceSessionStore', () => {
     expect(voiceSessionStore.getSnapshot().liveTurn).toBeNull()
   })
 
-  it('wakes partial-text subscribers only when that role’s text changes', () => {
+  it('wakes user-text subscribers only when that text changes', () => {
     const userListener = jest.fn()
-    const assistantListener = jest.fn()
-    const unsubscribeUser = voiceSessionStore.subscribePartialText(
-      'user',
-      userListener,
-    )
-    const unsubscribeAssistant = voiceSessionStore.subscribePartialText(
-      'assistant',
-      assistantListener,
-    )
+    const unsubscribeUser = voiceSessionStore.subscribePartialUser(userListener)
 
     // The mic meter writes to the same store at frame cadence; a text consumer
     // must not be woken by it.
     voiceSessionStore.setMicLevel(0.5)
     voiceSessionStore.setStatus('ready')
     expect(userListener).not.toHaveBeenCalled()
-    expect(assistantListener).not.toHaveBeenCalled()
 
     voiceSessionStore.appendPartialUser('hi')
     expect(userListener).toHaveBeenCalledTimes(1)
-    expect(assistantListener).not.toHaveBeenCalled()
-    expect(voiceSessionStore.getPartialText('user')).toBe('hi')
-
-    voiceSessionStore.appendPartialAssistant('yo')
-    expect(assistantListener).toHaveBeenCalledTimes(1)
-    expect(userListener).toHaveBeenCalledTimes(1)
-    expect(voiceSessionStore.getPartialText('assistant')).toBe('yo')
+    expect(voiceSessionStore.getPartialUserText()).toBe('hi')
 
     unsubscribeUser()
-    unsubscribeAssistant()
     voiceSessionStore.appendPartialUser('!')
     expect(userListener).toHaveBeenCalledTimes(1)
-    expect(voiceSessionStore.getPartialText('user')).toBe('hi!')
+    expect(voiceSessionStore.getPartialUserText()).toBe('hi!')
+  })
+
+  it('wakes status subscribers only when a coarse fact changes', () => {
+    const statusListener = jest.fn()
+    const unsubscribe = voiceSessionStore.subscribeStatus(statusListener)
+
+    voiceSessionStore.setMicLevel(0.5)
+    voiceSessionStore.appendPartialUser('hi')
+    expect(statusListener).not.toHaveBeenCalled()
+
+    voiceSessionStore.setStatus('ready')
+    expect(statusListener).toHaveBeenCalledTimes(1)
+    expect(voiceSessionStore.getStatusSnapshot().isActive).toBe(true)
+
+    unsubscribe()
+    voiceSessionStore.setStatus('idle')
+    expect(statusListener).toHaveBeenCalledTimes(1)
   })
 })

@@ -43,6 +43,7 @@ import {
 } from '../../core/cli-runtime'
 import { resolveLocalizedText } from '../../core/modules/moduleI18n'
 import { useRealtimeVoiceStatus } from '../../core/realtime'
+import type { RealtimeVoiceAssistantStream } from '../../core/realtime'
 import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 import type { ChatLeafPlacement } from '../../features/chat/chatLeafSessionManager'
 import { useChatHighlightSession } from '../../features/editor/selection-highlight/useChatHighlightSession'
@@ -652,10 +653,28 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const voiceToolBridgeFactoryRef = useRef<
     (() => Promise<VoiceToolBridge>) | null
   >(null)
+  const voiceAssistantStream = useMemo<RealtimeVoiceAssistantStream>(
+    () => ({
+      begin: (conversationId, messageId) =>
+        plugin
+          .getAgentService()
+          .beginExternalAssistantStream(conversationId, messageId),
+      end: (conversationId, messageId) =>
+        plugin
+          .getAgentService()
+          .endExternalAssistantStream(conversationId, messageId),
+      publish: (input) =>
+        plugin.getAgentService().publishExternalAssistantStream(input),
+    }),
+    [plugin],
+  )
   const voiceSession = useVoiceSession({
     sessionController,
     conversationId: currentConversationId,
     liveModelId: settings.voice.model,
+    // The agent's own render stream carries the spoken transcript, so a voice
+    // turn drives the same assistant bubble a text turn does.
+    assistantStream: voiceAssistantStream,
     stampTimeContext: (message) =>
       stampUserMessageTimeContext(message, settings.timeContextEnabled),
     resolveToolBridge: () =>

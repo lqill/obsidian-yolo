@@ -39,6 +39,12 @@ export type GeminiLiveSessionOptions = {
   store: VoiceSessionStore
   onTurn: (turn: VoiceTurn) => void
   /**
+   * The assistant's spoken text so far, as it arrives. The conversation's own
+   * render stream carries it to the bubble, so this is a display channel only —
+   * the committed text still comes from `onTurn`.
+   */
+  onAssistantText?: (text: string) => void
+  /**
    * Fired once when a turn opens, before its first transcript delta reaches the
    * store. The caller uses it to put the turn's (still textless) messages into
    * the conversation so the bubbles can stream into them.
@@ -115,7 +121,7 @@ export class GeminiLiveSession {
       this.typedText = ''
       this.spokenUserText = ''
       this.assistantText = ''
-      this.options.store.clearPartials()
+      this.options.store.clearPartialUser()
     }
     this.turnState = 'open'
     if (opensTurn) this.options.onTurnOpen?.()
@@ -157,7 +163,7 @@ export class GeminiLiveSession {
       case 'outputTranscript':
         this.beginTurn()
         this.assistantText += event.text
-        this.options.store.appendPartialAssistant(event.text)
+        this.options.onAssistantText?.(this.assistantText)
         break
       case 'interrupted':
         this.options.player.flush()
@@ -227,7 +233,7 @@ export class GeminiLiveSession {
     this.typedText = ''
     this.spokenUserText = ''
     this.assistantText = ''
-    this.options.store.clearPartials()
+    this.options.store.clearPartialUser()
     this.options.store.setActiveTool(null)
     if (!userText && !assistantText) return
     this.options.onTurn({ userText, assistantText })

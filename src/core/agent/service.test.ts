@@ -2933,3 +2933,85 @@ describe('AgentSessionService streaming merge cost', () => {
     await runPromise
   })
 })
+
+/**
+ * A realtime voice turn streams its assistant text into the same render stream
+ * an agent run uses, while the conversation itself stays idle and its message
+ * keeps an empty `content` until the turn commits.
+ */
+describe('external assistant streams', () => {
+  const streamingAssistant = (content: string): ChatMessage => ({
+    role: 'assistant',
+    id: 'assistant-1',
+    content,
+    metadata: { generationState: 'streaming' },
+  })
+
+  it('keeps the surface’s text when the conversation folds back', () => {
+    const service = new AgentSessionService()
+    service.replaceConversationMessages(
+      'external-1',
+      [streamingAssistant('')],
+      [],
+    )
+    service.beginExternalAssistantStream('external-1', 'assistant-1')
+    service.publishExternalAssistantStream({
+      conversationId: 'external-1',
+      messageId: 'assistant-1',
+      content: 'spo',
+    })
+
+    // A structural publish mid-turn must not fold the empty conversation
+    // content over what the surface has already said.
+    service.replaceConversationMessages(
+      'external-1',
+      [streamingAssistant('')],
+      [],
+    )
+
+    const value = service.getAssistantRenderStream('external-1', 'assistant-1')
+    expect(value?.content).toBe('spo')
+    expect(value?.phase).toBe('streaming')
+  })
+
+  it('settles at the committed text once the surface lets go', () => {
+    const service = new AgentSessionService()
+    const received: Array<{ content: string; phase: string }> = []
+    const unsubscribe = service.subscribeAssistantRenderStream(
+      'external-2',
+      'assistant-1',
+      (value) =>
+        received.push({ content: value.content, phase: value.phase }),
+    )
+    service.beginExternalAssistantStream('external-2', 'assistant-1')
+    service.publishExternalAssistantStream({
+      conversationId: 'external-2',
+      messageId: 'assistant-1',
+      content: 'spo',
+    })
+    expect(received.at(-1)).toEqual({ content: 'spo', phase: 'streaming' })
+
+    service.endExternalAssistantStream('external-2', 'assistant-1')
+
+    // The commit: the conversation now carries the final text, and the same
+    // publish settles the entry at it.
+    service.replaceConversationMessages(
+      'external-2',
+      [
+        {
+          role: 'assistant',
+          id: 'assistant-1',
+          content: 'spoken in full',
+          metadata: { generationState: 'completed' },
+        },
+      ],
+      [],
+    )
+
+    expect(received.at(-1)).toEqual({
+      content: 'spoken in full',
+      phase: 'terminal',
+    })
+    unsubscribe()
+  })
+})

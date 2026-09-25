@@ -1410,11 +1410,13 @@ describe('voice turn pipeline', () => {
       sendToolResponse: jest.fn(),
     }
     let liveTurn: VoiceLiveTurn | null = null
+    const assistantTexts: string[] = []
     const session = new GeminiLiveSession({
       client: client as never,
       microphone: microphone as never,
       player: player as never,
       store: voiceSessionStore,
+      onAssistantText: (text) => assistantTexts.push(text),
       onTurnOpen: () => {
         liveTurn = createVoiceLiveTurn('c1')
         voiceSessionStore.setLiveTurn(liveTurn)
@@ -1444,11 +1446,11 @@ describe('voice turn pipeline', () => {
         })
       },
     })
-    return { ...harness, session }
+    return { ...harness, session, assistantTexts }
   }
 
   it('streams a turn into the conversation, then finalizes the same messages', () => {
-    const { session, controller } = createPipeline()
+    const { session, controller, assistantTexts } = createPipeline()
     session.start()
     session.handleEvent({
       kind: 'inputTranscript',
@@ -1469,13 +1471,15 @@ describe('voice turn pipeline', () => {
     expect(
       (messages[1] as ChatAssistantMessage).metadata?.generationState,
     ).toBe('streaming')
-    expect(voiceSessionStore.getPartialText('user')).toBe('what is up')
+    expect(voiceSessionStore.getPartialUserText()).toBe('what is up')
 
     session.handleEvent({
       kind: 'outputTranscript',
       text: 'not much',
     } as GeminiLiveServerEvent)
-    expect(voiceSessionStore.getPartialText('assistant')).toBe('not much')
+    // The assistant's side no longer goes through the voice store: it streams
+    // into the conversation's render stream, under the turn's message id.
+    expect(assistantTexts).toEqual(['not much'])
 
     session.handleEvent({ kind: 'turnComplete' })
 
@@ -1493,7 +1497,7 @@ describe('voice turn pipeline', () => {
     expect(assistant.content).toBe('not much')
     expect(assistant.metadata?.generationState).toBe('completed')
     expect(voiceSessionStore.getSnapshot().liveTurn).toBeNull()
-    expect(voiceSessionStore.getPartialText('assistant')).toBe('')
+    expect(voiceSessionStore.getPartialUserText()).toBe('')
   })
 
   it('keeps what was already spoken when the model is interrupted', () => {

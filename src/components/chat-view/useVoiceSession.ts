@@ -2,7 +2,11 @@ import { Platform } from 'obsidian'
 import { useCallback, useEffect, useRef } from 'react'
 
 import { useSettings } from '../../contexts/settings-context'
-import type { VoiceLiveTurn, VoiceTurn } from '../../core/realtime'
+import type {
+  RealtimeVoiceAssistantStream,
+  VoiceLiveTurn,
+  VoiceTurn,
+} from '../../core/realtime'
 import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
 import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 import type { ChatUserMessage } from '../../types/chat'
@@ -18,12 +22,15 @@ export const useVoiceSession = ({
   sessionController,
   conversationId,
   liveModelId,
+  assistantStream,
   stampTimeContext,
   resolveToolBridge,
 }: {
   sessionController: ChatSessionController
   conversationId: string
   liveModelId: string
+  /** Where the spoken transcript streams — see `RealtimeVoiceAssistantStream`. */
+  assistantStream: RealtimeVoiceAssistantStream
   stampTimeContext?: (message: ChatUserMessage) => ChatUserMessage
   resolveToolBridge?: () => Promise<VoiceToolBridge | null>
 }) => {
@@ -51,6 +58,7 @@ export const useVoiceSession = ({
     const liveTurn = createVoiceLiveTurn(conversationId)
     liveTurnRef.current = liveTurn
     voiceSessionStore.setLiveTurn(liveTurn)
+    assistantStream.begin(conversationId, liveTurn.assistantMessageId)
     sessionController.upsertConversationMessages({
       conversationId,
       messages: buildLiveTurnMessages({
@@ -60,11 +68,30 @@ export const useVoiceSession = ({
       }),
       persist: false,
     })
-  }, [liveModelId, sessionController, settings.chatModels])
+  }, [assistantStream, liveModelId, sessionController, settings.chatModels])
+
+  /**
+   * Feeds the spoken text into the conversation's render stream, so the bubble
+   * plays it out exactly like an agent reply.
+   */
+  const publishAssistantText = useCallback(
+    (text: string) => {
+      const liveTurn = liveTurnRef.current
+      if (!liveTurn) return
+      assistantStream.publish({
+        conversationId: liveTurn.conversationId,
+        messageId: liveTurn.assistantMessageId,
+        content: text,
+      })
+    },
+    [assistantStream],
+  )
 
   /**
    * Finalizes the live turn in place: the messages that streamed become the
    * persisted messages, same ids, so nothing remounts and no text is re-typed.
+   * The stream is released first, so the write that follows settles it at the
+   * committed text.
    */
   const commitTurn = useCallback(
     (turn: VoiceTurn) => {
@@ -72,6 +99,7 @@ export const useVoiceSession = ({
       liveTurnRef.current = null
       voiceSessionStore.setLiveTurn(null)
       if (!liveTurn) return
+      assistantStream.end(liveTurn.conversationId, liveTurn.assistantMessageId)
       sessionController.upsertConversationMessages({
         conversationId: liveTurn.conversationId,
         messages: buildFinalTurnMessages({
@@ -83,7 +111,13 @@ export const useVoiceSession = ({
         }),
       })
     },
-    [liveModelId, sessionController, settings.chatModels, stampTimeContext],
+    [
+      assistantStream,
+      liveModelId,
+      sessionController,
+      settings.chatModels,
+      stampTimeContext,
+    ],
   )
 
   const start = useCallback(async () => {
@@ -124,6 +158,7 @@ export const useVoiceSession = ({
         connection: resolution.value,
         onTurn: commitTurn,
         onTurnOpen: openTurn,
+        onAssistantText: publishAssistantText,
         createSocket: (url) => new WebSocket(url),
         toolBridge: toolBridge ?? undefined,
         initialHistory: buildVoiceHistoryTurns(
@@ -145,6 +180,7 @@ export const useVoiceSession = ({
     conversationId,
     commitTurn,
     openTurn,
+    publishAssistantText,
     resolveToolBridge,
     sessionController,
   ])
@@ -159,13 +195,14 @@ export const useVoiceSession = ({
       // The turn never committed: drop the messages it was streaming into,
       // matching the pre-live behaviour of persisting nothing until
       // `turnComplete`.
+      assistantStream.end(liveTurn.conversationId, liveTurn.assistantMessageId)
       sessionController.upsertConversationMessages({
         conversationId: liveTurn.conversationId,
         removeMessageIds: [liveTurn.userMessageId, liveTurn.assistantMessageId],
       })
     }
     voiceSessionStore.reset()
-  }, [sessionController])
+  }, [assistantStream, sessionController])
 
   useEffect(() => {
     const pinned = pinnedConversationRef.current

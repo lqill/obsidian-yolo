@@ -14,6 +14,8 @@ import type { VoiceToolBridge } from './voiceToolBridge'
 export type CreateGeminiLiveRuntimeOptions = {
   connection: ResolvedLiveConnection
   onTurn: (turn: VoiceTurn) => void
+  /** See `GeminiLiveSessionOptions.onAssistantText`. */
+  onAssistantText?: (text: string) => void
   /** Fired once per turn when it opens; see `GeminiLiveSessionOptions`. */
   onTurnOpen?: () => void
   createSocket: (url: string) => WebSocketLike
@@ -56,6 +58,7 @@ export const createGeminiLiveRuntime = (
     player: new LiveAudioPlayer(),
     store: voiceSessionStore,
     onTurn: options.onTurn,
+    onAssistantText: options.onAssistantText,
     onTurnOpen: options.onTurnOpen,
     toolHandler: toolBridge
       ? (calls) => toolBridge.handleFunctionCalls(calls)
@@ -76,6 +79,7 @@ export {
   useRealtimeVoiceSnapshot,
   useRealtimeVoiceStatus,
 } from './useRealtimeVoice'
+export type { RealtimeVoiceAssistantStream } from './assistantStream'
 export type { VoiceTurn } from './GeminiLiveSession'
 export type { GeminiLiveHistoryTurn } from './geminiLiveProtocol'
 export type { ResolvedLiveConnection } from './resolveLiveConnection'
@@ -83,7 +87,6 @@ export type {
   VoiceError,
   VoiceFailure,
   VoiceLiveTurn,
-  VoicePartialTextKind,
   VoiceSessionSnapshot,
   VoiceSessionStatus,
   VoiceStatusSnapshot,
