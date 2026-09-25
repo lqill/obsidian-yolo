@@ -4,10 +4,7 @@ import { GeminiLiveSession } from './GeminiLiveSession'
 import { voiceSessionStore } from './voiceSessionStore'
 
 type Microphone = {
-  start(
-    onFrame: (base64: string) => void,
-    onLevel: (level: number) => void,
-  ): Promise<void>
+  start(): Promise<void>
   stop(): void
   setMuted(muted: boolean): void
 }
@@ -32,7 +29,6 @@ const makeFakes = (overrides?: { toolHandler?: ToolHandler }) => {
     sendAudio: jest.fn(),
     sendAudioStreamEnd: jest.fn(),
     sendToolResponse: jest.fn(),
-    isOpen: true,
   }
   const turns: Array<{ userText: string; assistantText: string }> = []
   const session = new GeminiLiveSession({

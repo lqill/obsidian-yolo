@@ -9,16 +9,13 @@ import type { VoiceSessionStore } from './voiceSessionStore'
 export type VoiceTurn = { userText: string; assistantText: string }
 
 export type VoiceMicrophone = {
-  start(
-    onFrame: (dataBase64: string) => void,
-    onLevel: (level: number) => void,
-  ): Promise<void>
+  start(): Promise<void>
   stop(): void
   setMuted(muted: boolean): void
 }
 
 export type VoiceAudioPlayer = {
-  enqueue(dataBase64: string, mimeType: string): void
+  enqueue(dataBase64: string): void
   flush(): void
   dispose(): void
 }
@@ -30,7 +27,6 @@ export type VoiceLiveClient = {
   sendAudio(dataBase64: string): void
   sendAudioStreamEnd(): void
   sendToolResponse(functionResponses: GeminiLiveFunctionResponse[]): void
-  isOpen: boolean
 }
 
 export type GeminiLiveSessionOptions = {
@@ -44,9 +40,10 @@ export type GeminiLiveSessionOptions = {
   ) => Promise<GeminiLiveFunctionResponse[]>
 }
 
+type VoiceTurnState = 'idle' | 'open' | 'committed'
+
 export class GeminiLiveSession {
-  private turnActive = false
-  private turnDone = false
+  private turnState: VoiceTurnState = 'idle'
   private typedText = ''
   private spokenUserText = ''
   private assistantText = ''
@@ -62,10 +59,7 @@ export class GeminiLiveSession {
   async start(): Promise<void> {
     this.stopped = false
     this.options.store.setStatus('connecting')
-    await this.options.microphone.start(
-      (dataBase64) => this.options.client.sendAudio(dataBase64),
-      (level) => this.options.store.setMicLevel(level),
-    )
+    await this.options.microphone.start()
     this.options.client.connect()
   }
 
@@ -76,7 +70,6 @@ export class GeminiLiveSession {
     this.options.player.flush()
     this.options.client.close()
     this.options.player.dispose()
-    this.options.store.setActiveTool(null)
     this.options.store.reset()
   }
 
@@ -89,22 +82,21 @@ export class GeminiLiveSession {
   sendText(text: string): void {
     const trimmed = text.trim()
     if (!trimmed) return
-    this.markTurnActive()
+    this.beginTurn()
     this.typedText = this.typedText ? `${this.typedText}\n${trimmed}` : trimmed
     this.options.store.appendPartialUser(`${trimmed}\n`)
     this.options.client.sendText(trimmed)
   }
 
-  private markTurnActive(): void {
-    if (this.turnDone) {
-      this.turnActive = false
-      this.turnDone = false
+  /** Opens the turn, discarding the previous turn's accumulated text if it already committed. */
+  private beginTurn(): void {
+    if (this.turnState === 'committed') {
       this.typedText = ''
       this.spokenUserText = ''
       this.assistantText = ''
       this.options.store.clearPartials()
     }
-    this.turnActive = true
+    this.turnState = 'open'
   }
 
   handleEvent(event: GeminiLiveClientEvent): void {
@@ -114,15 +106,15 @@ export class GeminiLiveSession {
         this.options.store.setStatus('ready')
         break
       case 'audio':
-        this.options.player.enqueue(event.dataBase64, event.mimeType)
+        this.options.player.enqueue(event.dataBase64)
         break
       case 'inputTranscript':
-        this.markTurnActive()
+        this.beginTurn()
         this.spokenUserText += event.text
         this.options.store.appendPartialUser(event.text)
         break
       case 'outputTranscript':
-        this.markTurnActive()
+        this.beginTurn()
         this.assistantText += event.text
         this.options.store.appendPartialAssistant(event.text)
         break
@@ -177,12 +169,11 @@ export class GeminiLiveSession {
   }
 
   private commitTurn(): void {
-    if (!this.turnActive || this.turnDone) return
+    if (this.turnState !== 'open') return
     const spoken = this.spokenUserText.trim()
     const userText = [this.typedText.trim(), spoken].filter(Boolean).join('\n')
     const assistantText = this.assistantText.trim()
-    this.turnActive = false
-    this.turnDone = true
+    this.turnState = 'committed'
     this.typedText = ''
     this.spokenUserText = ''
     this.assistantText = ''

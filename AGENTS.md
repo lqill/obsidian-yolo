@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+This is a fork of YOLO, focusing on adding gemini live api capabilities.
+
 YOLO is an Obsidian plugin for AI chat, agent workflows, RAG, writing assistance, and independently shipped product modules such as FSRS-based Learning and the Whiteboard infinite canvas.
 
 For a behavior ↔ code-location ↔ verification-path index (complements this file's directory-ownership rules, doesn't restate them), see `FEATURE_MAP.md`.

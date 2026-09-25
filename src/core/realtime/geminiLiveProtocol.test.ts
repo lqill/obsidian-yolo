@@ -1,6 +1,7 @@
 // src/core/realtime/geminiLiveProtocol.test.ts
+import { DEFAULT_GEMINI_BASE_URL } from '../llm/gemini'
+
 import {
-  BUILD_LIVE_DEFAULT_BASE_URL,
   buildAudioStreamEndMessage,
   buildLiveWebSocketUrl,
   buildSetupMessage,
@@ -14,7 +15,7 @@ import {
 describe('buildLiveWebSocketUrl', () => {
   it('builds the default wss endpoint with the api key', () => {
     const url = buildLiveWebSocketUrl({
-      baseUrl: BUILD_LIVE_DEFAULT_BASE_URL,
+      baseUrl: DEFAULT_GEMINI_BASE_URL,
       apiKey: 'abc',
     })
     expect(url).toBe(

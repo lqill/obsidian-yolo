@@ -30,7 +30,6 @@ export type GeminiLiveClientOptions = {
   setupConfig: GeminiLiveSetupConfig
   createSocket: (url: string) => WebSocketLike
   onEvent: (event: GeminiLiveClientEvent) => void
-  onClosed?: (event: { code: number; reason: string }) => void
 }
 
 const OPEN = 1
@@ -58,7 +57,6 @@ export class GeminiLiveClient {
     }
     socket.onclose = (event) => {
       this.socket = null
-      this.options.onClosed?.(event)
       this.options.onEvent({
         kind: 'closed',
         code: event.code,
@@ -111,9 +109,5 @@ export class GeminiLiveClient {
   close(): void {
     this.socket?.close(1000, 'client-close')
     this.socket = null
-  }
-
-  get isOpen(): boolean {
-    return this.socket?.readyState === OPEN
   }
 }

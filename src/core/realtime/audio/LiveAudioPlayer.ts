@@ -14,7 +14,7 @@ export class LiveAudioPlayer {
     return this.context
   }
 
-  enqueue(dataBase64: string, _mimeType: string): void {
+  enqueue(dataBase64: string): void {
     if (this.disposed) return
     const context = this.ensureContext()
     const samples = int16ToFloat32(base64ToInt16(dataBase64))

@@ -16,7 +16,7 @@ export type CreateGeminiLiveRuntimeOptions = {
 
 export const createGeminiLiveRuntime = (
   options: CreateGeminiLiveRuntimeOptions,
-) => {
+): GeminiLiveSession => {
   // eslint-disable-next-line prefer-const -- declared before the client so the onEvent closure can reference it
   let session: GeminiLiveSession
   const toolBridge = options.toolBridge
@@ -35,16 +35,13 @@ export const createGeminiLiveRuntime = (
     onEvent: (event) => session.handleEvent(event),
   })
 
-  const microphone = new PcmMicCapture({
-    onFrame: (dataBase64) => client.sendAudio(dataBase64),
-    onLevel: (level) => voiceSessionStore.setMicLevel(level),
-  })
-  const player = new LiveAudioPlayer()
-
   session = new GeminiLiveSession({
     client,
-    microphone,
-    player,
+    microphone: new PcmMicCapture({
+      onFrame: (dataBase64) => client.sendAudio(dataBase64),
+      onLevel: (level) => voiceSessionStore.setMicLevel(level),
+    }),
+    player: new LiveAudioPlayer(),
     store: voiceSessionStore,
     onTurn: options.onTurn,
     toolHandler: toolBridge
@@ -52,13 +49,7 @@ export const createGeminiLiveRuntime = (
       : undefined,
   })
 
-  return {
-    session,
-    start: () => session.start(),
-    stop: () => session.stop(),
-    sendText: (text: string) => session.sendText(text),
-    setMuted: (muted: boolean) => session.setMuted(muted),
-  }
+  return session
 }
 
 export { voiceSessionStore, VoiceSessionStore } from './voiceSessionStore'

@@ -169,26 +169,24 @@ export async function buildVoiceToolBridge(
   // on-demand and reject the direct call as "schema not loaded". Configured
   // (possibly offline) servers matter too: an offline server still contributes a
   // deferred catalog entry, so promote from `settings.mcp.servers` as well.
-  const voiceToolServerPreferences: Record<
-    string,
-    AssistantToolServerPreference
-  > = { ...(chatModeRuntime.toolServerPreferences ?? {}) }
-  const promoteServer = (rawName: string): void => {
+  const serverIds = new Set<string>()
+  for (const tool of availableTools) {
     try {
-      const { serverName } = parseToolName(rawName)
-      if (serverName === getLocalFileToolServerName()) return
-      voiceToolServerPreferences[serverName] = {
-        ...voiceToolServerPreferences[serverName],
-        disclosureMode: 'always',
-      }
+      serverIds.add(parseToolName(tool.name).serverName)
     } catch {
       // Names without a server prefix are never on-demand.
     }
   }
-  for (const tool of availableTools) promoteServer(tool.name)
   for (const server of settings.mcp.servers ?? []) {
-    const serverId = server.id
-    if (!serverId || serverId === getLocalFileToolServerName()) continue
+    if (server.id) serverIds.add(server.id)
+  }
+  serverIds.delete(getLocalFileToolServerName())
+
+  const voiceToolServerPreferences: Record<
+    string,
+    AssistantToolServerPreference
+  > = { ...(chatModeRuntime.toolServerPreferences ?? {}) }
+  for (const serverId of serverIds) {
     voiceToolServerPreferences[serverId] = {
       ...voiceToolServerPreferences[serverId],
       disclosureMode: 'always',
@@ -287,15 +285,11 @@ export async function buildVoiceToolBridge(
     // Queue rather than a plain map: two calls can legitimately carry the same
     // explicit server id, and a map would collapse their distinct results into
     // one payload. Consume one payload per request, in call order.
-    const payloadsById = new Map<
-      string,
-      Array<ReturnType<typeof toToolResponsePayload>>
-    >()
+    const payloadsById = new Map<string, Record<string, unknown>[]>()
     for (const { request, response } of executed.toolCalls) {
-      const payload = toToolResponsePayload(response)
-      const queued = payloadsById.get(request.id)
-      if (queued) queued.push(payload)
-      else payloadsById.set(request.id, [payload])
+      const queue = payloadsById.get(request.id) ?? []
+      queue.push(toToolResponsePayload(response))
+      payloadsById.set(request.id, queue)
     }
 
     // Always answer every function call exactly once, even if the gateway

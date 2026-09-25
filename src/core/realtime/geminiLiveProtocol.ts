@@ -1,7 +1,6 @@
 // src/core/realtime/geminiLiveProtocol.ts
+import { DEFAULT_GEMINI_BASE_URL } from '../llm/gemini'
 
-export const BUILD_LIVE_DEFAULT_BASE_URL =
-  'https://generativelanguage.googleapis.com'
 export const LIVE_INPUT_SAMPLE_RATE = 16000
 export const LIVE_OUTPUT_SAMPLE_RATE = 24000
 
@@ -57,7 +56,7 @@ export const buildLiveWebSocketUrl = ({
   apiKey: string
 }): string => {
   const normalized = baseUrl.replace(/\/+$/, '')
-  if (normalized !== BUILD_LIVE_DEFAULT_BASE_URL) {
+  if (normalized !== DEFAULT_GEMINI_BASE_URL) {
     throw new Error(
       'Voice mode requires the default Gemini base URL; custom base URLs / proxies are not supported by the Live API.',
     )

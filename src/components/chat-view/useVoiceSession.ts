@@ -65,7 +65,6 @@ export const useVoiceSession = ({
         userMessage,
         assistantMessage,
       ])
-      voiceSessionStore.clearPartials()
     },
     [sessionController, liveModelId, settings.chatModels, stampTimeContext],
   )
