@@ -1,9 +1,13 @@
 import { LiveAudioPlayer } from './audio/LiveAudioPlayer'
 import { PcmMicCapture } from './audio/PcmMicCapture'
 import { GeminiLiveClient, type WebSocketLike } from './GeminiLiveClient'
-import { buildLiveWebSocketUrl } from './geminiLiveProtocol'
+import {
+  type GeminiLiveHistoryTurn,
+  buildLiveWebSocketUrl,
+} from './geminiLiveProtocol'
 import { GeminiLiveSession, type VoiceTurn } from './GeminiLiveSession'
 import type { ResolvedLiveConnection } from './resolveLiveConnection'
+import { normalizeVoiceHistoryTurns } from './voiceHistory'
 import { voiceSessionStore } from './voiceSessionStore'
 import type { VoiceToolBridge } from './voiceToolBridge'
 
@@ -12,6 +16,8 @@ export type CreateGeminiLiveRuntimeOptions = {
   onTurn: (turn: VoiceTurn) => void
   createSocket: (url: string) => WebSocketLike
   toolBridge?: VoiceToolBridge
+  /** Prior conversation turns replayed so a restarted session keeps context. */
+  initialHistory?: GeminiLiveHistoryTurn[]
 }
 
 export const createGeminiLiveRuntime = (
@@ -20,6 +26,9 @@ export const createGeminiLiveRuntime = (
   // eslint-disable-next-line prefer-const -- declared before the client so the onEvent closure can reference it
   let session: GeminiLiveSession
   const toolBridge = options.toolBridge
+  const initialHistory = normalizeVoiceHistoryTurns(
+    options.initialHistory ?? [],
+  )
   const client = new GeminiLiveClient({
     url: buildLiveWebSocketUrl({
       baseUrl: options.connection.baseUrl,
@@ -30,6 +39,7 @@ export const createGeminiLiveRuntime = (
       voiceName: options.connection.voiceName,
       systemPrompt: options.connection.systemPrompt,
       functionDeclarations: toolBridge?.declarations ?? [],
+      initialHistoryInClientContent: initialHistory.length > 0,
     },
     createSocket: options.createSocket,
     onEvent: (event) => session.handleEvent(event),
@@ -47,6 +57,7 @@ export const createGeminiLiveRuntime = (
     toolHandler: toolBridge
       ? (calls) => toolBridge.handleFunctionCalls(calls)
       : undefined,
+    initialHistory,
   })
 
   return session
@@ -54,7 +65,12 @@ export const createGeminiLiveRuntime = (
 
 export { voiceSessionStore, VoiceSessionStore } from './voiceSessionStore'
 export { resolveLiveConnection } from './resolveLiveConnection'
+export {
+  buildVoiceHistoryTurns,
+  normalizeVoiceHistoryTurns,
+} from './voiceHistory'
 export type { VoiceTurn } from './GeminiLiveSession'
+export type { GeminiLiveHistoryTurn } from './geminiLiveProtocol'
 export type { ResolvedLiveConnection } from './resolveLiveConnection'
 export type {
   VoiceSessionSnapshot,

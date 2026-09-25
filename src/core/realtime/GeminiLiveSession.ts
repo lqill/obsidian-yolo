@@ -3,7 +3,9 @@ import type { GeminiLiveClientEvent } from './GeminiLiveClient'
 import type {
   GeminiLiveFunctionCall,
   GeminiLiveFunctionResponse,
+  GeminiLiveHistoryTurn,
 } from './geminiLiveProtocol'
+import { normalizeVoiceHistoryTurns } from './voiceHistory'
 import type { VoiceSessionStore } from './voiceSessionStore'
 
 export type VoiceTurn = { userText: string; assistantText: string }
@@ -26,6 +28,7 @@ export type VoiceLiveClient = {
   sendText(text: string): void
   sendAudio(dataBase64: string): void
   sendAudioStreamEnd(): void
+  sendInitialHistory(turns: GeminiLiveHistoryTurn[]): void
   sendToolResponse(functionResponses: GeminiLiveFunctionResponse[]): void
 }
 
@@ -38,6 +41,8 @@ export type GeminiLiveSessionOptions = {
   toolHandler?: (
     calls: GeminiLiveFunctionCall[],
   ) => Promise<GeminiLiveFunctionResponse[]>
+  /** Prior turns replayed on `setupComplete` so a restarted session keeps context. */
+  initialHistory?: GeminiLiveHistoryTurn[]
 }
 
 type VoiceTurnState = 'idle' | 'open' | 'committed'
@@ -53,13 +58,18 @@ export class GeminiLiveSession {
   // concurrently would let the later batch overwrite the active-tool chip and
   // send responses out of request order.
   private toolCallChain: Promise<void> = Promise.resolve()
+  private readonly history: GeminiLiveHistoryTurn[]
 
-  constructor(private readonly options: GeminiLiveSessionOptions) {}
+  constructor(private readonly options: GeminiLiveSessionOptions) {
+    this.history = normalizeVoiceHistoryTurns(options.initialHistory ?? [])
+  }
 
   async start(): Promise<void> {
     this.stopped = false
     this.options.store.setStatus('connecting')
-    await this.options.microphone.start()
+    // With history, capture waits for `ready`: the server must receive the
+    // seeded `clientContent` before any realtime input reaches the session.
+    if (this.history.length === 0) await this.options.microphone.start()
     this.options.client.connect()
   }
 
@@ -99,11 +109,30 @@ export class GeminiLiveSession {
     this.turnState = 'open'
   }
 
+  /**
+   * Replays the saved turns as `clientContent` (the server withholds the
+   * realtime conversation until `turnComplete`), then opens the microphone.
+   */
+  private async replayInitialHistory(): Promise<void> {
+    if (this.stopped || this.history.length === 0) return
+    this.options.client.sendInitialHistory(this.history)
+    try {
+      await this.options.microphone.start()
+    } catch (error) {
+      if (this.stopped) return
+      this.options.store.setStatus(
+        'error',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+
   handleEvent(event: GeminiLiveClientEvent): void {
     if (this.stopped) return
     switch (event.kind) {
       case 'ready':
         this.options.store.setStatus('ready')
+        void this.replayInitialHistory()
         break
       case 'audio':
         this.options.player.enqueue(event.dataBase64)

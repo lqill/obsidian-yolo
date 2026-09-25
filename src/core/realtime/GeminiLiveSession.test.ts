@@ -1,13 +1,10 @@
 // src/core/realtime/GeminiLiveSession.test.ts
-import type { GeminiLiveServerEvent } from './geminiLiveProtocol'
+import type {
+  GeminiLiveHistoryTurn,
+  GeminiLiveServerEvent,
+} from './geminiLiveProtocol'
 import { GeminiLiveSession } from './GeminiLiveSession'
 import { voiceSessionStore } from './voiceSessionStore'
-
-type Microphone = {
-  start(): Promise<void>
-  stop(): void
-  setMuted(muted: boolean): void
-}
 
 type ToolHandler = (
   calls: Array<{ id?: string; name: string; args?: Record<string, unknown> }>,
@@ -15,8 +12,11 @@ type ToolHandler = (
   Array<{ id?: string; name: string; response: Record<string, unknown> }>
 >
 
-const makeFakes = (overrides?: { toolHandler?: ToolHandler }) => {
-  const microphone: Microphone = {
+const makeFakes = (overrides?: {
+  toolHandler?: ToolHandler
+  initialHistory?: GeminiLiveHistoryTurn[]
+}) => {
+  const microphone = {
     start: jest.fn(async () => {}),
     stop: jest.fn(),
     setMuted: jest.fn(),
@@ -28,6 +28,7 @@ const makeFakes = (overrides?: { toolHandler?: ToolHandler }) => {
     sendText: jest.fn(),
     sendAudio: jest.fn(),
     sendAudioStreamEnd: jest.fn(),
+    sendInitialHistory: jest.fn(),
     sendToolResponse: jest.fn(),
   }
   const turns: Array<{ userText: string; assistantText: string }> = []
@@ -38,6 +39,7 @@ const makeFakes = (overrides?: { toolHandler?: ToolHandler }) => {
     store: voiceSessionStore,
     onTurn: (turn) => turns.push(turn),
     toolHandler: overrides?.toolHandler,
+    initialHistory: overrides?.initialHistory,
   })
   return { session, client, microphone, player, turns }
 }
@@ -241,5 +243,70 @@ describe('GeminiLiveSession per-turn state machine', () => {
     pending.resolve?.()
     await flushAsync()
     expect(client.sendToolResponse).not.toHaveBeenCalled()
+  })
+})
+
+describe('GeminiLiveSession initial history', () => {
+  beforeEach(() => voiceSessionStore.reset())
+
+  it('opens the microphone immediately when there is no history', async () => {
+    const { session, microphone, client } = makeFakes()
+    await session.start()
+    expect(microphone.start).toHaveBeenCalledTimes(1)
+    expect(client.sendInitialHistory).not.toHaveBeenCalled()
+  })
+
+  it('replays history on ready before opening the microphone', async () => {
+    const history: GeminiLiveHistoryTurn[] = [
+      { role: 'user', text: 'earlier question' },
+      { role: 'model', text: 'earlier answer' },
+    ]
+    const { session, microphone, client } = makeFakes({
+      initialHistory: history,
+    })
+    await session.start()
+    expect(microphone.start).not.toHaveBeenCalled()
+    session.handleEvent({ kind: 'ready' })
+    await flushAsync()
+    expect(client.sendInitialHistory).toHaveBeenCalledWith(history)
+    expect(microphone.start).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops whitespace-only turns before replaying', async () => {
+    const { session, client } = makeFakes({
+      initialHistory: [
+        { role: 'user', text: '   ' },
+        { role: 'user', text: 'real question' },
+      ],
+    })
+    await session.start()
+    session.handleEvent({ kind: 'ready' })
+    await flushAsync()
+    expect(client.sendInitialHistory).toHaveBeenCalledWith([
+      { role: 'user', text: 'real question' },
+    ])
+  })
+
+  it('surfaces a microphone failure after history replay', async () => {
+    const { session, microphone } = makeFakes({
+      initialHistory: [{ role: 'user', text: 'real question' }],
+    })
+    ;(microphone.start as jest.Mock).mockRejectedValueOnce(new Error('denied'))
+    await session.start()
+    session.handleEvent({ kind: 'ready' })
+    await flushAsync()
+    expect(voiceSessionStore.getSnapshot().status).toBe('error')
+    expect(voiceSessionStore.getSnapshot().error).toBe('denied')
+  })
+
+  it('does not replay history after stop', async () => {
+    const { session, client } = makeFakes({
+      initialHistory: [{ role: 'user', text: 'earlier' }],
+    })
+    await session.start()
+    session.stop()
+    session.handleEvent({ kind: 'ready' })
+    await flushAsync()
+    expect(client.sendInitialHistory).not.toHaveBeenCalled()
   })
 })

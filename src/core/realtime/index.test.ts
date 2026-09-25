@@ -89,4 +89,55 @@ describe('createGeminiLiveRuntime', () => {
     ])
     runtime.stop()
   })
+
+  it('seeds the setup frame with history and replays it on setupComplete', async () => {
+    const sockets: Array<{
+      onopen: ((ev: unknown) => void) | null
+      onmessage: ((ev: { data: unknown }) => void) | null
+    }> = []
+    const sent: string[] = []
+    const runtime = createGeminiLiveRuntime({
+      connection: {
+        baseUrl: 'https://generativelanguage.googleapis.com',
+        apiKey: 'k',
+        model: 'gemini-3.1-flash-live-preview',
+        voiceName: 'Kore',
+        systemPrompt: '',
+      },
+      onTurn: () => {},
+      initialHistory: [
+        { role: 'user', text: 'earlier question' },
+        { role: 'model', text: 'earlier answer' },
+      ],
+      createSocket: () => {
+        const fake = {
+          readyState: 1,
+          send: (data: string) => sent.push(data),
+          close: () => {},
+          onopen: null as ((ev: unknown) => void) | null,
+          onmessage: null as ((ev: { data: unknown }) => void) | null,
+          onerror: null,
+          onclose: null,
+        }
+        sockets.push(fake)
+        return fake
+      },
+    })
+    await runtime.start()
+    sockets[0]?.onopen?.({})
+    expect(JSON.parse(sent[0]).setup.historyConfig).toEqual({
+      initialHistoryInClientContent: true,
+    })
+    sockets[0]?.onmessage?.({ data: JSON.stringify({ setupComplete: {} }) })
+    expect(JSON.parse(sent[1])).toEqual({
+      clientContent: {
+        turns: [
+          { role: 'user', parts: [{ text: 'earlier question' }] },
+          { role: 'model', parts: [{ text: 'earlier answer' }] },
+        ],
+        turnComplete: true,
+      },
+    })
+    runtime.stop()
+  })
 })

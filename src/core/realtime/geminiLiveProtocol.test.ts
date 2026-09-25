@@ -3,6 +3,7 @@ import { DEFAULT_GEMINI_BASE_URL } from '../llm/gemini'
 
 import {
   buildAudioStreamEndMessage,
+  buildClientContentHistoryMessage,
   buildLiveWebSocketUrl,
   buildSetupMessage,
   buildTextMessage,
@@ -178,6 +179,48 @@ describe('buildToolResponseMessage', () => {
         functionResponses: [
           { id: '1', name: 'fs_read', response: { result: 'ok' } },
         ],
+      },
+    })
+  })
+})
+
+describe('buildSetupMessage with initial history', () => {
+  it('omits historyConfig unless client-content history is requested', () => {
+    const msg = buildSetupMessage({
+      model: 'm',
+      voiceName: 'Kore',
+      systemPrompt: 's',
+    })
+    expect((msg as any).setup.historyConfig).toBeUndefined()
+  })
+
+  it('waits for clientContent history when requested', () => {
+    const msg = buildSetupMessage({
+      model: 'm',
+      voiceName: 'Kore',
+      systemPrompt: 's',
+      initialHistoryInClientContent: true,
+    })
+    expect((msg as any).setup.historyConfig).toEqual({
+      initialHistoryInClientContent: true,
+    })
+  })
+})
+
+describe('buildClientContentHistoryMessage', () => {
+  it('maps turns to content parts and marks the history complete', () => {
+    expect(
+      buildClientContentHistoryMessage([
+        { role: 'user', text: 'hi' },
+        { role: 'model', text: 'hello' },
+      ]),
+    ).toEqual({
+      clientContent: {
+        turns: [
+          { role: 'user', parts: [{ text: 'hi' }] },
+          { role: 'model', parts: [{ text: 'hello' }] },
+        ],
+        turnComplete: true,
       },
     })
   })

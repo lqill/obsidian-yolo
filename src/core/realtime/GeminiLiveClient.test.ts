@@ -95,4 +95,24 @@ describe('GeminiLiveClient', () => {
       },
     })
   })
+
+  it('sends initial history as a completed clientContent frame', () => {
+    const { client, sockets } = make()
+    client.connect()
+    sockets[0].onopen?.({})
+    client.sendInitialHistory([
+      { role: 'user', text: 'earlier question' },
+      { role: 'model', text: 'earlier answer' },
+    ])
+    const sent = sockets[0].sent
+    expect(JSON.parse(sent[sent.length - 1])).toEqual({
+      clientContent: {
+        turns: [
+          { role: 'user', parts: [{ text: 'earlier question' }] },
+          { role: 'model', parts: [{ text: 'earlier answer' }] },
+        ],
+        turnComplete: true,
+      },
+    })
+  })
 })

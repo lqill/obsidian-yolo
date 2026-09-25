@@ -25,6 +25,12 @@ export type GeminiLiveFunctionResponse = {
   response: Record<string, unknown>
 }
 
+/** A prior conversation turn replayed into a fresh session as initial history. */
+export type GeminiLiveHistoryTurn = {
+  role: 'user' | 'model'
+  text: string
+}
+
 export type GeminiLiveServerEvent =
   | { kind: 'ready' }
   | { kind: 'audio'; dataBase64: string; mimeType: string }
@@ -40,6 +46,12 @@ export type GeminiLiveSetupConfig = {
   voiceName: string
   systemPrompt: string
   functionDeclarations?: GeminiLiveFunctionDeclaration[]
+  /**
+   * When set, the server waits for `clientContent` history turns (ending in
+   * `turnComplete: true`) before the realtime conversation starts. Required
+   * for the seeded-history frame to be treated as context rather than a prompt.
+   */
+  initialHistoryInClientContent?: boolean
 }
 
 export type GeminiLiveClientMessage = Record<string, unknown>
@@ -82,8 +94,24 @@ export const buildSetupMessage = (
   if (config.functionDeclarations && config.functionDeclarations.length > 0) {
     setup.tools = [{ functionDeclarations: config.functionDeclarations }]
   }
+  if (config.initialHistoryInClientContent) {
+    setup.historyConfig = { initialHistoryInClientContent: true }
+  }
   return { setup }
 }
+
+/** Replays prior turns as initial history so a new session does not start blank. */
+export const buildClientContentHistoryMessage = (
+  turns: GeminiLiveHistoryTurn[],
+): GeminiLiveClientMessage => ({
+  clientContent: {
+    turns: turns.map((turn) => ({
+      role: turn.role,
+      parts: [{ text: turn.text }],
+    })),
+    turnComplete: true,
+  },
+})
 
 export const buildAudioMessage = (
   dataBase64: string,

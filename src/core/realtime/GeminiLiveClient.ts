@@ -1,9 +1,11 @@
 import {
   type GeminiLiveFunctionResponse,
+  type GeminiLiveHistoryTurn,
   type GeminiLiveServerEvent,
   type GeminiLiveSetupConfig,
   buildAudioMessage,
   buildAudioStreamEndMessage,
+  buildClientContentHistoryMessage,
   buildSetupMessage,
   buildTextMessage,
   buildToolResponseMessage,
@@ -92,6 +94,10 @@ export class GeminiLiveClient {
 
   sendText(text: string): void {
     this.send(encodeClientMessage(buildTextMessage(text)))
+  }
+
+  sendInitialHistory(turns: GeminiLiveHistoryTurn[]): void {
+    this.send(encodeClientMessage(buildClientContentHistoryMessage(turns)))
   }
 
   sendAudio(dataBase64: string): void {

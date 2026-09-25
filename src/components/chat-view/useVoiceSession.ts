@@ -77,11 +77,13 @@ export const useVoiceSession = ({
     startingRef.current = true
     voiceSessionStore.setStatus('connecting')
     try {
-      const [{ resolveLiveConnection }, { createGeminiLiveRuntime }] =
-        await Promise.all([
-          import('../../core/realtime/resolveLiveConnection'),
-          import('../../core/realtime'),
-        ])
+      const [
+        { resolveLiveConnection },
+        { buildVoiceHistoryTurns, createGeminiLiveRuntime },
+      ] = await Promise.all([
+        import('../../core/realtime/resolveLiveConnection'),
+        import('../../core/realtime'),
+      ])
       const resolution = resolveLiveConnection({ settings })
       if (!resolution.ok) {
         voiceSessionStore.setStatus('error', resolution.error)
@@ -105,6 +107,9 @@ export const useVoiceSession = ({
         onTurn: commitTurn,
         createSocket: (url) => new WebSocket(url),
         toolBridge: toolBridge ?? undefined,
+        initialHistory: buildVoiceHistoryTurns(
+          sessionController.getSnapshot().chatMessages,
+        ),
       })
       runtimeRef.current = runtime
       await runtime.start()
