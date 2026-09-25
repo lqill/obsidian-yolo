@@ -167,7 +167,6 @@ export type UseChatInputControllerParams = {
     modelId: string,
     level: ReasoningLevel,
   ) => Promise<void>
-  sendVoiceTextRef?: { current: ((text: string) => boolean) | null }
 }
 
 /**
@@ -201,7 +200,6 @@ export function useChatInputController({
   setQueuedMessageEditState,
   getReasoningLevelForModelId,
   persistReasoningLevelForModel,
-  sendVoiceTextRef,
 }: UseChatInputControllerParams) {
   const plugin = usePlugin()
   const app = useApp()
@@ -1139,15 +1137,6 @@ export function useChatInputController({
       }
 
       const late = getLate()
-      const voiceText = editorStateToPlainText(content).trim()
-      if (voiceText && sendVoiceTextRef?.current?.(voiceText)) {
-        replaceInputMessage(
-          buildNewInputMessage(
-            preferencesController.getSnapshot().reasoningLevel,
-          ),
-        )
-        return
-      }
       const message = buildInputMessageForSubmit(content)
       const assistant =
         settings.assistants.find(
@@ -1227,14 +1216,6 @@ export function useChatInputController({
             t(
               'chat.queueMessage.blockedActiveTool',
               '请等待当前工具调用完成后再发送新消息。',
-            ),
-          )
-          return
-        case 'blocked':
-          new Notice(
-            t(
-              'voiceUnavailable',
-              'Voice mode is active. End the voice session before typing.',
             ),
           )
           return

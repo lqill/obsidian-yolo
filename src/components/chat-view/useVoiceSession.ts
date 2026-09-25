@@ -41,8 +41,9 @@ export const useVoiceSession = ({
 
   /**
    * A turn opens on its first transcript delta. Put its messages into the
-   * conversation immediately — still textless — so the bubbles exist and the
-   * store's partial transcript has somewhere to stream into.
+   * conversation immediately — still textless, and not yet durable — so the
+   * bubbles exist and the store's partial transcript has somewhere to stream
+   * into.
    */
   const openTurn = useCallback(() => {
     const conversationId = pinnedConversationRef.current
@@ -50,14 +51,15 @@ export const useVoiceSession = ({
     const liveTurn = createVoiceLiveTurn(conversationId)
     liveTurnRef.current = liveTurn
     voiceSessionStore.setLiveTurn(liveTurn)
-    sessionController.beginVoiceTurn(
+    sessionController.upsertConversationMessages({
       conversationId,
-      buildLiveTurnMessages({
+      messages: buildLiveTurnMessages({
         liveTurn,
         liveModelId,
         model: settings.chatModels.find((m) => m.id === liveModelId),
       }),
-    )
+      persist: false,
+    })
   }, [liveModelId, sessionController, settings.chatModels])
 
   /**
@@ -70,16 +72,16 @@ export const useVoiceSession = ({
       liveTurnRef.current = null
       voiceSessionStore.setLiveTurn(null)
       if (!liveTurn) return
-      sessionController.finalizeVoiceTurn(
-        liveTurn.conversationId,
-        buildFinalTurnMessages({
+      sessionController.upsertConversationMessages({
+        conversationId: liveTurn.conversationId,
+        messages: buildFinalTurnMessages({
           liveTurn,
           turn,
           liveModelId,
           model: settings.chatModels.find((m) => m.id === liveModelId),
           stampTimeContext,
         }),
-      )
+      })
     },
     [liveModelId, sessionController, settings.chatModels, stampTimeContext],
   )
@@ -157,10 +159,10 @@ export const useVoiceSession = ({
       // The turn never committed: drop the messages it was streaming into,
       // matching the pre-live behaviour of persisting nothing until
       // `turnComplete`.
-      sessionController.discardVoiceTurn(liveTurn.conversationId, [
-        liveTurn.userMessageId,
-        liveTurn.assistantMessageId,
-      ])
+      sessionController.upsertConversationMessages({
+        conversationId: liveTurn.conversationId,
+        removeMessageIds: [liveTurn.userMessageId, liveTurn.assistantMessageId],
+      })
     }
     voiceSessionStore.reset()
   }, [sessionController])

@@ -37,6 +37,7 @@ import type { RequestContextBuilder } from '../../utils/chat/requestContextBuild
 import { stampUserMessageTimeContext } from '../../utils/prompt/timeContext'
 
 import { yoloPreferencePatch } from './chat-input/ChatModeSelect'
+import { editorStateToPlainText } from './chat-input/utils/editor-state-to-plain-text'
 import {
   buildAssistantErrorContinuation,
   buildRetrySubmissionMessages,
@@ -191,7 +192,6 @@ export type ChatSessionSubmitResult =
   | { kind: 'blocked_waiting_approval' }
   | { kind: 'blocked_enqueue_awaiting_approval' }
   | { kind: 'blocked_active_tool' }
-  | { kind: 'blocked'; reason: 'voice-active' }
   | { kind: 'enqueued'; message: ChatUserMessage }
   | { kind: 'submitted'; message: ChatUserMessage }
 
@@ -241,6 +241,15 @@ export type ChatSessionRunConversationParams = {
   branchTarget?: ChatSessionRunConversationBranchTarget
   assistantContinuation?: ChatSessionAssistantContinuationTarget
   compactionOverride?: ChatConversationCompactionState
+}
+
+/**
+ * A surface that runs its own turns beside the chat's submit path (a live
+ * voice session). The controller hands it the typed text instead of starting a
+ * run, and leaves compaction alone while it is active.
+ */
+export type ChatSessionRealtimeSurface = {
+  sendText: (text: string) => void
 }
 
 export type ChatSessionControllerDeps = {
@@ -335,8 +344,12 @@ export type ChatSessionControllerDeps = {
    * hook hasn't produced a ready controller/coordinator/scope yet — mirrors
    * the pre-C2 `if (!controller || !coordinator || !scope) return` guard. */
   getCliSubmitContext: () => ChatSessionCliContext | null
-  /** Voice mode mutual exclusion; resolved by the hook layer. */
-  isVoiceActive: () => boolean
+  /**
+   * The active realtime surface (a live voice session), or null. Its presence
+   * is the fact that a submit belongs to that surface and that context
+   * compaction is unavailable — the surface owns its own turn lifecycle.
+   */
+  getRealtimeSurface?: () => ChatSessionRealtimeSurface | null
 }
 
 type Listener = () => void
@@ -403,15 +416,6 @@ export class ChatSessionController {
    * to the pre-C2 `assistantContinuationPendingRef` in
    * `useChatDomainActions.ts`, now a plain field instead of a React ref. */
   private assistantContinuationPending = false
-  /**
-   * The voice turn whose transcript is currently streaming, if any. It exists
-   * only to be reclaimed when its conversation is left — see
-   * `settleLiveVoiceTurnForSwitch`.
-   */
-  private liveVoiceTurn: {
-    conversationId: string
-    messageIds: readonly [string, string]
-  } | null = null
 
   readonly chatMessagesStateRef: { current: ChatMessage[] }
   readonly activeBranchByUserMessageIdRef: { current: Map<string, string> }
@@ -1154,13 +1158,11 @@ export class ChatSessionController {
 
   /**
    * Changing the conversation identity re-points the AgentSessionService
-   * subscription and ends any voice turn streaming into the conversation being
-   * left — every other setter is a plain field write.
+   * subscription; every other setter is a plain field write.
    */
   setCurrentConversationId = (action: SetStateActionLike<string>): void => {
     const next = resolveNext(action, this.snapshot.currentConversationId)
     if (next === this.snapshot.currentConversationId) return
-    this.settleLiveVoiceTurnForSwitch()
     this.commit({ currentConversationId: next })
     this.subscribeAgentService(next)
   }
@@ -1233,109 +1235,67 @@ export class ChatSessionController {
   }
 
   /**
-   * Puts the current voice turn's messages into the conversation as soon as the
-   * turn opens, while they are still textless: the bubbles mount on them and
-   * `voiceSessionStore` streams the transcript into them. Read at call time over
+   * Writes messages produced by a surface that does not run through `submit()`
+   * (a live voice turn) into the current conversation: same id ⇒ replaced in
+   * place, new ⇒ appended, `removeMessageIds` ⇒ dropped. Read at call time over
    * the CURRENT snapshot (mirroring `removeHistoricalUserMessage`) so a mid-turn
-   * edit is never clobbered. No-ops if the conversation changed since the session
-   * started, or if the turn's messages are already present.
+   * edit is never clobbered, and a no-op once the conversation has moved on.
+   * Scroll and title side effects match the normal submit path.
+   *
+   * `persist: false` is for a turn that is still being spoken: its messages
+   * exist so the transcript has bubbles to stream into, but they are not part
+   * of the conversation until the turn commits — which is also what makes
+   * leaving the conversation mid-turn need no cleanup.
    */
-  beginVoiceTurn = (
-    conversationId: string,
-    messages: readonly [ChatUserMessage, ChatAssistantMessage],
-  ): void => {
+  upsertConversationMessages = ({
+    conversationId,
+    messages = [],
+    removeMessageIds = [],
+    persist = true,
+  }: {
+    conversationId: string
+    messages?: readonly ChatMessage[]
+    removeMessageIds?: readonly string[]
+    persist?: boolean
+  }): void => {
     if (conversationId !== this.snapshot.currentConversationId) {
       return
     }
-    this.liveVoiceTurn = {
-      conversationId,
-      messageIds: [messages[0].id, messages[1].id],
-    }
-    const liveIds = new Set(messages.map((message) => message.id))
-    if (this.snapshot.chatMessages.some((message) => liveIds.has(message.id))) {
-      return
-    }
-    const nextMessages = [...this.snapshot.chatMessages, ...messages]
-    this.setChatMessages(nextMessages)
-    this.syncAgentConversationMessages(nextMessages)
-    this.persist(nextMessages)
-    this.deps.forceScrollToBottom({ deferToNextFrame: true })
-  }
-
-  /**
-   * Replaces the live turn's messages with their finalized text IN PLACE — same
-   * ids, so the bubble that streamed becomes the persisted message without a
-   * remount or a re-typed answer. Falls back to appending when the live messages
-   * were deleted mid-turn. Scroll + title side effects match the normal submit
-   * path; no-ops if the conversation changed since the session started.
-   */
-  finalizeVoiceTurn = (
-    conversationId: string,
-    messages: readonly [ChatUserMessage, ChatAssistantMessage],
-  ): void => {
-    if (conversationId !== this.snapshot.currentConversationId) {
-      return
-    }
-    this.liveVoiceTurn = null
     const previous = this.snapshot.chatMessages
-    const liveIds = new Set(messages.map((message) => message.id))
-    const isFirstTurn = previous.every(
-      (message) => message.role !== 'user' || liveIds.has(message.id),
+    const removed = new Set(removeMessageIds)
+    const replaced = new Set(messages.map((message) => message.id))
+    const nextMessages = replaceOrAppendMessages(
+      previous.filter((message) => !removed.has(message.id)),
+      messages,
     )
-    const nextMessages = replaceOrAppendMessages(previous, messages)
+    if (
+      nextMessages.length === previous.length &&
+      nextMessages.every((message, index) => message === previous[index])
+    ) {
+      return
+    }
+    // Title the conversation on the first turn that actually carries user text:
+    // a turn opens with its messages still textless and is titled when it
+    // commits. Any surviving user message outside this batch means it is not
+    // the first turn.
+    const hasOtherUserMessage = previous.some(
+      (message) =>
+        message.role === 'user' &&
+        !replaced.has(message.id) &&
+        !removed.has(message.id),
+    )
+    const addsUserText = messages.some(
+      (message) => message.role === 'user' && Boolean(message.promptContent),
+    )
     this.setChatMessages(nextMessages)
     this.syncAgentConversationMessages(nextMessages)
-    this.persist(nextMessages)
+    if (persist) {
+      this.persist(nextMessages)
+    }
     this.deps.forceScrollToBottom({ deferToNextFrame: true })
-    if (isFirstTurn) {
+    if (!hasOtherUserMessage && addsUserText) {
       void this.deps.generateConversationTitle(conversationId, nextMessages)
     }
-  }
-
-  /**
-   * Drops a voice turn that ended without committing (session ended mid-turn):
-   * its partial transcript is discarded, matching the pre-live behaviour where
-   * nothing was persisted until `turnComplete`.
-   */
-  discardVoiceTurn = (
-    conversationId: string,
-    messageIds: readonly string[],
-  ): void => {
-    if (conversationId !== this.snapshot.currentConversationId) {
-      return
-    }
-    this.liveVoiceTurn = null
-    this.removeMessages(messageIds)
-  }
-
-  /**
-   * Leaving a conversation ends the voice turn streaming into it: its messages
-   * existed only as targets for that transcript, so they must not survive in a
-   * conversation the user has walked away from. Called before the id changes,
-   * while the outgoing conversation is still current, so the removal persists to
-   * the conversation that actually holds them.
-   */
-  private settleLiveVoiceTurnForSwitch(): void {
-    const liveTurn = this.liveVoiceTurn
-    this.liveVoiceTurn = null
-    if (!liveTurn) return
-    if (liveTurn.conversationId !== this.snapshot.currentConversationId) return
-    this.removeMessages(liveTurn.messageIds)
-  }
-
-  /** Drops messages from the current conversation and persists the removal. */
-  private removeMessages(messageIds: readonly string[]): void {
-    const discarded = new Set(messageIds)
-    const previous = this.snapshot.chatMessages
-    const nextMessages = previous.filter(
-      (message) => !discarded.has(message.id),
-    )
-    if (nextMessages.length === previous.length) {
-      return
-    }
-    this.setChatMessages(nextMessages)
-    this.syncAgentConversationMessages(nextMessages)
-    this.persist(nextMessages)
   }
 
   /** Equivalent to the original `handleAssistantMessageEditSave`. */
@@ -1615,8 +1575,16 @@ export class ChatSessionController {
    * waiting-for-approval, queueable (enqueue), active, normal submit.
    */
   submit(input: ChatSessionSubmitInput): ChatSessionSubmitResult {
-    if (this.deps.isVoiceActive()) {
-      return { kind: 'blocked', reason: 'voice-active' }
+    const realtimeSurface = this.deps.getRealtimeSurface?.() ?? null
+    if (realtimeSurface) {
+      // Typed text belongs to the live session while it runs: it opens (or
+      // extends) the spoken turn instead of starting a run.
+      if (input.message.content) {
+        realtimeSurface.sendText(
+          editorStateToPlainText(input.message.content).trim(),
+        )
+      }
+      return { kind: 'submitted', message: input.message }
     }
     if (input.runtimeId !== 'yolo') {
       return this.submitCli(input.message)
@@ -1738,7 +1706,7 @@ export class ChatSessionController {
       'isActive' | 'isWaitingApproval'
     >
   }): Promise<ChatSessionCompactResult | null> {
-    if (this.deps.isVoiceActive()) {
+    if (this.deps.getRealtimeSurface?.() ?? null) {
       return null
     }
     if (input.currentConversationRunSummary.isWaitingApproval) {

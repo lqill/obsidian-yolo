@@ -104,6 +104,7 @@ import {
 import type {
   ChatSessionCliContext,
   ChatSessionControllerDeps,
+  ChatSessionRealtimeSurface,
 } from './ChatSessionController'
 import { ChatSessionController } from './ChatSessionController'
 import CliChatSurface from './CliChatSurface'
@@ -587,8 +588,12 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   // the controller reads it through a getter, so the lock and the mic control
   // can never disagree with what the session is actually doing.
   const realtimeVoice = useRealtimeVoiceStatus()
-  const realtimeActiveRef = useRef(false)
-  realtimeActiveRef.current = realtimeVoice.isActive
+  /**
+   * What the controller routes a submit to while a live session runs, or null.
+   * A ref because the deps object is built once, and assigned during render the
+   * same way the other late-bound deps in this file are.
+   */
+  const realtimeSurfaceRef = useRef<ChatSessionRealtimeSurface | null>(null)
   const sessionControllerDepsRef = useRef<ChatSessionControllerDeps>()
   const sessionControllerDeps = (sessionControllerDepsRef.current ??= {
     getAgentService: () => plugin.getAgentService(),
@@ -620,7 +625,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     setQueryProgress: (action) => setQueryProgress(action),
     runtimeNavigationGenerationRef,
     getCliSubmitContext: () => cliSubmitContextRef.current,
-    isVoiceActive: () => realtimeActiveRef.current,
+    getRealtimeSurface: () => realtimeSurfaceRef.current,
   })
   const sessionController = (sessionControllerRef.current ??=
     new ChatSessionController(
@@ -659,7 +664,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         : Promise.resolve(null),
   })
   const handleToggleVoice = useCallback(() => {
-    if (realtimeActiveRef.current) {
+    if (realtimeSurfaceRef.current) {
       voiceSession.stop()
     } else {
       void voiceSession.start()
@@ -668,12 +673,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
   const handleToggleVoiceMute = useCallback(() => {
     voiceSession.setMuted(!realtimeVoice.muted)
   }, [realtimeVoice.muted, voiceSession])
-  const voiceSendTextRef = useRef<((text: string) => boolean) | null>(null)
-  voiceSendTextRef.current = (text) => {
-    if (!realtimeActiveRef.current) return false
-    voiceSession.sendText(text)
-    return true
-  }
+  realtimeSurfaceRef.current = realtimeVoice.isActive
+    ? { sendText: voiceSession.sendText }
+    : null
 
   const {
     chatMessages,
@@ -719,7 +721,6 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     setQueuedMessageEditState,
     getReasoningLevelForModelId,
     persistReasoningLevelForModel,
-    sendVoiceTextRef: voiceSendTextRef,
   })
   const {
     inputMessage,

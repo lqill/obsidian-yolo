@@ -20,6 +20,7 @@ import type {
 } from '../../types/chat'
 
 import { editorStateToPlainText } from './chat-input/utils/editor-state-to-plain-text'
+import { plainTextToEditorState } from './chat-input/utils/plain-text-to-editor-state'
 import type {
   ChatSessionCliContext,
   ChatSessionControllerDeps,
@@ -268,7 +269,6 @@ function createDeps(
     setQueryProgress,
     runtimeNavigationGenerationRef,
     getCliSubmitContext,
-    isVoiceActive: () => false,
     ...overrides,
   }
   return {
@@ -1213,7 +1213,7 @@ describe('ChatSessionController — C2 submit/abortRun/compactContext/retry', ()
   })
 })
 
-describe('voice turn messages', () => {
+describe('live surface messages', () => {
   const liveUser = () =>
     userMessage('u1', { promptContent: '', selectedModelIds: ['live-model'] })
   const liveAssistant = () =>
@@ -1221,11 +1221,17 @@ describe('voice turn messages', () => {
       content: '',
       metadata: { generationState: 'streaming' },
     })
+  const openTurn = (controller: ChatSessionController, conversationId = 'c1') =>
+    controller.upsertConversationMessages({
+      conversationId,
+      messages: [liveUser(), liveAssistant()],
+      persist: false,
+    })
 
-  it('beginVoiceTurn inserts the still-textless pair, syncs, persists, scrolls', () => {
+  it('inserts the still-textless pair, syncs and scrolls, without persisting', () => {
     const { controller, agentService, forceScrollToBottom } =
       createController('c1')
-    controller.beginVoiceTurn('c1', [liveUser(), liveAssistant()])
+    openTurn(controller)
     expect(controller.getSnapshot().chatMessages.map((m) => m.id)).toEqual([
       'u1',
       'a1',
@@ -1238,26 +1244,42 @@ describe('voice turn messages', () => {
     expect(forceScrollToBottom).toHaveBeenCalled()
   })
 
-  it('beginVoiceTurn no-ops when the conversation id does not match', () => {
+  it('persists nothing for a turn that has not committed', () => {
+    const { controller, createOrUpdateConversation } = createController('c1')
+    openTurn(controller)
+    expect(createOrUpdateConversation).not.toHaveBeenCalled()
+  })
+
+  it('no-ops when the conversation id does not match', () => {
     const { controller } = createController('c1')
-    controller.beginVoiceTurn('other', [liveUser(), liveAssistant()])
+    openTurn(controller, 'other')
     expect(controller.getSnapshot().chatMessages).toEqual([])
   })
 
-  it('beginVoiceTurn no-ops when the turn is already in the conversation', () => {
-    const { controller } = createController('c1', [liveUser(), liveAssistant()])
+  it('no-ops when the same messages are written again', () => {
+    const { controller } = createController('c1')
+    const pair = [liveUser(), liveAssistant()]
+    controller.upsertConversationMessages({
+      conversationId: 'c1',
+      messages: pair,
+      persist: false,
+    })
     const before = controller.getSnapshot().chatMessages
-    controller.beginVoiceTurn('c1', [liveUser(), liveAssistant()])
+    controller.upsertConversationMessages({
+      conversationId: 'c1',
+      messages: pair,
+      persist: false,
+    })
     expect(controller.getSnapshot().chatMessages).toBe(before)
   })
 
-  it('finalizeVoiceTurn replaces the pair in place, same ids, and titles the first turn', () => {
+  it('replaces the pair in place, same ids, and titles the first turn', () => {
     const {
       controller,
       createOrUpdateConversation,
       generateConversationTitle,
     } = createController('c1')
-    controller.beginVoiceTurn('c1', [liveUser(), liveAssistant()])
+    openTurn(controller)
     const finalizedUser = userMessage('u1', {
       content: null,
       promptContent: 'hello there',
@@ -1267,7 +1289,10 @@ describe('voice turn messages', () => {
       metadata: { generationState: 'completed' },
     })
 
-    controller.finalizeVoiceTurn('c1', [finalizedUser, finalizedAssistant])
+    controller.upsertConversationMessages({
+      conversationId: 'c1',
+      messages: [finalizedUser, finalizedAssistant],
+    })
 
     const messages = controller.getSnapshot().chatMessages
     expect(messages.map((m) => m.id)).toEqual(['u1', 'a1'])
@@ -1280,36 +1305,45 @@ describe('voice turn messages', () => {
     )
   })
 
-  it('finalizeVoiceTurn does not re-title a later turn', () => {
+  it('does not re-title a later turn', () => {
     const { controller, generateConversationTitle } = createController('c1', [
       userMessage('earlier-user'),
       assistantMessage('earlier-assistant'),
     ])
-    controller.beginVoiceTurn('c1', [liveUser(), liveAssistant()])
-    controller.finalizeVoiceTurn('c1', [
-      userMessage('u1', { promptContent: 'again' }),
-      assistantMessage('a1', { metadata: { generationState: 'completed' } }),
-    ])
+    openTurn(controller)
+    controller.upsertConversationMessages({
+      conversationId: 'c1',
+      messages: [
+        userMessage('u1', { promptContent: 'again' }),
+        assistantMessage('a1', { metadata: { generationState: 'completed' } }),
+      ],
+    })
     expect(generateConversationTitle).not.toHaveBeenCalled()
   })
 
-  it('finalizeVoiceTurn appends when the live messages were deleted mid-turn', () => {
+  it('appends when the live messages were deleted mid-turn', () => {
     const { controller } = createController('c1')
     const finalizedUser = userMessage('u1', { promptContent: 'kept' })
     const finalizedAssistant = assistantMessage('a1', { content: 'reply' })
-    controller.finalizeVoiceTurn('c1', [finalizedUser, finalizedAssistant])
+    controller.upsertConversationMessages({
+      conversationId: 'c1',
+      messages: [finalizedUser, finalizedAssistant],
+    })
     expect(controller.getSnapshot().chatMessages.map((m) => m.id)).toEqual([
       'u1',
       'a1',
     ])
   })
 
-  it('discardVoiceTurn drops the live pair and persists the removal', () => {
+  it('drops the live pair and persists the removal', () => {
     const { controller, createOrUpdateConversation } = createController('c1', [
       userMessage('earlier'),
     ])
-    controller.beginVoiceTurn('c1', [liveUser(), liveAssistant()])
-    controller.discardVoiceTurn('c1', ['u1', 'a1'])
+    openTurn(controller)
+    controller.upsertConversationMessages({
+      conversationId: 'c1',
+      removeMessageIds: ['u1', 'a1'],
+    })
     expect(controller.getSnapshot().chatMessages.map((m) => m.id)).toEqual([
       'earlier',
     ])
@@ -1318,31 +1352,26 @@ describe('voice turn messages', () => {
     expect(lastCall?.[1]).toEqual([expect.objectContaining({ id: 'earlier' })])
   })
 
-  it('reclaims the live turn from the conversation being left', () => {
+  it('no-ops when neither id is present', () => {
     const { controller, createOrUpdateConversation } = createController('c1', [
       userMessage('earlier'),
     ])
-    controller.beginVoiceTurn('c1', [liveUser(), liveAssistant()])
-
-    controller.setCurrentConversationId('c2')
-
-    expect(controller.getSnapshot().chatMessages.map((m) => m.id)).toEqual([
-      'earlier',
-    ])
-    // The removal lands on the conversation that held the messages, and it
-    // happens while that conversation is still the current one.
-    const lastCall = createOrUpdateConversation.mock.calls.at(-1) as unknown[]
-    expect(lastCall?.[0]).toBe('c1')
-    expect(lastCall?.[1]).toEqual([expect.objectContaining({ id: 'earlier' })])
+    controller.upsertConversationMessages({
+      conversationId: 'c1',
+      removeMessageIds: ['u1', 'a1'],
+    })
+    expect(createOrUpdateConversation).not.toHaveBeenCalled()
   })
 
-  it('keeps a finalized turn when leaving the conversation', () => {
+  it('keeps a committed turn when the conversation changes', () => {
     const { controller } = createController('c1')
-    controller.beginVoiceTurn('c1', [liveUser(), liveAssistant()])
-    controller.finalizeVoiceTurn('c1', [
-      userMessage('u1', { promptContent: 'said' }),
-      assistantMessage('a1', { content: 'answered' }),
-    ])
+    controller.upsertConversationMessages({
+      conversationId: 'c1',
+      messages: [
+        userMessage('u1', { promptContent: 'said' }),
+        assistantMessage('a1', { content: 'answered' }),
+      ],
+    })
 
     controller.setCurrentConversationId('c2')
 
@@ -1350,14 +1379,6 @@ describe('voice turn messages', () => {
       'u1',
       'a1',
     ])
-  })
-
-  it('discardVoiceTurn no-ops when neither id is present', () => {
-    const { controller, createOrUpdateConversation } = createController('c1', [
-      userMessage('earlier'),
-    ])
-    controller.discardVoiceTurn('c1', ['u1', 'a1'])
-    expect(createOrUpdateConversation).not.toHaveBeenCalled()
   })
 })
 
@@ -1372,7 +1393,7 @@ describe('voice turn pipeline', () => {
   afterEach(() => voiceSessionStore.reset())
 
   const createPipeline = () => {
-    const harness = createController('c1', [], { isVoiceActive: () => true })
+    const harness = createController('c1')
     const microphone = {
       start: jest.fn(async () => {}),
       stop: jest.fn(),
@@ -1397,29 +1418,30 @@ describe('voice turn pipeline', () => {
       onTurnOpen: () => {
         liveTurn = createVoiceLiveTurn('c1')
         voiceSessionStore.setLiveTurn(liveTurn)
-        harness.controller.beginVoiceTurn(
-          'c1',
-          buildLiveTurnMessages({
+        harness.controller.upsertConversationMessages({
+          conversationId: 'c1',
+          messages: buildLiveTurnMessages({
             liveTurn,
             liveModelId: 'live-model',
             model: undefined,
           }),
-        )
+          persist: false,
+        })
       },
       onTurn: (turn) => {
         const current = liveTurn
         liveTurn = null
         voiceSessionStore.setLiveTurn(null)
         if (!current) return
-        harness.controller.finalizeVoiceTurn(
-          'c1',
-          buildFinalTurnMessages({
+        harness.controller.upsertConversationMessages({
+          conversationId: 'c1',
+          messages: buildFinalTurnMessages({
             liveTurn: current,
             turn,
             liveModelId: 'live-model',
             model: undefined,
           }),
-        )
+        })
       },
     })
     return { ...harness, session }
@@ -1540,16 +1562,16 @@ describe('voice turn pipeline', () => {
     expect(liveTurn).not.toBeNull()
 
     // What `useVoiceSession.stop()` does: the uncommitted turn is dropped.
-    controller.discardVoiceTurn(liveTurn!.conversationId, [
-      liveTurn!.userMessageId,
-      liveTurn!.assistantMessageId,
-    ])
+    controller.upsertConversationMessages({
+      conversationId: liveTurn!.conversationId,
+      removeMessageIds: [liveTurn!.userMessageId, liveTurn!.assistantMessageId],
+    })
     voiceSessionStore.reset()
 
     expect(controller.getSnapshot().chatMessages).toEqual([])
   })
 
-  it('turns off and leaves nothing behind when the conversation is switched', () => {
+  it('persists nothing for a conversation the user left mid-turn', () => {
     const { session, controller, createOrUpdateConversation } = createPipeline()
     session.start()
     session.handleEvent({
@@ -1558,36 +1580,40 @@ describe('voice turn pipeline', () => {
     } as GeminiLiveServerEvent)
     expect(controller.getSnapshot().chatMessages).toHaveLength(2)
 
-    // What `loadYoloConversation` does first when the user picks another
-    // conversation, followed by what `useVoiceSession`'s effect then does.
+    // Switching conversations replaces the message list wholesale, and the
+    // uncommitted pair was never written, so nothing has to be reclaimed.
     controller.setCurrentConversationId('c2')
     voiceSessionStore.reset()
 
-    expect(controller.getSnapshot().chatMessages).toEqual([])
+    expect(createOrUpdateConversation).not.toHaveBeenCalled()
     expect(voiceSessionStore.getSnapshot().liveTurn).toBeNull()
-    const lastCall = createOrUpdateConversation.mock.calls.at(-1) as unknown[]
-    expect(lastCall?.[0]).toBe('c1')
-    expect(lastCall?.[1]).toEqual([])
   })
 })
 
-describe('voice-active guards', () => {
-  it('blocks submit while voice is active', () => {
-    const { controller } = createController('c1', [], {
-      isVoiceActive: () => true,
+describe('realtime surface routing', () => {
+  it('sends a typed submit to the live session instead of starting a run', () => {
+    const sendText = jest.fn()
+    const { controller, runConversation } = createController('c1', [], {
+      getRealtimeSurface: () => ({ sendText }),
     })
+
     const result = controller.submit({
       runtimeId: 'yolo',
-      message: userMessage('draft-1'),
+      message: userMessage('draft-1', {
+        content: plainTextToEditorState('spoken by typing'),
+      }),
       assistantTimeContextEnabled: false,
       currentConversationRunSummary: idleRunSummary,
     })
-    expect(result.kind).toBe('blocked')
+
+    expect(result.kind).toBe('submitted')
+    expect(sendText).toHaveBeenCalledWith('spoken by typing')
+    expect(runConversation).not.toHaveBeenCalled()
   })
 
-  it('returns null from compactContext while voice is active', async () => {
+  it('returns null from compactContext while a surface is live', async () => {
     const { controller } = createController('c1', [], {
-      isVoiceActive: () => true,
+      getRealtimeSurface: () => ({ sendText: jest.fn() }),
     })
     await expect(
       controller.compactContext({ conversationId: 'c1' } as never),
