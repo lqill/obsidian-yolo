@@ -1,51 +1,46 @@
-import type {
-  SerializedEditorState,
-  SerializedElementNode,
-  SerializedTextNode,
-} from 'lexical'
-
-type SerializedParagraphNode = SerializedElementNode<SerializedTextNode>
-
-function createTextNode(text: string): SerializedTextNode {
-  return {
-    detail: 0,
-    format: 0,
-    mode: 'normal',
-    style: '',
-    text,
-    type: 'text',
-    version: 1,
-  }
-}
-
-function createParagraphNode(text: string): SerializedParagraphNode {
-  return {
-    children: text.length > 0 ? [createTextNode(text)] : [],
-    direction: 'ltr',
-    format: '',
-    indent: 0,
-    type: 'paragraph',
-    version: 1,
-    textFormat: 0,
-    textStyle: '',
-  } as SerializedParagraphNode
-}
+import type { SerializedEditorState } from 'lexical'
 
 /**
- * Inverse of `editorStateToPlainText`, for content that only exists as text —
- * a voice turn's transcript, which has no editor state behind it. Each line
- * becomes a paragraph, which is what the read-only card and the click-to-edit
- * editor both render, and what `editorStateToPlainText` round-trips to.
+ * The inverse of `editorStateToPlainText`, which joins a paragraph's children
+ * with no separator and renders `linebreak` as '\n': lines become `linebreak`
+ * nodes inside ONE paragraph, so the text round-trips exactly. Separate
+ * paragraphs would silently concatenate.
+ *
+ * Used wherever a message's text arrives as a plain string rather than from the
+ * composer (the CLI surface's editable draft, a voice turn's committed text).
  */
-export function plainTextToEditorState(text: string): SerializedEditorState {
-  return {
+export const plainTextToEditorState = (text: string): SerializedEditorState =>
+  ({
     root: {
-      children: text.split('\n').map(createParagraphNode),
-      direction: 'ltr',
+      children: [
+        {
+          children: text.split('\n').flatMap((line, index) => [
+            ...(index > 0 ? [{ type: 'linebreak', version: 1 }] : []),
+            ...(line
+              ? [
+                  {
+                    detail: 0,
+                    format: 0,
+                    mode: 'normal',
+                    style: '',
+                    text: line,
+                    type: 'text',
+                    version: 1,
+                  },
+                ]
+              : []),
+          ]),
+          direction: null,
+          format: '',
+          indent: 0,
+          type: 'paragraph',
+          version: 1,
+        },
+      ],
+      direction: null,
       format: '',
       indent: 0,
       type: 'root',
       version: 1,
     },
-  }
-}
+  }) as unknown as SerializedEditorState

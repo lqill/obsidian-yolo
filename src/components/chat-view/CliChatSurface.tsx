@@ -1,4 +1,3 @@
-import type { SerializedEditorState } from 'lexical'
 import { SquareTerminal } from 'lucide-react'
 import { Notice, TFile } from 'obsidian'
 import {
@@ -39,6 +38,7 @@ import AssistantErrorCard from './AssistantErrorCard'
 import AssistantMessageReasoning from './AssistantMessageReasoning'
 import { CliRuntimeControls } from './chat-input/CliRuntimeControls'
 import { editorStateToPlainText } from './chat-input/utils/editor-state-to-plain-text'
+import { plainTextToEditorState } from './chat-input/utils/plain-text-to-editor-state'
 import { ChatRuntimeActionsProvider } from './chat-runtime-actions-context'
 import { getChatSurfacePreset } from './chat-surface-presets'
 import type { ChatSurfacePreset } from './chat-surface-presets'
@@ -118,42 +118,6 @@ export const handleVisiblePresentedCliDraft = ({
   onHandled(presentedDraft)
   return true
 }
-
-const plainTextToEditorState = (text: string): SerializedEditorState =>
-  ({
-    root: {
-      children: [
-        {
-          children: text.split('\n').flatMap((line, index) => [
-            ...(index > 0 ? [{ type: 'linebreak', version: 1 }] : []),
-            ...(line
-              ? [
-                  {
-                    detail: 0,
-                    format: 0,
-                    mode: 'normal',
-                    style: '',
-                    text: line,
-                    type: 'text',
-                    version: 1,
-                  },
-                ]
-              : []),
-          ]),
-          direction: null,
-          format: '',
-          indent: 0,
-          type: 'paragraph',
-          version: 1,
-        },
-      ],
-      direction: null,
-      format: '',
-      indent: 0,
-      type: 'root',
-      version: 1,
-    },
-  }) as unknown as SerializedEditorState
 
 const getPromptContentText = (
   promptContent: ChatUserMessage['promptContent'],
