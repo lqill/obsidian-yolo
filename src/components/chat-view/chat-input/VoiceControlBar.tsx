@@ -1,6 +1,6 @@
 import { useLanguage } from '../../../contexts/language-context'
-import { useRealtimeVoiceSnapshot } from '../../../core/realtime'
-import type { VoiceFailure } from '../../../core/realtime/voiceSessionStore'
+import type { VoiceFailure } from '../../../core/realtime'
+import { useRealtimeVoiceSnapshot } from '../../../core/realtime/useRealtimeVoice'
 
 /** Core names the failure; the wording lives here, resolved at render time. */
 const FAILURE_KEY: Record<VoiceFailure, string> = {

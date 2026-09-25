@@ -4,7 +4,7 @@ import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import { useLanguage } from '../../contexts/language-context'
-import { useRealtimeUserText } from '../../core/realtime'
+import { useRealtimeUserText } from '../../core/realtime/useRealtimeVoice'
 import { ChatSelectedSkill, ChatUserMessage } from '../../types/chat'
 import { UserMessageDisplaySnapshot } from '../../types/chat-timeline'
 import { Mentionable } from '../../types/mentionable'

@@ -7,7 +7,14 @@ import type {
   VoiceLiveTurn,
   VoiceTurn,
 } from '../../core/realtime'
-import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
+import {
+  beginRealtimeVoiceSession,
+  endRealtimeVoiceSession,
+  failRealtimeVoiceSession,
+  getRealtimeVoiceStatus,
+  markRealtimeVoiceConnecting,
+  setRealtimeVoiceLiveTurn,
+} from '../../core/realtime/sessionControl'
 import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 import type { ChatUserMessage } from '../../types/chat'
 
@@ -57,7 +64,7 @@ export const useVoiceSession = ({
     if (!conversationId) return
     const liveTurn = createVoiceLiveTurn(conversationId)
     liveTurnRef.current = liveTurn
-    voiceSessionStore.setLiveTurn(liveTurn)
+    setRealtimeVoiceLiveTurn(liveTurn)
     assistantStream.begin(conversationId, liveTurn.assistantMessageId)
     sessionController.upsertConversationMessages({
       conversationId,
@@ -97,7 +104,7 @@ export const useVoiceSession = ({
     (turn: VoiceTurn) => {
       const liveTurn = liveTurnRef.current
       liveTurnRef.current = null
-      voiceSessionStore.setLiveTurn(null)
+      setRealtimeVoiceLiveTurn(null)
       if (!liveTurn) return
       assistantStream.end(liveTurn.conversationId, liveTurn.assistantMessageId)
       sessionController.upsertConversationMessages({
@@ -122,11 +129,11 @@ export const useVoiceSession = ({
 
   const start = useCallback(async () => {
     if (startingRef.current) return
-    const currentStatus = voiceSessionStore.getSnapshot().status
+    const currentStatus = getRealtimeVoiceStatus()
     if (currentStatus !== 'idle' && currentStatus !== 'error') return
     if (!Platform.isDesktop) return
     startingRef.current = true
-    voiceSessionStore.setStatus('connecting')
+    markRealtimeVoiceConnecting()
     try {
       const [
         { resolveLiveConnection },
@@ -137,18 +144,18 @@ export const useVoiceSession = ({
       ])
       const resolution = resolveLiveConnection({ settings })
       if (!resolution.ok) {
-        voiceSessionStore.setStatus('error', { failure: resolution.reason })
+        failRealtimeVoiceSession({ failure: resolution.reason })
         return
       }
       pinnedConversationRef.current = conversationId
-      voiceSessionStore.setConversationId(conversationId)
+      beginRealtimeVoiceSession(conversationId)
       let toolBridge: VoiceToolBridge | null = null
       try {
         toolBridge = (await resolveToolBridge?.()) ?? null
       } catch (error) {
         // Fail loud: a session started without its resolved tools would silently
         // diverge from the text agent's surface.
-        voiceSessionStore.setStatus('error', {
+        failRealtimeVoiceSession({
           failure: 'tools_unavailable',
           detail: error instanceof Error ? error.message : String(error),
         })
@@ -168,7 +175,7 @@ export const useVoiceSession = ({
       runtimeRef.current = runtime
       await runtime.start()
     } catch (error) {
-      voiceSessionStore.setStatus('error', {
+      failRealtimeVoiceSession({
         failure: 'start_failed',
         detail: error instanceof Error ? error.message : String(error),
       })
@@ -201,7 +208,7 @@ export const useVoiceSession = ({
         removeMessageIds: [liveTurn.userMessageId, liveTurn.assistantMessageId],
       })
     }
-    voiceSessionStore.reset()
+    endRealtimeVoiceSession()
   }, [assistantStream, sessionController])
 
   useEffect(() => {

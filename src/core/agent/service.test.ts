@@ -2980,8 +2980,7 @@ describe('external assistant streams', () => {
     const unsubscribe = service.subscribeAssistantRenderStream(
       'external-2',
       'assistant-1',
-      (value) =>
-        received.push({ content: value.content, phase: value.phase }),
+      (value) => received.push({ content: value.content, phase: value.phase }),
     )
     service.beginExternalAssistantStream('external-2', 'assistant-1')
     service.publishExternalAssistantStream({

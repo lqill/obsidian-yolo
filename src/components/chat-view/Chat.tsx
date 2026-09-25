@@ -42,8 +42,8 @@ import {
   isCliRuntimeAvailable,
 } from '../../core/cli-runtime'
 import { resolveLocalizedText } from '../../core/modules/moduleI18n'
-import { useRealtimeVoiceStatus } from '../../core/realtime'
 import type { RealtimeVoiceAssistantStream } from '../../core/realtime'
+import { useRealtimeVoiceStatus } from '../../core/realtime/useRealtimeVoice'
 import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
 import type { ChatLeafPlacement } from '../../features/chat/chatLeafSessionManager'
 import { useChatHighlightSession } from '../../features/editor/selection-highlight/useChatHighlightSession'

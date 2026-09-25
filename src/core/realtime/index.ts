@@ -79,6 +79,14 @@ export {
   useRealtimeVoiceSnapshot,
   useRealtimeVoiceStatus,
 } from './useRealtimeVoice'
+export {
+  beginRealtimeVoiceSession,
+  endRealtimeVoiceSession,
+  failRealtimeVoiceSession,
+  getRealtimeVoiceStatus,
+  markRealtimeVoiceConnecting,
+  setRealtimeVoiceLiveTurn,
+} from './sessionControl'
 export type { RealtimeVoiceAssistantStream } from './assistantStream'
 export type { VoiceTurn } from './GeminiLiveSession'
 export type { GeminiLiveHistoryTurn } from './geminiLiveProtocol'
