@@ -1921,6 +1921,32 @@ describe('RequestContextBuilder project instructions injection', () => {
     expect(content).not.toContain('## Project instructions: CLAUDE.md')
     expect(content).not.toContain('project instructions in the vault')
   })
+
+  it('generateSystemPrompt returns the assistant persona and mode prompt the chat request gets', async () => {
+    const app = makeApp(new Map())
+    const settings = {
+      ...baseSettings,
+      currentAssistantId: 'a-1',
+      assistants: [
+        {
+          id: 'a-1',
+          name: 'Tester',
+          systemPrompt: 'You are a Korean language placement tester.',
+        },
+      ],
+    } as unknown as YoloSettings
+    const builder = new RequestContextBuilder(app as never, settings)
+
+    const prompt = await builder.generateSystemPrompt({
+      conversationId: 'conv-pi',
+      hasTools: true,
+      runtimeModePrompt: 'MODE-PROMPT',
+      systemPromptSnapshotMode: 'create',
+    })
+
+    expect(prompt).toContain('You are a Korean language placement tester.')
+    expect(prompt).toContain('MODE-PROMPT')
+  })
 })
 
 describe('RequestContextBuilder generateRequestMessages stamped context', () => {
