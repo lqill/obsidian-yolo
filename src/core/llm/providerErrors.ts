@@ -48,6 +48,22 @@ const isUsableProviderMessage = (value: string): boolean => {
   return message !== '[object Object]' && !/^[[{]/.test(message)
 }
 
+/**
+ * A provider that wraps its own JSON error document in a `message` string
+ * (Gemini does this). Recursing into it is what turns a hidden
+ * "Function call is missing a `thought_signature`" back into the explanation;
+ * a document with no message of its own still yields nothing.
+ */
+const parseEmbeddedProviderBody = (value: string): unknown => {
+  const start = value.search(/[[{]/)
+  if (start === -1) return undefined
+  try {
+    return JSON.parse(value.slice(start)) as unknown
+  } catch {
+    return undefined
+  }
+}
+
 export const extractProviderErrorMessage = (
   value: unknown,
   depth = 0,
@@ -55,18 +71,26 @@ export const extractProviderErrorMessage = (
   if (depth > 5 || value == null) return null
   if (typeof value === 'string') {
     const message = value.trim()
-    if (!isUsableProviderMessage(message)) {
-      return null
+    if (isUsableProviderMessage(message)) {
+      return message
     }
-    return message
+    const embedded = parseEmbeddedProviderBody(message)
+    if (embedded !== undefined) {
+      return extractProviderErrorMessage(embedded, depth + 1)
+    }
+    return null
   }
   if (!isRecord(value)) return null
 
   const directKeys = ['message', 'msg', 'detail', 'error_description'] as const
   for (const key of directKeys) {
     const candidate = value[key]
-    if (typeof candidate === 'string' && isUsableProviderMessage(candidate)) {
-      return candidate.trim()
+    if (typeof candidate !== 'string') continue
+    if (isUsableProviderMessage(candidate)) return candidate.trim()
+    const embedded = parseEmbeddedProviderBody(candidate)
+    if (embedded !== undefined) {
+      const nested = extractProviderErrorMessage(embedded, depth + 1)
+      if (nested) return nested
     }
   }
 

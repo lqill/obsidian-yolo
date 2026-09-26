@@ -62,6 +62,29 @@ describe('provider errors', () => {
     )
   })
 
+  it('unwraps a provider that nests its own JSON error document in message', () => {
+    // Gemini returns this shape for a rejected function-call history: the real
+    // explanation is a JSON string inside `error.message`.
+    expect(
+      extractProviderErrorMessage({
+        error: {
+          code: 400,
+          status: 'INVALID_ARGUMENT',
+          message: JSON.stringify({
+            error: {
+              code: 400,
+              message:
+                'Function call is missing a thought_signature in functionCall parts.',
+              status: 'INVALID_ARGUMENT',
+            },
+          }),
+        },
+      }),
+    ).toBe(
+      'Function call is missing a thought_signature in functionCall parts.',
+    )
+  })
+
   it('normalizes a non-standard OpenAI-compatible error and logs its raw response', async () => {
     const fetch = createProviderErrorFetch(
       jest.fn(
