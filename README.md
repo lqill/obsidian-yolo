@@ -33,6 +33,145 @@
   </a>
 </p>
 
+## What this fork adds: Gemini Live voice
+
+The note above is the *why*. This is the *what* — the fork adds a third execution surface next to the
+text agent and the CLI runtimes: pick a Gemini API-key provider in **Settings → Voice**, press the mic
+in the composer, and talk. The model answers with audio, and the exchange lands in the conversation as
+ordinary messages.
+
+```mermaid
+flowchart TB
+  classDef added fill:#e7f5ea,stroke:#2e7d32,color:#14361a
+  classDef edited fill:#fff6e0,stroke:#b8860b,color:#4a3600
+  classDef reused fill:#eef1f4,stroke:#8a9aa8,color:#2f3b45
+
+  subgraph module["ADDED · src/core/realtime/ (desktop only)"]
+    direction TB
+    Resolve["resolveLiveConnection.ts<br/>settings to endpoint, key, model, voice"]
+    History["voiceHistory.ts<br/>conversation to seeded turns"]
+    Factory["index.ts · createGeminiLiveRuntime"]
+    Protocol["geminiLiveProtocol.ts<br/>BidiGenerateContent frames"]
+    Client["GeminiLiveClient.ts<br/>WebSocket"]
+    Session["GeminiLiveSession.ts<br/>per-turn state machine"]
+    Bridge["voiceToolBridge.ts<br/>function calls to tool gateway"]
+    Store["voiceSessionStore.ts<br/>status, mic level, user transcript"]
+    ReadApi["useRealtimeVoice.ts<br/>read hooks"]
+    ControlApi["sessionControl.ts<br/>lifecycle calls"]
+    Contract["assistantStream.ts<br/>where spoken text goes"]
+    Pcm["audio/pcm.ts<br/>PCM math, base64, resample"]
+    Mic["audio/PcmMicCapture.ts + micWorklet.ts<br/>16 kHz capture"]
+    Player["audio/LiveAudioPlayer.ts<br/>24 kHz playback"]
+
+    Resolve --> Factory
+    History --> Factory
+    Bridge --> Factory
+    Factory --> Client
+    Factory --> Session
+    Protocol --- Client
+    Protocol --- Session
+    Pcm --> Mic
+    Pcm --> Player
+    Mic --> Session
+    Session --> Player
+    Session --> Store
+    Store --> ReadApi
+    ControlApi --> Store
+    Contract -.-> Session
+  end
+
+  LiveApi["Gemini Live API<br/>BidiGenerateContent over WSS"]
+
+  subgraph surface["ADDED · chat surface"]
+    Adapter["useVoiceSession.ts<br/>session to conversation adapter"]
+    TurnMessages["voiceTurnMessages.ts<br/>a turn's message pair"]
+    ControlBar["VoiceControlBar.tsx<br/>status, meter, mute, end"]
+  end
+
+  subgraph upstream["EDITED upstream"]
+    ChatTsx["Chat.tsx<br/>the single decision point"]
+    Controller["ChatSessionController.ts<br/>upsertConversationMessages, getRealtimeSurface"]
+    Service["agent/service.ts<br/>external assistant stream"]
+    Gateway["agent/tool-gateway.ts<br/>advertisesAllToolSchemas"]
+    Caps["cli-runtime/capabilities.ts<br/>supportsRealtimeVoice"]
+    InputUi["ChatUserInput.tsx · ChatModeSelect.tsx<br/>ChatHeader.tsx · UserMessageItem.tsx"]
+    SettingsUi["settings: voice schema + Voice section"]
+  end
+
+  subgraph reused["REUSED upstream, unchanged"]
+    RenderStream["assistantRenderStreamStore"]
+    AssistantBubble["AssistantMessageContent.tsx"]
+    ToolGateway["AgentToolGateway to dispatcher.ts"]
+    Composer["composer submit path"]
+    ChatMode["resolveChatModeRuntime"]
+  end
+
+  Client -->|frames| LiveApi
+  LiveApi -->|frames| Client
+  Session --> Contract --> Adapter
+  Adapter --> Service --> RenderStream --> AssistantBubble
+  Bridge --> ToolGateway
+  Adapter --> Controller
+  Controller --> Composer
+  ChatTsx --> Adapter
+  ChatTsx -->|getRealtimeSurface| Controller
+  Adapter --> TurnMessages
+  Caps --> ChatTsx
+  InputUi --> ChatTsx
+  SettingsUi --> Resolve
+  ChatMode --> Bridge
+  ReadApi --> ChatTsx
+  ReadApi --> ControlBar
+  ReadApi --> InputUi
+
+  class Resolve,History,Factory,Protocol,Client,Session,Bridge,Store,ReadApi,ControlApi,Contract,Pcm,Mic,Player,Adapter,TurnMessages,ControlBar added
+  class ChatTsx,Controller,Service,Gateway,Caps,InputUi,SettingsUi edited
+  class RenderStream,AssistantBubble,ToolGateway,Composer,ChatMode reused
+```
+
+**Legend** — green: added by this fork · yellow: edited upstream · grey: upstream code, reused as is ·
+uncoloured: Google's Live API and the network between it and the plugin.
+Test files are not shown; they add another ~2,200 lines.
+
+### Adds
+
+| | Lines (non-test) |
+| --- | --- |
+| Added: `src/core/realtime/` — transport, protocol codec, turn state machine, audio capture/playback, session state, connection resolution, history seeding, tool bridge | 1,553 |
+| Added: chat surface — session adapter, turn message builders, control bar, shared text→editor-state helper | 414 |
+| Added: generic seams in upstream core (external stream 49, blocked-prefix helper 19, capability flag 12, gateway option 12, two exports 4) | 96 |
+| Added: lines written into existing upstream files (the edits listed below) | 315 |
+| Added: `settings.voice` schema, Voice settings section, i18n (25 keys × 3 locales), stylesheet | 479 |
+| Added: docs | 18 |
+| **Non-test total** | **2,875** |
+| Tests (unit + integration, not shown above) | 2,198 |
+| **Added vs upstream** | **5,073** (68 lines deleted) |
+
+### Changes upstream
+
+Small, generic seams rather than voice-specific branches:
+
+- **`AgentSessionService`** gains an *external assistant stream*: a surface that is not an agent run can
+  publish assistant text into the same render stream, so the assistant bubble needs no voice code.
+- **`AgentToolGateway`** gains `advertisesAllToolSchemas`, for a surface that receives every schema up
+  front instead of through the deferred-disclosure protocol.
+- **`ChatRuntimeCapabilities`** gains `supportsRealtimeVoice` — the mic control and the picker locks read
+  the capability table instead of comparing against the active runtime.
+- **`ChatSessionController`** gains one generic write-back (`upsertConversationMessages`) and one
+  `getRealtimeSurface` port; a typed message while a session runs routes to it exactly the way it
+  already routes to a CLI runtime.
+- **`Chat.tsx`** is the single place that turns "a session is live" into picker locks and those ports.
+- `src/components/chat-view/RuntimeSelector.tsx` and `AssistantMessageContent.tsx` are **byte-identical
+  to upstream** again; `CliChatSurface.tsx` lost a private helper the fork now shares.
+
+### Rules it follows
+
+- It never calls `AgentSessionService.run` — the Live model drives its own loop, tool calls included.
+- **One streaming channel**: the spoken transcript uses the agent's render stream, not a second one.
+- The same tool boundary as text: workspace scope, skill paths and the terminal command blocklist.
+- Audio never reaches disk, and an uncommitted turn is not persisted.
+- Desktop only; the mobile graph never loads the module.
+
 ## Sponsors
 
 <table>
