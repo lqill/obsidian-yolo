@@ -1,5 +1,6 @@
 // src/core/realtime/resolveLiveConnection.ts
 import type { YoloSettings } from '../../settings/schema/setting.types'
+import { DEFAULT_VOICE_SETTINGS } from '../../settings/schema/setting.types'
 import {
   getDefaultBaseUrlForPreset,
   normalizeGeminiProviderBaseUrl,
@@ -72,7 +73,7 @@ export const resolveLiveConnection = ({
       baseUrl,
       apiKey: provider.apiKey,
       model,
-      voiceName: voice.voiceName.trim() || 'Kore',
+      voiceName: voice.voiceName.trim() || DEFAULT_VOICE_SETTINGS.voiceName,
       systemPrompt: voice.systemPrompt,
     },
   }

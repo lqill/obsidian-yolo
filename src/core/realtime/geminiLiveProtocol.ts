@@ -33,13 +33,13 @@ export type GeminiLiveHistoryTurn = {
 
 export type GeminiLiveServerEvent =
   | { kind: 'ready' }
-  | { kind: 'audio'; dataBase64: string; mimeType: string }
+  | { kind: 'audio'; dataBase64: string }
   | { kind: 'inputTranscript'; text: string }
   | { kind: 'outputTranscript'; text: string }
   | { kind: 'interrupted' }
   | { kind: 'turnComplete' }
   | { kind: 'toolCall'; functionCalls: GeminiLiveFunctionCall[] }
-  | { kind: 'error'; message: string; raw?: unknown }
+  | { kind: 'error'; message: string }
 
 export type GeminiLiveSetupConfig = {
   model: string
@@ -113,7 +113,12 @@ export const buildAudioMessage = (
   dataBase64: string,
 ): GeminiLiveClientMessage => ({
   realtimeInput: {
-    audio: { data: dataBase64, mimeType: 'audio/pcm;rate=16000' },
+    audio: {
+      data: dataBase64,
+      // The same rate the capture runs at, so the declared and actual rates
+      // cannot drift apart.
+      mimeType: `audio/pcm;rate=${LIVE_INPUT_SAMPLE_RATE}`,
+    },
   },
 })
 
@@ -128,9 +133,6 @@ export const buildAudioStreamEndMessage = (): GeminiLiveClientMessage => ({
 export const buildToolResponseMessage = (
   functionResponses: GeminiLiveFunctionResponse[],
 ): GeminiLiveClientMessage => ({ toolResponse: { functionResponses } })
-
-export const encodeClientMessage = (message: GeminiLiveClientMessage): string =>
-  JSON.stringify(message)
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null
@@ -155,14 +157,7 @@ export const parseServerMessage = (raw: unknown): GeminiLiveServerEvent[] => {
       const inline = asRecord(asRecord(part)?.inlineData)
       const data = inline?.data
       if (typeof data === 'string') {
-        events.push({
-          kind: 'audio',
-          dataBase64: data,
-          mimeType:
-            typeof inline?.mimeType === 'string'
-              ? inline.mimeType
-              : 'audio/pcm',
-        })
+        events.push({ kind: 'audio', dataBase64: data })
       }
     }
     const input = asRecord(content.inputTranscription)
@@ -203,7 +198,6 @@ export const parseServerMessage = (raw: unknown): GeminiLiveServerEvent[] => {
         typeof error.message === 'string'
           ? error.message
           : 'Unknown Live API error',
-      raw: error,
     })
   }
 

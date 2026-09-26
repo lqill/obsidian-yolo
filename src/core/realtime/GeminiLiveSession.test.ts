@@ -308,19 +308,15 @@ describe('GeminiLiveSession initial history', () => {
     expect(microphone.start).toHaveBeenCalledTimes(1)
   })
 
-  it('drops whitespace-only turns before replaying', async () => {
-    const { session, client } = makeFakes({
-      initialHistory: [
-        { role: 'user', text: '   ' },
-        { role: 'user', text: 'real question' },
-      ],
-    })
+  it('replays the turns it was given, and only those', async () => {
+    const history: GeminiLiveHistoryTurn[] = [
+      { role: 'user', text: 'real question' },
+    ]
+    const { session, client } = makeFakes({ initialHistory: history })
     await session.start()
     session.handleEvent({ kind: 'ready' })
     await flushAsync()
-    expect(client.sendInitialHistory).toHaveBeenCalledWith([
-      { role: 'user', text: 'real question' },
-    ])
+    expect(client.sendInitialHistory).toHaveBeenCalledWith(history)
   })
 
   it('surfaces a microphone failure after history replay', async () => {

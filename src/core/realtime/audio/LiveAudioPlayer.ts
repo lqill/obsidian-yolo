@@ -36,11 +36,8 @@ export class LiveAudioPlayer {
 
   flush(): void {
     for (const node of this.scheduled) {
-      try {
-        node.stop()
-      } catch {
-        // node already stopped
-      }
+      // Idempotent per the Web Audio spec: stopping an ended node is a no-op.
+      node.stop()
     }
     this.scheduled.clear()
     this.nextStartTime = this.context?.currentTime ?? 0

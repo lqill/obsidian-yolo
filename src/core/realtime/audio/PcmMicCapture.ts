@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-deprecated -- ScriptProcessorNode is the intentional fallback when AudioWorklet.addModule is unavailable */
 import { LIVE_INPUT_SAMPLE_RATE } from '../geminiLiveProtocol'
 
 import { MIC_WORKLET_SOURCE } from './micWorklet'
@@ -18,15 +17,14 @@ export type PcmMicCaptureOptions = {
 
 /**
  * Desktop-only microphone capture at 16 kHz mono, emitted as ~100 ms base64
- * PCM16 frames. Prefers a native 16 kHz AudioContext; falls back to a linear
- * resampler and, if AudioWorklet is unavailable, a ScriptProcessorNode.
+ * PCM16 frames. Prefers a native 16 kHz AudioContext and resamples linearly
+ * when the platform hands back a different rate.
  */
 export class PcmMicCapture {
   private stream: MediaStream | null = null
   private context: AudioContext | null = null
   private source: MediaStreamAudioSourceNode | null = null
   private worklet: AudioWorkletNode | null = null
-  private scriptNode: ScriptProcessorNode | null = null
   private pending = new Int16Array(0)
   private muted = false
 
@@ -44,48 +42,29 @@ export class PcmMicCapture {
       })
       this.context = new AudioContext({ sampleRate: LIVE_INPUT_SAMPLE_RATE })
       this.source = this.context.createMediaStreamSource(this.stream)
-
-      if (typeof this.context.audioWorklet !== 'undefined') {
-        const blobUrl = URL.createObjectURL(
-          new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }),
-        )
-        await this.context.audioWorklet.addModule(blobUrl)
-        URL.revokeObjectURL(blobUrl)
-        this.worklet = new AudioWorkletNode(this.context, 'mic-capture')
-        this.worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-          const context = this.context
-          const frame = new Int16Array(event.data)
-          const resampled =
-            context && context.sampleRate !== LIVE_INPUT_SAMPLE_RATE
-              ? float32ToInt16(
-                  resampleLinear(
-                    int16ToFloat32(frame),
-                    context.sampleRate,
-                    LIVE_INPUT_SAMPLE_RATE,
-                  ),
-                )
-              : frame
-          this.pushFrame(resampled)
-        }
-        this.source.connect(this.worklet)
-        this.worklet.connect(this.context.destination)
-      } else {
-        this.scriptNode = this.context.createScriptProcessor(FRAME_SIZE, 1, 1)
-        this.scriptNode.onaudioprocess = (event) => {
-          const input = event.inputBuffer.getChannelData(0)
-          const resampled =
-            this.context && this.context.sampleRate !== LIVE_INPUT_SAMPLE_RATE
-              ? resampleLinear(
-                  input,
-                  this.context.sampleRate,
+      const blobUrl = URL.createObjectURL(
+        new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }),
+      )
+      await this.context.audioWorklet.addModule(blobUrl)
+      URL.revokeObjectURL(blobUrl)
+      this.worklet = new AudioWorkletNode(this.context, 'mic-capture')
+      this.worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+        const context = this.context
+        const frame = new Int16Array(event.data)
+        const resampled =
+          context && context.sampleRate !== LIVE_INPUT_SAMPLE_RATE
+            ? float32ToInt16(
+                resampleLinear(
+                  int16ToFloat32(frame),
+                  context.sampleRate,
                   LIVE_INPUT_SAMPLE_RATE,
-                )
-              : input
-          this.pushFrame(float32ToInt16(resampled))
-        }
-        this.source.connect(this.scriptNode)
-        this.scriptNode.connect(this.context.destination)
+                ),
+              )
+            : frame
+        this.pushFrame(resampled)
       }
+      this.source.connect(this.worklet)
+      this.worklet.connect(this.context.destination)
     } catch (error) {
       this.stop()
       throw error
@@ -118,7 +97,6 @@ export class PcmMicCapture {
 
   stop(): void {
     this.worklet?.disconnect()
-    this.scriptNode?.disconnect()
     this.source?.disconnect()
     this.stream?.getTracks().forEach((track) => track.stop())
     void this.context?.close()
@@ -126,7 +104,6 @@ export class PcmMicCapture {
     this.context = null
     this.source = null
     this.worklet = null
-    this.scriptNode = null
     this.pending = new Int16Array(0)
   }
 }

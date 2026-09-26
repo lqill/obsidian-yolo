@@ -8,7 +8,6 @@ import type {
   VoiceTurn,
 } from '../../core/realtime'
 import {
-  beginRealtimeVoiceSession,
   endRealtimeVoiceSession,
   failRealtimeVoiceSession,
   getRealtimeVoiceStatus,
@@ -148,7 +147,6 @@ export const useVoiceSession = ({
         return
       }
       pinnedConversationRef.current = conversationId
-      beginRealtimeVoiceSession(conversationId)
       let toolBridge: VoiceToolBridge | null = null
       try {
         toolBridge = (await resolveToolBridge?.()) ?? null
@@ -166,7 +164,6 @@ export const useVoiceSession = ({
         onTurn: commitTurn,
         onTurnOpen: openTurn,
         onAssistantText: publishAssistantText,
-        createSocket: (url) => new WebSocket(url),
         toolBridge: toolBridge ?? undefined,
         initialHistory: buildVoiceHistoryTurns(
           sessionController.getSnapshot().chatMessages,

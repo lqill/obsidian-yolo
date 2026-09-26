@@ -7,15 +7,6 @@ import type {
 } from './voiceSessionStore'
 import { voiceSessionStore } from './voiceSessionStore'
 
-const IDLE_STATUS: VoiceStatusSnapshot = {
-  status: 'idle',
-  isActive: false,
-  muted: false,
-  activeToolName: null,
-  error: null,
-  liveTurn: null,
-}
-
 const getNoText = (): string => ''
 
 /**
@@ -36,7 +27,7 @@ export function useRealtimeVoiceStatus(): VoiceStatusSnapshot {
   return useSyncExternalStore(
     voiceSessionStore.subscribeStatus,
     voiceSessionStore.getStatusSnapshot,
-    () => IDLE_STATUS,
+    voiceSessionStore.getStatusSnapshot,
   )
 }
 

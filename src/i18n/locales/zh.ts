@@ -2697,7 +2697,6 @@ export const zh: TranslationKeys = {
   voiceToolsEnabledDesc:
     '允许语音模型调用与文本代理相同的工具。需要审批的工具仅在当前模式开启 YOLO 时才会执行。',
   voiceToolRunning: '正在使用工具',
-  voiceDesktopOnly: '语音模式仅支持桌面端。',
   voiceUnavailable: '请在设置中选择一个 Gemini API 密钥提供商以使用语音模式。',
   voiceProviderUnsupported:
     '语音模式需要配置了 API 密钥的 Gemini 提供商；暂不支持 OAuth 提供商。',

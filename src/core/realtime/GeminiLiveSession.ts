@@ -5,7 +5,6 @@ import type {
   GeminiLiveFunctionResponse,
   GeminiLiveHistoryTurn,
 } from './geminiLiveProtocol'
-import { normalizeVoiceHistoryTurns } from './voiceHistory'
 import type { VoiceSessionStore } from './voiceSessionStore'
 
 export type VoiceTurn = { userText: string; assistantText: string }
@@ -53,14 +52,12 @@ export type GeminiLiveSessionOptions = {
   toolHandler?: (
     calls: GeminiLiveFunctionCall[],
   ) => Promise<GeminiLiveFunctionResponse[]>
-  /** Prior turns replayed on `setupComplete` so a restarted session keeps context. */
+  /** Prior turns replayed on `setupComplete`; already normalized by the caller. */
   initialHistory?: GeminiLiveHistoryTurn[]
 }
 
-type VoiceTurnState = 'idle' | 'open' | 'committed'
-
 export class GeminiLiveSession {
-  private turnState: VoiceTurnState = 'idle'
+  private turnOpen = false
   private typedText = ''
   private spokenUserText = ''
   private assistantText = ''
@@ -70,18 +67,17 @@ export class GeminiLiveSession {
   // concurrently would let the later batch overwrite the active-tool chip and
   // send responses out of request order.
   private toolCallChain: Promise<void> = Promise.resolve()
-  private readonly history: GeminiLiveHistoryTurn[]
 
-  constructor(private readonly options: GeminiLiveSessionOptions) {
-    this.history = normalizeVoiceHistoryTurns(options.initialHistory ?? [])
-  }
+  constructor(private readonly options: GeminiLiveSessionOptions) {}
 
   async start(): Promise<void> {
     this.stopped = false
     this.options.store.setStatus('connecting')
     // With history, capture waits for `ready`: the server must receive the
     // seeded `clientContent` before any realtime input reaches the session.
-    if (this.history.length === 0) await this.options.microphone.start()
+    if ((this.options.initialHistory?.length ?? 0) === 0) {
+      await this.options.microphone.start()
+    }
     this.options.client.connect()
   }
 
@@ -111,20 +107,18 @@ export class GeminiLiveSession {
   }
 
   /**
-   * Opens the turn, discarding the previous turn's accumulated text if it
-   * already committed, and signals a first open so the caller can create the
-   * turn's messages before any of its text reaches the screen.
+   * Opens the turn, resetting the accumulators, and signals a first open so the
+   * caller can create the turn's messages before any of its text reaches the
+   * screen.
    */
   private beginTurn(): void {
-    const opensTurn = this.turnState !== 'open'
-    if (this.turnState === 'committed') {
-      this.typedText = ''
-      this.spokenUserText = ''
-      this.assistantText = ''
-      this.options.store.clearPartialUser()
-    }
-    this.turnState = 'open'
-    if (opensTurn) this.options.onTurnOpen?.()
+    if (this.turnOpen) return
+    this.turnOpen = true
+    this.typedText = ''
+    this.spokenUserText = ''
+    this.assistantText = ''
+    this.options.store.clearPartialUser()
+    this.options.onTurnOpen?.()
   }
 
   /**
@@ -132,8 +126,9 @@ export class GeminiLiveSession {
    * realtime conversation until `turnComplete`), then opens the microphone.
    */
   private async replayInitialHistory(): Promise<void> {
-    if (this.stopped || this.history.length === 0) return
-    this.options.client.sendInitialHistory(this.history)
+    const history = this.options.initialHistory ?? []
+    if (this.stopped || history.length === 0) return
+    this.options.client.sendInitialHistory(history)
     try {
       await this.options.microphone.start()
     } catch (error) {
@@ -225,11 +220,11 @@ export class GeminiLiveSession {
   }
 
   private commitTurn(): void {
-    if (this.turnState !== 'open') return
+    if (!this.turnOpen) return
     const spoken = this.spokenUserText.trim()
     const userText = [this.typedText.trim(), spoken].filter(Boolean).join('\n')
     const assistantText = this.assistantText.trim()
-    this.turnState = 'committed'
+    this.turnOpen = false
     this.typedText = ''
     this.spokenUserText = ''
     this.assistantText = ''

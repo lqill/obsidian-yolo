@@ -9,19 +9,8 @@ import {
   buildSetupMessage,
   buildTextMessage,
   buildToolResponseMessage,
-  encodeClientMessage,
   parseServerMessage,
 } from './geminiLiveProtocol'
-
-export type WebSocketLike = {
-  readyState: number
-  send(data: string): void
-  close(code?: number, reason?: string): void
-  onopen: ((ev: unknown) => void) | null
-  onmessage: ((ev: { data: unknown }) => void) | null
-  onerror: ((ev: unknown) => void) | null
-  onclose: ((ev: { code: number; reason: string }) => void) | null
-}
 
 export type GeminiLiveClientEvent =
   | GeminiLiveServerEvent
@@ -30,25 +19,24 @@ export type GeminiLiveClientEvent =
 export type GeminiLiveClientOptions = {
   url: string
   setupConfig: GeminiLiveSetupConfig
-  createSocket: (url: string) => WebSocketLike
   onEvent: (event: GeminiLiveClientEvent) => void
 }
 
 const OPEN = 1
 
 export class GeminiLiveClient {
-  private socket: WebSocketLike | null = null
+  private socket: WebSocket | null = null
   private readonly setupMessage: string
 
   constructor(private readonly options: GeminiLiveClientOptions) {
-    this.setupMessage = encodeClientMessage(
-      buildSetupMessage(options.setupConfig),
-    )
+    this.setupMessage = JSON.stringify(buildSetupMessage(options.setupConfig))
   }
 
   connect(): void {
     if (this.socket) return
-    const socket = this.options.createSocket(this.options.url)
+    // The Gemini Live API is served over WSS only, and the browser's own
+    // WebSocket is the one transport available in the renderer.
+    const socket = new WebSocket(this.options.url)
     this.socket = socket
     socket.onopen = () => socket.send(this.setupMessage)
     socket.onmessage = (event) => {
@@ -87,29 +75,29 @@ export class GeminiLiveClient {
     for (const event of parseServerMessage(parsed)) this.options.onEvent(event)
   }
 
-  private send(message: string): void {
+  private send(message: Record<string, unknown>): void {
     if (this.socket && this.socket.readyState === OPEN)
-      this.socket.send(message)
+      this.socket.send(JSON.stringify(message))
   }
 
   sendText(text: string): void {
-    this.send(encodeClientMessage(buildTextMessage(text)))
+    this.send(buildTextMessage(text))
   }
 
   sendInitialHistory(turns: GeminiLiveHistoryTurn[]): void {
-    this.send(encodeClientMessage(buildClientContentHistoryMessage(turns)))
+    this.send(buildClientContentHistoryMessage(turns))
   }
 
   sendAudio(dataBase64: string): void {
-    this.send(encodeClientMessage(buildAudioMessage(dataBase64)))
+    this.send(buildAudioMessage(dataBase64))
   }
 
   sendAudioStreamEnd(): void {
-    this.send(encodeClientMessage(buildAudioStreamEndMessage()))
+    this.send(buildAudioStreamEndMessage())
   }
 
   sendToolResponse(functionResponses: GeminiLiveFunctionResponse[]): void {
-    this.send(encodeClientMessage(buildToolResponseMessage(functionResponses)))
+    this.send(buildToolResponseMessage(functionResponses))
   }
 
   close(): void {

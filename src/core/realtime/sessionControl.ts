@@ -22,11 +22,6 @@ export const markRealtimeVoiceConnecting = (): void => {
   voiceSessionStore.setStatus('connecting')
 }
 
-/** Pins the conversation the session will write its turns into. */
-export const beginRealtimeVoiceSession = (conversationId: string): void => {
-  voiceSessionStore.setConversationId(conversationId)
-}
-
 export const failRealtimeVoiceSession = (error: VoiceError): void => {
   voiceSessionStore.setStatus('error', error)
 }

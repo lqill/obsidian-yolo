@@ -47,7 +47,6 @@ export type VoiceSessionSnapshot = {
   liveTurn: VoiceLiveTurn | null
   error: VoiceError | null
   activeToolName: string | null
-  conversationId: string | null
 }
 
 const IDLE: VoiceSessionSnapshot = {
@@ -58,7 +57,6 @@ const IDLE: VoiceSessionSnapshot = {
   liveTurn: null,
   error: null,
   activeToolName: null,
-  conversationId: null,
 }
 
 /**
@@ -160,9 +158,6 @@ export class VoiceSessionStore {
     status: VoiceSessionStatus,
     error: VoiceError | null = null,
   ): void => this.set({ status, error })
-
-  setConversationId = (conversationId: string | null): void =>
-    this.set({ conversationId })
 
   setMuted = (muted: boolean): void => this.set({ muted })
 

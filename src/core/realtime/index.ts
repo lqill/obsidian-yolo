@@ -1,6 +1,6 @@
 import { LiveAudioPlayer } from './audio/LiveAudioPlayer'
 import { PcmMicCapture } from './audio/PcmMicCapture'
-import { GeminiLiveClient, type WebSocketLike } from './GeminiLiveClient'
+import { GeminiLiveClient } from './GeminiLiveClient'
 import {
   type GeminiLiveHistoryTurn,
   buildLiveWebSocketUrl,
@@ -18,7 +18,6 @@ export type CreateGeminiLiveRuntimeOptions = {
   onAssistantText?: (text: string) => void
   /** Fired once per turn when it opens; see `GeminiLiveSessionOptions`. */
   onTurnOpen?: () => void
-  createSocket: (url: string) => WebSocketLike
   toolBridge?: VoiceToolBridge
   /** Prior conversation turns replayed so a restarted session keeps context. */
   initialHistory?: GeminiLiveHistoryTurn[]
@@ -29,6 +28,8 @@ export const createGeminiLiveRuntime = (
 ): GeminiLiveSession => {
   // eslint-disable-next-line prefer-const -- declared before the client so the onEvent closure can reference it
   let session: GeminiLiveSession
+  // Local so the tool handler closure keeps the narrowing; `options.toolBridge`
+  // cannot be narrowed inside it.
   const toolBridge = options.toolBridge
   const initialHistory = normalizeVoiceHistoryTurns(
     options.initialHistory ?? [],
@@ -45,7 +46,6 @@ export const createGeminiLiveRuntime = (
       functionDeclarations: toolBridge?.declarations ?? [],
       initialHistoryInClientContent: initialHistory.length > 0,
     },
-    createSocket: options.createSocket,
     onEvent: (event) => session.handleEvent(event),
   })
 
@@ -70,17 +70,13 @@ export const createGeminiLiveRuntime = (
 }
 
 export { resolveLiveConnection } from './resolveLiveConnection'
-export {
-  buildVoiceHistoryTurns,
-  normalizeVoiceHistoryTurns,
-} from './voiceHistory'
+export { buildVoiceHistoryTurns } from './voiceHistory'
 export {
   useRealtimeUserText,
   useRealtimeVoiceSnapshot,
   useRealtimeVoiceStatus,
 } from './useRealtimeVoice'
 export {
-  beginRealtimeVoiceSession,
   endRealtimeVoiceSession,
   failRealtimeVoiceSession,
   getRealtimeVoiceStatus,

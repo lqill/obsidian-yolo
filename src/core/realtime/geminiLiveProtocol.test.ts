@@ -1,12 +1,12 @@
 // src/core/realtime/geminiLiveProtocol.test.ts
 import {
+  buildAudioMessage,
   buildAudioStreamEndMessage,
   buildClientContentHistoryMessage,
   buildLiveWebSocketUrl,
   buildSetupMessage,
   buildTextMessage,
   buildToolResponseMessage,
-  encodeClientMessage,
   parseServerMessage,
 } from './geminiLiveProtocol'
 
@@ -42,14 +42,18 @@ describe('buildSetupMessage', () => {
   })
 })
 
-describe('encodeClientMessage', () => {
-  it('serializes text and audioStreamEnd frames', () => {
-    expect(JSON.parse(encodeClientMessage(buildTextMessage('hi')))).toEqual({
-      realtimeInput: { text: 'hi' },
+describe('client frames', () => {
+  it('names the capture rate in the audio frame', () => {
+    expect(buildAudioMessage('AAAA')).toEqual({
+      realtimeInput: {
+        audio: { data: 'AAAA', mimeType: 'audio/pcm;rate=16000' },
+      },
     })
-    expect(
-      JSON.parse(encodeClientMessage(buildAudioStreamEndMessage())),
-    ).toEqual({
+  })
+
+  it('serializes text and audioStreamEnd frames', () => {
+    expect(buildTextMessage('hi')).toEqual({ realtimeInput: { text: 'hi' } })
+    expect(buildAudioStreamEndMessage()).toEqual({
       realtimeInput: { audioStreamEnd: true },
     })
   })
@@ -72,9 +76,7 @@ describe('parseServerMessage', () => {
         },
       },
     })
-    expect(events).toEqual([
-      { kind: 'audio', dataBase64: 'AAAA', mimeType: 'audio/pcm;rate=24000' },
-    ])
+    expect(events).toEqual([{ kind: 'audio', dataBase64: 'AAAA' }])
   })
 
   it('parses input/output transcription and turn signals', () => {
@@ -105,7 +107,7 @@ describe('parseServerMessage', () => {
       { kind: 'toolCall', functionCalls: [{ id: '1', name: 'foo', args: {} }] },
     ])
     expect(parseServerMessage({ error: { message: 'bad model' } })).toEqual([
-      { kind: 'error', message: 'bad model', raw: { message: 'bad model' } },
+      { kind: 'error', message: 'bad model' },
     ])
   })
 

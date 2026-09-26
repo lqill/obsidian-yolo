@@ -1323,7 +1323,7 @@ const VoiceSettingsSection = () => {
   }
 
   return (
-    <section className="yolo-models-block yolo-voice-block">
+    <section className="yolo-models-block">
       <div className="yolo-models-block-head">
         <div className="yolo-models-block-head-title-row">
           <div className="yolo-settings-sub-header yolo-models-block-title">

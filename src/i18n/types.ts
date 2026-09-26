@@ -2493,7 +2493,6 @@ export type TranslationKeys = {
   voiceToolsEnabledLabel: string
   voiceToolsEnabledDesc: string
   voiceToolRunning: string
-  voiceDesktopOnly: string
   voiceUnavailable: string
   voiceProviderUnsupported: string
   voiceApiKeyMissing: string
