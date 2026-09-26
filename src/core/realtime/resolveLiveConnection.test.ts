@@ -41,7 +41,6 @@ describe('resolveLiveConnection', () => {
         apiKey: 'k1',
         model: 'gemini-3.1-flash-live-preview',
         voiceName: 'Kore',
-        systemPrompt: 'Hi',
       },
     })
   })

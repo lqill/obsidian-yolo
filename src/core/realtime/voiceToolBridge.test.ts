@@ -135,16 +135,28 @@ const makeGateway = (
  * No assistant unless a test needs one: the skill-path lookup then
  * short-circuits and the `app` stub is never touched.
  */
+const makeRequestContextBuilder = (sharedPrompt = 'SHARED PROMPT') =>
+  ({
+    generateSystemPrompt: jest.fn(async () => sharedPrompt),
+  }) as any
+
+/**
+ * No assistant unless a test needs one: the skill-path lookup then
+ * short-circuits and the `app` stub is never touched.
+ */
 const buildBridge = (
   overrides: {
     mcpManager?: unknown
     chatModeRuntime?: unknown
     settings?: unknown
     assistant?: unknown
+    requestContextBuilder?: unknown
   } = {},
 ) =>
   buildVoiceToolBridge({
     mcpManager: (overrides.mcpManager ?? makeMcpManager()) as never,
+    requestContextBuilder: (overrides.requestContextBuilder ??
+      makeRequestContextBuilder()) as never,
     conversationId: 'c1',
     app: {} as never,
     assistant: (overrides.assistant ?? null) as never,
@@ -366,5 +378,73 @@ describe('buildVoiceToolBridge', () => {
     expect(await bridge.handleFunctionCalls([{ name: 'fs_read' }])).toEqual([])
     expect(mcpManager.listAvailableTools).not.toHaveBeenCalled()
     expect(gatewayConstructor).not.toHaveBeenCalled()
+  })
+
+  it('carries the shared chat prompt as the session system prompt', async () => {
+    installGateway(makeGateway())
+    const requestContextBuilder = makeRequestContextBuilder('SHARED PROMPT')
+    const bridge = await buildBridge({ requestContextBuilder })
+
+    expect(bridge.systemPrompt).toBe('SHARED PROMPT')
+    expect(requestContextBuilder.generateSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: 'c1',
+        hasTools: true,
+        hasOnDemandTools: false,
+        systemPromptSnapshotMode: 'reuse',
+      }),
+    )
+  })
+
+  it('appends the voice addendum after the shared prompt', async () => {
+    installGateway(makeGateway())
+    const bridge = await buildBridge({
+      settings: {
+        ...makeSettings(),
+        voice: { toolsEnabled: true, systemPrompt: '  Speak briefly.  ' },
+      },
+    })
+
+    expect(bridge.systemPrompt).toBe('SHARED PROMPT\n\nSpeak briefly.')
+  })
+
+  it('keeps the shared prompt even when tools are off, with hasTools false', async () => {
+    installGateway(makeGateway())
+    const requestContextBuilder = makeRequestContextBuilder()
+    const bridge = await buildBridge({
+      requestContextBuilder,
+      settings: makeSettings(false),
+    })
+
+    expect(bridge.systemPrompt).toBe('SHARED PROMPT')
+    expect(requestContextBuilder.generateSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ hasTools: false }),
+    )
+  })
+
+  it('forwards the mode runtime facts into the shared prompt', async () => {
+    installGateway(makeGateway())
+    const requestContextBuilder = makeRequestContextBuilder()
+    await buildBridge({
+      requestContextBuilder,
+      chatModeRuntime: makeRuntime({
+        runtimeMode: 'max',
+        modeEnvironmentPrompt: 'cwd: /vault',
+        modePersonaPrompt: 'persona',
+        modePersonaModuleId: 'mod',
+        moduleChatModeId: 'mod:mode',
+      }),
+    })
+
+    expect(requestContextBuilder.generateSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hasTools: true,
+        modeEnvironmentPrompt: 'cwd: /vault',
+        modePersonaPrompt: 'persona',
+        modePersonaModuleId: 'mod',
+        moduleChatModeId: 'mod:mode',
+        contextPolicy: { useAssistant: true },
+      }),
+    )
   })
 })

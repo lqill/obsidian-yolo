@@ -2656,6 +2656,7 @@ export const zh: TranslationKeys = {
   voiceModelLabel: 'Live 模型',
   voiceNameLabel: '音色',
   voiceSystemPromptLabel: '系统提示词',
+  voiceSystemPromptDesc: '追加在聊天模型的系统提示词之后——用于仅语音的指令。',
   voiceMicStart: '开始语音对话',
   voiceMicStop: '结束语音对话',
   voiceStatusConnecting: '连接中…',

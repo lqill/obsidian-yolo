@@ -613,6 +613,46 @@ export class RequestContextBuilder {
   }
 
   /**
+   * The system message this conversation's chat model would receive, with no
+   * request messages built. Voice's Live `setup` calls it so a spoken turn and
+   * a typed turn in the same conversation start from the same profile, prompt,
+   * memory, skills, and mode persona — the same bytes, not a parallel
+   * assembly. Shares `resolveSystemPromptSnapshot`, so `reuse` returns the
+   * chat path's frozen snapshot when one exists and otherwise computes fresh
+   * without freezing it (see `SystemPromptSnapshotMode`).
+   */
+  public async generateSystemPrompt(args: {
+    conversationId: string
+    hasTools?: boolean
+    hasOnDemandTools?: boolean
+    deferredToolCatalogText?: string
+    compaction?: ChatConversationCompactionLike | null
+    runtimeModePrompt?: string
+    modeEnvironmentPrompt?: string
+    modePersonaPrompt?: string
+    modePersonaModuleId?: string
+    moduleChatModeId?: string
+    contextPolicy?: ChatContextPolicy
+    systemPromptSnapshotMode: SystemPromptSnapshotMode
+  }): Promise<string> {
+    const { systemContent } = await this.resolveSystemPromptSnapshot({
+      conversationId: args.conversationId,
+      hasTools: args.hasTools ?? false,
+      hasOnDemandTools: args.hasOnDemandTools ?? false,
+      deferredToolCatalogText: args.deferredToolCatalogText,
+      compaction: args.compaction,
+      runtimeModePrompt: args.runtimeModePrompt,
+      modeEnvironmentPrompt: args.modeEnvironmentPrompt,
+      modePersonaPrompt: args.modePersonaPrompt,
+      modePersonaModuleId: args.modePersonaModuleId,
+      moduleChatModeId: args.moduleChatModeId,
+      contextPolicy: args.contextPolicy,
+      mode: args.systemPromptSnapshotMode,
+    })
+    return systemContent
+  }
+
+  /**
    * Shared pipeline for `generateRequestMessages` and
    * `generateRequestSections`. Compiles the user message, reads snapshots,
    * builds the system prompt, and strips/preps

@@ -159,12 +159,20 @@ export const useVoiceSession = ({
         })
         return
       }
+      if (!toolBridge) {
+        // The bridge also carries the shared system prompt, so failing here
+        // fails loud rather than letting the live model speak from a different
+        // config than the chat model.
+        failRealtimeVoiceSession({ failure: 'tools_unavailable' })
+        return
+      }
       const runtime = createGeminiLiveRuntime({
         connection: resolution.value,
+        systemPrompt: toolBridge.systemPrompt,
         onTurn: commitTurn,
         onTurnOpen: openTurn,
         onAssistantText: publishAssistantText,
-        toolBridge: toolBridge ?? undefined,
+        toolBridge,
         initialHistory: buildVoiceHistoryTurns(
           sessionController.getSnapshot().chatMessages,
         ),

@@ -12,7 +12,6 @@ export type ResolvedLiveConnection = {
   apiKey: string
   model: string
   voiceName: string
-  systemPrompt: string
 }
 
 /**
@@ -74,7 +73,6 @@ export const resolveLiveConnection = ({
       apiKey: provider.apiKey,
       model,
       voiceName: voice.voiceName.trim() || DEFAULT_VOICE_SETTINGS.voiceName,
-      systemPrompt: voice.systemPrompt,
     },
   }
 }

@@ -12,12 +12,14 @@ import {
   ToolCallResponseStatus,
   createCompleteToolCallArguments,
 } from '../../types/tool-call.types'
+import type { RequestContextBuilder } from '../../utils/chat/requestContextBuilder'
 import { resolveAllowedSkillPaths } from '../agent/agent-api'
 import {
   resolveBlockedCommandPrefixes,
   resolveWorkspaceScopeForRuntimeInput,
 } from '../agent/chat-runtime-inputs'
 import type { ChatModeRuntime } from '../agent/chat-runtime-profiles'
+import { buildRuntimeModePrompt } from '../agent/runtime-mode-prompt'
 import { AgentToolGateway } from '../agent/tool-gateway'
 import {
   buildRequestTools,
@@ -37,6 +39,14 @@ import type {
 } from './geminiLiveProtocol'
 
 export type VoiceToolBridge = {
+  /**
+   * The voice session's system instruction: the chat model's own assembled
+   * system prompt (`RequestContextBuilder.generateSystemPrompt`) plus
+   * `settings.voice.systemPrompt` as a voice-only addendum. It lives here
+   * because the prompt and the tool grant share one `ChatModeRuntime` and one
+   * tool selection, so resolving them apart would mean resolving twice.
+   */
+  systemPrompt: string
   declarations: GeminiLiveFunctionDeclaration[]
   handleFunctionCalls(
     calls: GeminiLiveFunctionCall[],
@@ -46,6 +56,8 @@ export type VoiceToolBridge = {
 
 export type BuildVoiceToolBridgeOptions = {
   mcpManager: McpManager
+  /** Builds the shared prompt half — see `VoiceToolBridge.systemPrompt`. */
+  requestContextBuilder: RequestContextBuilder
   conversationId: string
   /** The current mode's runtime, resolved by the caller (`resolveChatModeRuntime`). */
   chatModeRuntime: ChatModeRuntime
@@ -56,10 +68,41 @@ export type BuildVoiceToolBridgeOptions = {
   apiType?: LLMProviderApiType | null
 }
 
-const INERT_BRIDGE: VoiceToolBridge = {
-  declarations: [],
-  handleFunctionCalls: async () => [],
+/**
+ * The chat model's own assembled system prompt, with `hasTools` reflecting what
+ * this voice session actually advertises — the base-behaviour section must not
+ * describe tools this session did not send. The voice addendum is appended, not
+ * swapped in, so voice keeps its own instructions *on top of* the shared ones.
+ */
+const buildSystemPrompt = async (
+  options: BuildVoiceToolBridgeOptions,
+  hasTools: boolean,
+): Promise<string> => {
+  const { requestContextBuilder, chatModeRuntime, settings, conversationId } =
+    options
+  const shared = await requestContextBuilder.generateSystemPrompt({
+    conversationId,
+    hasTools,
+    // Every advertised tool's schema rides the setup frame (the gateway is
+    // built with `advertisesAllToolSchemas: true`), so there is no two-step
+    // disclosure for the model to be told about.
+    hasOnDemandTools: false,
+    runtimeModePrompt: buildRuntimeModePrompt(chatModeRuntime.runtimeMode),
+    modeEnvironmentPrompt: chatModeRuntime.modeEnvironmentPrompt,
+    modePersonaPrompt: chatModeRuntime.modePersonaPrompt,
+    modePersonaModuleId: chatModeRuntime.modePersonaModuleId,
+    moduleChatModeId: chatModeRuntime.moduleChatModeId,
+    contextPolicy: chatModeRuntime.contextPolicy,
+    // Reuse the conversation's frozen chat prompt when the text path already
+    // built one; never freeze one from the voice path, which is not the request
+    // that defines it (see `SystemPromptSnapshotMode`).
+    systemPromptSnapshotMode: 'reuse',
+  })
+  const addendum = (settings.voice.systemPrompt ?? '').trim()
+  return addendum ? `${shared}\n\n${addendum}` : shared
 }
+
+const INERT_TOOL_HANDLER = async (): Promise<GeminiLiveFunctionResponse[]> => []
 
 const toToolResponsePayload = (
   response: ToolCallResponse,
@@ -99,7 +142,13 @@ export async function buildVoiceToolBridge(
     settings.voice.toolsEnabled === false ||
     !chatModeRuntime.loopConfig.enableTools
   ) {
-    return INERT_BRIDGE
+    // Tools are off, but the prompt still is not: the session keeps the shared
+    // profile and instructions, just with no function declarations.
+    return {
+      systemPrompt: await buildSystemPrompt(options, false),
+      declarations: [],
+      handleFunctionCalls: INERT_TOOL_HANDLER,
+    }
   }
 
   const availableTools = await mcpManager.listAvailableTools({
@@ -240,5 +289,9 @@ export async function buildVoiceToolBridge(
     })
   }
 
-  return { declarations, handleFunctionCalls }
+  return {
+    systemPrompt: await buildSystemPrompt(options, declarations.length > 0),
+    declarations,
+    handleFunctionCalls,
+  }
 }

@@ -2449,6 +2449,7 @@ export type TranslationKeys = {
   voiceModelLabel: string
   voiceNameLabel: string
   voiceSystemPromptLabel: string
+  voiceSystemPromptDesc: string
   voiceMicStart: string
   voiceMicStop: string
   voiceStatusConnecting: string

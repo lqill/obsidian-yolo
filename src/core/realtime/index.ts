@@ -13,6 +13,12 @@ import type { VoiceToolBridge } from './voiceToolBridge'
 
 export type CreateGeminiLiveRuntimeOptions = {
   connection: ResolvedLiveConnection
+  /**
+   * The session's system instruction — see `VoiceToolBridge.systemPrompt`. It
+   * is the chat model's assembled prompt plus the voice addendum, so the live
+   * model shares the text agent's profile, memory, skills, and mode persona.
+   */
+  systemPrompt: string
   onTurn: (turn: VoiceTurn) => void
   /** See `GeminiLiveSessionOptions.onAssistantText`. */
   onAssistantText?: (text: string) => void
@@ -42,7 +48,7 @@ export const createGeminiLiveRuntime = (
     setupConfig: {
       model: options.connection.model,
       voiceName: options.connection.voiceName,
-      systemPrompt: options.connection.systemPrompt,
+      systemPrompt: options.systemPrompt,
       functionDeclarations: toolBridge?.declarations ?? [],
       initialHistoryInClientContent: initialHistory.length > 0,
     },

@@ -1146,6 +1146,7 @@ export function useChatStreamManager({
     )
     return buildVoiceToolBridge({
       mcpManager,
+      requestContextBuilder,
       conversationId: currentConversationId,
       // Same resolution as the run path above, so a voice session inherits
       // exactly the tool grant the current mode and assistant describe.
@@ -1172,6 +1173,7 @@ export function useChatStreamManager({
     currentConversationId,
     getMcpManager,
     moduleToolSetEnablement,
+    requestContextBuilder,
     resolveModuleChatMode,
     settings,
     yoloEnabled,

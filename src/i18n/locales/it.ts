@@ -2544,6 +2544,8 @@ export const it: DeepPartial<TranslationKeys> = {
   voiceModelLabel: 'Modello Live',
   voiceNameLabel: 'Voce',
   voiceSystemPromptLabel: 'Prompt di sistema',
+  voiceSystemPromptDesc:
+    'Aggiunto dopo il prompt di sistema del modello chat — usalo per istruzioni solo vocali.',
   voiceMicStart: 'Avvia conversazione vocale',
   voiceMicStop: 'Termina conversazione vocale',
   voiceStatusConnecting: 'Connessione…',

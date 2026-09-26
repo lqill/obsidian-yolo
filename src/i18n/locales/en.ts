@@ -2826,6 +2826,8 @@ export const en: TranslationKeys = {
   voiceModelLabel: 'Live model',
   voiceNameLabel: 'Voice',
   voiceSystemPromptLabel: 'System prompt',
+  voiceSystemPromptDesc:
+    "Appended after the chat model's system prompt — use it for voice-only instructions.",
   voiceMicStart: 'Start voice conversation',
   voiceMicStop: 'End voice conversation',
   voiceStatusConnecting: 'Connecting…',

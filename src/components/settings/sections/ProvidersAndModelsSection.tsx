@@ -1457,6 +1457,7 @@ const VoiceSettingsSection = () => {
         <div className="yolo-models-textarea-card">
           <ObsidianSetting
             name={t('voiceSystemPromptLabel')}
+            desc={t('voiceSystemPromptDesc')}
             className="yolo-settings-textarea-header yolo-models-textarea-card-header"
           />
 

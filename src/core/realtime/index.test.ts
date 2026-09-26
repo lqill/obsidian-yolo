@@ -45,7 +45,6 @@ const connection = {
   apiKey: 'k',
   model: 'gemini-3.1-flash-live-preview',
   voiceName: 'Kore',
-  systemPrompt: '',
 }
 
 describe('createGeminiLiveRuntime', () => {
@@ -57,10 +56,26 @@ describe('createGeminiLiveRuntime', () => {
   it('returns a session plus a stop function without touching browser globals', () => {
     const runtime = createGeminiLiveRuntime({
       connection,
+      systemPrompt: 'SYS',
       onTurn: () => {},
     })
     expect(typeof runtime.start).toBe('function')
     expect(typeof runtime.stop).toBe('function')
+    runtime.stop()
+  })
+
+  it('sends the resolved system prompt as the setup system instruction', async () => {
+    const runtime = createGeminiLiveRuntime({
+      connection,
+      systemPrompt: 'SHARED PROMPT\n\nvoice addendum',
+      onTurn: () => {},
+    })
+    await runtime.start()
+    const socket = FakeSocket.instances[0]
+    socket.onopen?.({})
+    expect(JSON.parse(socket.sent[0]).setup.systemInstruction).toEqual({
+      parts: [{ text: 'SHARED PROMPT\n\nvoice addendum' }],
+    })
     runtime.stop()
   })
 
@@ -74,8 +89,10 @@ describe('createGeminiLiveRuntime', () => {
     ]
     const runtime = createGeminiLiveRuntime({
       connection,
+      systemPrompt: 'SYS',
       onTurn: () => {},
       toolBridge: {
+        systemPrompt: 'SYS',
         declarations,
         handleFunctionCalls: async () => [],
       },
@@ -92,6 +109,7 @@ describe('createGeminiLiveRuntime', () => {
   it('drops whitespace-only turns, and the setup flag follows', async () => {
     const runtime = createGeminiLiveRuntime({
       connection,
+      systemPrompt: 'SYS',
       onTurn: () => {},
       initialHistory: [
         { role: 'user', text: '   ' },
@@ -115,6 +133,7 @@ describe('createGeminiLiveRuntime', () => {
   it('asks for no history handshake when every turn is blank', async () => {
     const runtime = createGeminiLiveRuntime({
       connection,
+      systemPrompt: 'SYS',
       onTurn: () => {},
       initialHistory: [{ role: 'user', text: '   ' }],
     })
@@ -130,6 +149,7 @@ describe('createGeminiLiveRuntime', () => {
   it('seeds the setup frame with history and replays it on setupComplete', async () => {
     const runtime = createGeminiLiveRuntime({
       connection,
+      systemPrompt: 'SYS',
       onTurn: () => {},
       initialHistory: [
         { role: 'user', text: 'earlier question' },
