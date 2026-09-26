@@ -6,9 +6,11 @@ import type { Assistant } from '../../types/assistant.types'
 import type { ChatToolMessage } from '../../types/chat'
 import type { RequestTool } from '../../types/llm/request'
 import type { LLMProviderApiType } from '../../types/provider.types'
+import type {
+  ToolCallRequest,
+  ToolCallResponse,
+} from '../../types/tool-call.types'
 import {
-  type ToolCallRequest,
-  type ToolCallResponse,
   ToolCallResponseStatus,
   createCompleteToolCallArguments,
 } from '../../types/tool-call.types'
@@ -66,6 +68,34 @@ export type BuildVoiceToolBridgeOptions = {
   app: App
   assistant: Assistant | null
   apiType?: LLMProviderApiType | null
+  /**
+   * Where a voice tool call becomes visible to the user. A call the gateway
+   * parks in `PendingApproval` is resolved by the chat surface's normal approval
+   * card, so the bridge has to publish the message and wait for that resolution
+   * instead of rejecting it the way a surface with no approval affordance would.
+   */
+  conversationPort: VoiceToolConversationPort
+}
+
+/**
+ * The bridge's one seam into the chat surface. Deliberately narrow: the bridge
+ * owns a tool call's lifecycle, the surface owns where the call is shown and
+ * how the user resolves it.
+ */
+export type VoiceToolConversationPort = {
+  /**
+   * Inserts or replaces the tool message in the voice session's conversation, so
+   * the chat timeline renders it exactly like a text agent's tool call.
+   */
+  publish(message: ChatToolMessage): void
+  /**
+   * Resolves once every id has a terminal response — the user approved or
+   * rejected it, or the session aborted and the call is reported as aborted.
+   */
+  awaitResolution(
+    toolCallIds: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, ToolCallResponse>>
 }
 
 /**
@@ -103,6 +133,11 @@ const buildSystemPrompt = async (
 }
 
 const INERT_TOOL_HANDLER = async (): Promise<GeminiLiveFunctionResponse[]> => []
+
+const isTerminalToolResponse = (response: ToolCallResponse): boolean =>
+  response.status !== ToolCallResponseStatus.Running &&
+  response.status !== ToolCallResponseStatus.PendingApproval &&
+  response.status !== ToolCallResponseStatus.AwaitingUserInput
 
 const toToolResponsePayload = (
   response: ToolCallResponse,
@@ -160,7 +195,7 @@ export async function buildVoiceToolBridge(
   // These built-ins operate on the chat transcript or on a UI voice does not
   // have; `handleFunctionCalls` passes `conversationMessages: []`.
   const voiceExcludedToolNames = new Set(
-    ['context_pruning', 'context_compaction', 'user_questions'].flatMap((id) =>
+    ['context_pruning', 'context_compaction'].flatMap((id) =>
       getToolNamesForCapability(id),
     ),
   )
@@ -239,38 +274,65 @@ export async function buildVoiceToolBridge(
       toolCallRequests,
       conversationId: options.conversationId,
     })
-
-    // Voice has no approval affordance: convert anything that would pause for
-    // the user into a rejected response the model can explain out loud.
-    const normalized: ChatToolMessage = {
-      ...created,
-      toolCalls: created.toolCalls.map(({ request, response }) =>
-        response.status === ToolCallResponseStatus.PendingApproval ||
-        response.status === ToolCallResponseStatus.AwaitingUserInput
-          ? {
-              request,
-              response: {
-                status: ToolCallResponseStatus.Rejected,
-                reason:
-                  'Voice mode cannot ask for tool approval. Enable YOLO for this chat mode or use text chat to run this tool.',
-              },
-            }
-          : { request, response },
-      ),
-    }
+    // Show the call (and any approval card it needs) before touching the tool,
+    // so the user sees the same pending card the text agent produces.
+    options.conversationPort.publish(created)
 
     const executed = await gateway.executeAutoToolCalls({
-      toolMessage: normalized,
+      toolMessage: created,
       conversationId: options.conversationId,
       conversationMessages: [],
       signal,
     })
 
+    // `executeAutoToolCalls` runs everything the gateway already cleared and
+    // leaves a call that needs the user in `PendingApproval`. That call is the
+    // chat surface's to resolve (the user taps approve/reject on the card the
+    // publish above put on screen), so hold the Live turn open until it lands.
+    const awaitingResolution = executed.toolCalls.filter(
+      ({ response }) =>
+        response.status === ToolCallResponseStatus.PendingApproval ||
+        response.status === ToolCallResponseStatus.AwaitingUserInput,
+    )
+    let finalToolMessage = executed
+    if (awaitingResolution.length > 0) {
+      const resolved = await options.conversationPort.awaitResolution(
+        awaitingResolution.map((toolCall) => toolCall.request.id),
+        signal,
+      )
+      finalToolMessage = {
+        ...executed,
+        toolCalls: executed.toolCalls.map((toolCall) => {
+          const response = resolved.get(toolCall.request.id)
+          return response ? { ...toolCall, response } : toolCall
+        }),
+      }
+    }
+    // A stopped session must not leave a card (or a spinner) waiting on a model
+    // that is gone, so anything the abort left unresolved becomes aborted.
+    if (signal?.aborted) {
+      finalToolMessage = {
+        ...finalToolMessage,
+        toolCalls: finalToolMessage.toolCalls.map((toolCall) =>
+          isTerminalToolResponse(toolCall.response)
+            ? toolCall
+            : {
+                ...toolCall,
+                response: { status: ToolCallResponseStatus.Aborted },
+              },
+        ),
+      }
+    }
+    // Republish the settled message. On the approval path the surface already
+    // wrote the same content; on the abort path this is what clears a card that
+    // would otherwise be left waiting forever.
+    options.conversationPort.publish(finalToolMessage)
+
     // Queue rather than a plain map: two calls can legitimately carry the same
     // explicit server id, and a map would collapse their distinct results into
     // one payload. Consume one payload per request, in call order.
     const payloadsById = new Map<string, Record<string, unknown>[]>()
-    for (const { request, response } of executed.toolCalls) {
+    for (const { request, response } of finalToolMessage.toolCalls) {
       const queue = payloadsById.get(request.id) ?? []
       queue.push(toToolResponsePayload(response))
       payloadsById.set(request.id, queue)

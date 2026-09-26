@@ -165,6 +165,13 @@ export type ChatToolMessage = {
     branchConversationId?: string
     branchRunStatus?: 'idle' | 'running' | 'completed' | 'aborted' | 'error'
     branchWaitingApproval?: boolean
+    /**
+     * This tool call belongs to a live Gemini Live voice session, so its result
+     * is handed back to the Live model — never to a text agent run. The chat
+     * surface uses this to show the normal approval card without kicking off a
+     * resume request the voice bridge would race against.
+     */
+    realtimeVoice?: boolean
   }
 }
 
@@ -317,6 +324,7 @@ export type SerializedChatToolMessage = {
     branchConversationId?: string
     branchRunStatus?: 'idle' | 'running' | 'completed' | 'aborted' | 'error'
     branchWaitingApproval?: boolean
+    realtimeVoice?: boolean
   }
 }
 export type SerializedChatExternalAgentResultMessage =

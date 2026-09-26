@@ -54,7 +54,10 @@ import { promoteProviderTransportModeToObsidian } from '../../core/llm/transport
 import { getLocalFileToolServerName } from '../../core/mcp/localFileTools'
 import { getToolName } from '../../core/mcp/tool-name-utils'
 import { toModuleToolSetEnablement } from '../../core/modules/moduleToolSetRegistry'
-import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
+import type {
+  VoiceToolBridge,
+  VoiceToolConversationPort,
+} from '../../core/realtime/voiceToolBridge'
 import { listLiteSkillEntries } from '../../core/skills/liteSkills'
 import { isSkillEnabledForAssistant } from '../../core/skills/skillPolicy'
 import { useChatManager } from '../../hooks/useJsonManagers'
@@ -187,7 +190,9 @@ export type UseChatStreamManager = {
   buildContextBreakdownInputs: (
     messages: ChatMessage[],
   ) => Promise<ContextBreakdownInputs | null>
-  buildVoiceToolBridgeForConversation: () => Promise<VoiceToolBridge>
+  buildVoiceToolBridgeForConversation: (
+    conversationPort: VoiceToolConversationPort,
+  ) => Promise<VoiceToolBridge>
   submitChatMutation: UseMutationResult<
     { aborted: boolean },
     Error,
@@ -1132,52 +1137,56 @@ export function useChatStreamManager({
     ],
   )
 
-  const buildVoiceToolBridgeForConversation = useCallback(async () => {
-    const effectiveAssistantId =
-      assistantIdOverride ?? settings.currentAssistantId
-    const selectedAssistant = effectiveAssistantId
-      ? (settings.assistants || []).find(
-          (assistant) => assistant.id === effectiveAssistantId,
-        ) || null
-      : null
-    const mcpManager = await getMcpManager()
-    const { buildVoiceToolBridge } = await import(
-      '../../core/realtime/voiceToolBridge'
-    )
-    return buildVoiceToolBridge({
-      mcpManager,
-      requestContextBuilder,
-      conversationId: currentConversationId,
-      // Same resolution as the run path above, so a voice session inherits
-      // exactly the tool grant the current mode and assistant describe.
-      chatModeRuntime: resolveChatModeRuntime({
-        mode: chatMode,
-        yoloEnabled,
+  const buildVoiceToolBridgeForConversation = useCallback(
+    async (conversationPort: VoiceToolConversationPort) => {
+      const effectiveAssistantId =
+        assistantIdOverride ?? settings.currentAssistantId
+      const selectedAssistant = effectiveAssistantId
+        ? (settings.assistants || []).find(
+            (assistant) => assistant.id === effectiveAssistantId,
+          ) || null
+        : null
+      const mcpManager = await getMcpManager()
+      const { buildVoiceToolBridge } = await import(
+        '../../core/realtime/voiceToolBridge'
+      )
+      return buildVoiceToolBridge({
+        mcpManager,
+        requestContextBuilder,
+        conversationId: currentConversationId,
+        // Same resolution as the run path above, so a voice session inherits
+        // exactly the tool grant the current mode and assistant describe.
+        chatModeRuntime: resolveChatModeRuntime({
+          mode: chatMode,
+          yoloEnabled,
+          app,
+          assistant: selectedAssistant,
+          assistantEnabledToolNames: getEnabledAssistantToolNames(
+            selectedAssistant,
+            moduleToolSetEnablement,
+          ),
+          moduleChatMode: resolveModuleChatMode(),
+        }),
+        settings,
         app,
         assistant: selectedAssistant,
-        assistantEnabledToolNames: getEnabledAssistantToolNames(
-          selectedAssistant,
-          moduleToolSetEnablement,
-        ),
-        moduleChatMode: resolveModuleChatMode(),
-      }),
-      settings,
+        apiType: 'gemini',
+        conversationPort,
+      })
+    },
+    [
       app,
-      assistant: selectedAssistant,
-      apiType: 'gemini',
-    })
-  }, [
-    app,
-    assistantIdOverride,
-    chatMode,
-    currentConversationId,
-    getMcpManager,
-    moduleToolSetEnablement,
-    requestContextBuilder,
-    resolveModuleChatMode,
-    settings,
-    yoloEnabled,
-  ])
+      assistantIdOverride,
+      chatMode,
+      currentConversationId,
+      getMcpManager,
+      moduleToolSetEnablement,
+      requestContextBuilder,
+      resolveModuleChatMode,
+      settings,
+      yoloEnabled,
+    ],
+  )
 
   return {
     abortConversationRun,

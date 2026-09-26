@@ -168,9 +168,10 @@ describe('GeminiLiveSession per-turn state machine', () => {
       functionCalls: [{ id: '1', name: 'fs_read', args: { path: 'a.md' } }],
     } as GeminiLiveServerEvent)
     await flushAsync()
-    expect(toolHandler).toHaveBeenCalledWith([
-      { id: '1', name: 'fs_read', args: { path: 'a.md' } },
-    ])
+    expect(toolHandler).toHaveBeenCalledWith(
+      [{ id: '1', name: 'fs_read', args: { path: 'a.md' } }],
+      expect.any(AbortSignal),
+    )
     expect(client.sendToolResponse).toHaveBeenCalledWith([
       { id: '1', name: 'fs_read', response: { result: 'ok' } },
     ])

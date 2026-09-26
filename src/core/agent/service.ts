@@ -1586,6 +1586,13 @@ export class AgentSessionService {
     if (toolCall.response.status !== ToolCallResponseStatus.PendingApproval) {
       return false
     }
+    // A live voice session owns its own continuation: the result goes back to
+    // the Live model through `voiceToolCallResolution`, so this path must not
+    // execute the call and resume a (stale) text run. Declining sends the chat
+    // surface to `handleRecoverPendingToolCall`, which executes it without a run.
+    if (toolMessage.metadata?.realtimeVoice === true) {
+      return false
+    }
 
     const conversationEntry = this.getOrCreateConversationEntry(conversationId)
     const recoveryContext = conversationEntry.pendingApprovalRecoveryContext
@@ -1760,9 +1767,12 @@ export class AgentSessionService {
 
     // Active-run path: the awaiting tool call still lives inside an
     // AgentRunEntry. Commit through updateToolCallResponse so subscribers
-    // see the status change and we can drive the loop forward.
+    // see the status change and we can drive the loop forward. A voice-owned
+    // question skips it: continuing a text run would answer it outside the
+    // Live session, so it falls through to the recovery path the voice bridge
+    // awaits.
     const located = this.findToolCall(conversationId, toolCallId)
-    if (located) {
+    if (located && located.toolMessage.metadata?.realtimeVoice !== true) {
       if (
         located.toolCall.response.status !==
         ToolCallResponseStatus.AwaitingUserInput

@@ -1927,6 +1927,14 @@ export class ChatSessionController {
         { persistState: true },
       )
     void this.persistImmediately(resolvedMessages)
+    // A voice session owns its own continuation: the answer goes back to the
+    // Live model through `voiceToolCallResolution`, so starting a text run here
+    // would answer the same question twice. See `ChatToolMessage.realtimeVoice`.
+    const isVoiceOwned = resolvedMessages.some(
+      (message) =>
+        message.role === 'tool' && message.metadata?.realtimeVoice === true,
+    )
+    if (isVoiceOwned) return
     this.deps.runConversation({
       chatMessages: resolvedMessages,
       conversationId,

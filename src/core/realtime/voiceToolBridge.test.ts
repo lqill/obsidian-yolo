@@ -1,6 +1,7 @@
 // src/core/realtime/voiceToolBridge.test.ts
 import {
   type ToolCallRequest,
+  type ToolCallResponse,
   ToolCallResponseStatus,
 } from '../../types/tool-call.types'
 import { AgentToolGateway } from '../agent/tool-gateway'
@@ -11,6 +12,7 @@ import {
 import { INVOKE_TOOL_NAME } from '../tools/internal/invoke_tool/definition'
 import { getToolNamesForCapability } from '../tools/registry'
 
+import type { VoiceToolConversationPort } from './voiceToolBridge'
 import { buildVoiceToolBridge } from './voiceToolBridge'
 
 // The bridge builds a real gateway; these tests observe the options it was
@@ -132,6 +134,27 @@ const makeGateway = (
 })
 
 /**
+ * The chat surface's stand-in: `publish` is observed, and `awaitResolution`
+ * hands back whatever the test decided the user did with an approval card.
+ */
+const makeConversationPort = (
+  resolutions: Record<string, ToolCallResponse> = {},
+): VoiceToolConversationPort & {
+  publish: jest.Mock
+  awaitResolution: jest.Mock
+} => ({
+  publish: jest.fn(),
+  awaitResolution: jest.fn(async (toolCallIds: readonly string[]) => {
+    const resolved = new Map<string, ToolCallResponse>()
+    for (const id of toolCallIds) {
+      const response = resolutions[id]
+      if (response) resolved.set(id, response)
+    }
+    return resolved
+  }),
+})
+
+/**
  * No assistant unless a test needs one: the skill-path lookup then
  * short-circuits and the `app` stub is never touched.
  */
@@ -151,6 +174,7 @@ const buildBridge = (
     settings?: unknown
     assistant?: unknown
     requestContextBuilder?: unknown
+    conversationPort?: VoiceToolConversationPort
   } = {},
 ) =>
   buildVoiceToolBridge({
@@ -162,6 +186,7 @@ const buildBridge = (
     assistant: (overrides.assistant ?? null) as never,
     chatModeRuntime: (overrides.chatModeRuntime ?? makeRuntime()) as never,
     settings: (overrides.settings ?? makeSettings()) as never,
+    conversationPort: overrides.conversationPort ?? makeConversationPort(),
   })
 
 describe('buildVoiceToolBridge', () => {
@@ -215,24 +240,96 @@ describe('buildVoiceToolBridge', () => {
     ])
   })
 
-  it('rejects calls that would require interactive approval', async () => {
+  it('publishes a pending call, waits for the surface to resolve it, and reports the result', async () => {
     const gateway = makeGateway({
-      [`${localServer}__fs_read`]: {
+      [`${localServer}__fs_write`]: {
         status: ToolCallResponseStatus.PendingApproval,
       },
     })
     installGateway(gateway)
-    const bridge = await buildBridge()
+    const conversationPort = makeConversationPort({
+      call1: {
+        status: ToolCallResponseStatus.Success,
+        data: { type: 'text', text: 'written' },
+      },
+    })
+    const bridge = await buildBridge({ conversationPort })
 
     const responses = await bridge.handleFunctionCalls([
-      { id: 'call1', name: 'fs_read', args: {} },
+      { id: 'call1', name: 'fs_write', args: { path: 'a.md' } },
     ])
 
-    expect(String(responses[0].response.error)).toMatch(/approval/i)
-    const passedMessage =
-      gateway.executeAutoToolCalls.mock.calls[0][0].toolMessage
-    expect(passedMessage.toolCalls[0].response.status).toBe(
-      ToolCallResponseStatus.Rejected,
+    expect(responses).toEqual([
+      {
+        id: 'call1',
+        name: 'fs_write',
+        response: { result: 'written' },
+      },
+    ])
+    expect(conversationPort.awaitResolution).toHaveBeenCalledWith(
+      ['call1'],
+      undefined,
+    )
+    // Once with the pending card, once settled.
+    expect(conversationPort.publish).toHaveBeenCalledTimes(2)
+  })
+
+  it('publishes every auto-executed call so the timeline shows it', async () => {
+    installGateway(makeGateway())
+    const conversationPort = makeConversationPort()
+    const bridge = await buildBridge({ conversationPort })
+
+    await bridge.handleFunctionCalls([
+      { id: 'call1', name: 'fs_read', args: { path: 'a.md' } },
+    ])
+
+    expect(conversationPort.awaitResolution).not.toHaveBeenCalled()
+    expect(conversationPort.publish).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports a call the aborted session left unresolved as aborted', async () => {
+    const gateway = makeGateway({
+      [`${localServer}__fs_write`]: {
+        status: ToolCallResponseStatus.PendingApproval,
+      },
+    })
+    installGateway(gateway)
+    const conversationPort = makeConversationPort()
+    conversationPort.awaitResolution.mockImplementation(
+      async (toolCallIds: readonly string[], signal?: AbortSignal) => {
+        const aborted = () =>
+          new Map(
+            toolCallIds.map((id) => [
+              id,
+              { status: ToolCallResponseStatus.Aborted },
+            ]),
+          )
+        if (signal?.aborted) return aborted()
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener('abort', () => resolve(), { once: true })
+        })
+        return aborted()
+      },
+    )
+    const bridge = await buildBridge({ conversationPort })
+    const controller = new AbortController()
+
+    const responsesPromise = bridge.handleFunctionCalls(
+      [{ id: 'call1', name: 'fs_write', args: { path: 'a.md' } }],
+      controller.signal,
+    )
+    controller.abort()
+
+    await expect(responsesPromise).resolves.toEqual([
+      {
+        id: 'call1',
+        name: 'fs_write',
+        response: { error: 'Tool call was aborted.' },
+      },
+    ])
+    const finalPublish = conversationPort.publish.mock.calls.at(-1)?.[0]
+    expect(finalPublish.toolCalls[0].response.status).toBe(
+      ToolCallResponseStatus.Aborted,
     )
   })
 

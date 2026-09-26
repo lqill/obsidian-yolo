@@ -1,6 +1,7 @@
 import { Platform } from 'obsidian'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 
+import { usePlugin } from '../../contexts/plugin-context'
 import { useSettings } from '../../contexts/settings-context'
 import type {
   RealtimeVoiceAssistantStream,
@@ -14,10 +15,14 @@ import {
   markRealtimeVoiceConnecting,
   setRealtimeVoiceLiveTurn,
 } from '../../core/realtime/sessionControl'
-import type { VoiceToolBridge } from '../../core/realtime/voiceToolBridge'
+import type {
+  VoiceToolBridge,
+  VoiceToolConversationPort,
+} from '../../core/realtime/voiceToolBridge'
 import type { ChatUserMessage } from '../../types/chat'
 
 import type { ChatSessionController } from './ChatSessionController'
+import { awaitVoiceToolCallResolution } from './voiceToolCallResolution'
 import {
   buildFinalTurnMessages,
   buildLiveTurnMessages,
@@ -38,9 +43,12 @@ export const useVoiceSession = ({
   /** Where the spoken transcript streams — see `RealtimeVoiceAssistantStream`. */
   assistantStream: RealtimeVoiceAssistantStream
   stampTimeContext?: (message: ChatUserMessage) => ChatUserMessage
-  resolveToolBridge?: () => Promise<VoiceToolBridge | null>
+  resolveToolBridge?: (
+    conversationPort: VoiceToolConversationPort,
+  ) => Promise<VoiceToolBridge | null>
 }) => {
   const { settings } = useSettings()
+  const plugin = usePlugin()
   const runtimeRef = useRef<{
     start(): Promise<void>
     stop(): void
@@ -51,6 +59,44 @@ export const useVoiceSession = ({
   const startingRef = useRef(false)
   /** The turn being spoken right now; null between turns. */
   const liveTurnRef = useRef<VoiceLiveTurn | null>(null)
+  /** Tool messages written into the current turn, so `stop` can drop them with it. */
+  const turnToolMessageIdsRef = useRef<Set<string>>(new Set())
+
+  /**
+   * The bridge's one seam into the chat surface. A voice tool call is written
+   * into the conversation (so the timeline shows it and any approval card is
+   * actionable), and a call parked for approval is awaited from the same
+   * conversation — the surface that resolves it does not know the bridge exists.
+   */
+  const toolConversationPort = useMemo<VoiceToolConversationPort>(() => {
+    const agentService = plugin.getAgentService()
+    return {
+      publish: (message) => {
+        const pinnedConversationId = pinnedConversationRef.current
+        if (!pinnedConversationId) return
+        turnToolMessageIdsRef.current.add(message.id)
+        sessionController.upsertConversationMessages({
+          conversationId: pinnedConversationId,
+          messages: [
+            {
+              ...message,
+              metadata: { ...message.metadata, realtimeVoice: true },
+            },
+          ],
+          // Part of the live turn: durable only once the turn commits, exactly
+          // like the turn's own messages. See `commitTurn`.
+          persist: false,
+        })
+      },
+      awaitResolution: (toolCallIds, signal) =>
+        awaitVoiceToolCallResolution({
+          agentService,
+          conversationId: pinnedConversationRef.current ?? conversationId,
+          toolCallIds,
+          signal,
+        }),
+    }
+  }, [conversationId, plugin, sessionController])
 
   /**
    * A turn opens on its first transcript delta. Put its messages into the
@@ -63,6 +109,7 @@ export const useVoiceSession = ({
     if (!conversationId) return
     const liveTurn = createVoiceLiveTurn(conversationId)
     liveTurnRef.current = liveTurn
+    turnToolMessageIdsRef.current = new Set()
     setRealtimeVoiceLiveTurn(liveTurn)
     assistantStream.begin(conversationId, liveTurn.assistantMessageId)
     sessionController.upsertConversationMessages({
@@ -149,7 +196,7 @@ export const useVoiceSession = ({
       pinnedConversationRef.current = conversationId
       let toolBridge: VoiceToolBridge | null = null
       try {
-        toolBridge = (await resolveToolBridge?.()) ?? null
+        toolBridge = (await resolveToolBridge?.(toolConversationPort)) ?? null
       } catch (error) {
         // Fail loud: a session started without its resolved tools would silently
         // diverge from the text agent's surface.
@@ -195,22 +242,29 @@ export const useVoiceSession = ({
     publishAssistantText,
     resolveToolBridge,
     sessionController,
+    toolConversationPort,
   ])
 
   const stop = useCallback(() => {
     runtimeRef.current?.stop()
     runtimeRef.current = null
-    pinnedConversationRef.current = null
     const liveTurn = liveTurnRef.current
     liveTurnRef.current = null
+    const turnToolMessageIds = [...turnToolMessageIdsRef.current]
+    turnToolMessageIdsRef.current = new Set()
+    pinnedConversationRef.current = null
     if (liveTurn) {
-      // The turn never committed: drop the messages it was streaming into,
-      // matching the pre-live behaviour of persisting nothing until
-      // `turnComplete`.
+      // The turn never committed: drop the messages it was streaming into —
+      // including any tool card it opened — matching the pre-live behaviour of
+      // persisting nothing until `turnComplete`.
       assistantStream.end(liveTurn.conversationId, liveTurn.assistantMessageId)
       sessionController.upsertConversationMessages({
         conversationId: liveTurn.conversationId,
-        removeMessageIds: [liveTurn.userMessageId, liveTurn.assistantMessageId],
+        removeMessageIds: [
+          liveTurn.userMessageId,
+          liveTurn.assistantMessageId,
+          ...turnToolMessageIds,
+        ],
       })
     }
     endRealtimeVoiceSession()

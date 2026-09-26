@@ -157,6 +157,10 @@ Small, generic seams rather than voice-specific branches:
 
 - **`AgentSessionService`** gains an *external assistant stream*: a surface that is not an agent run can
   publish assistant text into the same render stream, so the assistant bubble needs no voice code.
+- **`ChatToolMessage.metadata`** gains `realtimeVoice`, so any surface that would otherwise resume the text
+  agent after a tool call (the approval recovery path) leaves a live voice session's result to the Live model.
+- **`AgentSessionService.approveToolCall` / `answerUserQuestion`** decline a voice-owned call, routing the
+  chat surface to its existing recovery path instead of executing it and resuming a run the voice bridge owns.
 - **`AgentToolGateway`** gains `advertisesAllToolSchemas`, for a surface that receives every schema up
   front instead of through the deferred-disclosure protocol.
 - **`ChatRuntimeCapabilities`** gains `supportsRealtimeVoice` — the mic control and the picker locks read
@@ -173,6 +177,11 @@ Small, generic seams rather than voice-specific branches:
 - It never calls `AgentSessionService.run` — the Live model drives its own loop, tool calls included.
 - **One streaming channel**: the spoken transcript uses the agent's render stream, not a second one.
 - The same tool boundary as text: workspace scope, skill paths and the terminal command blocklist.
+- The same tool visibility and approval as text: every voice tool call is written into the conversation (marked
+  `realtimeVoice`), so it renders as a normal tool card; a call that needs approval shows the normal approval
+  card and the Live turn waits for the user's answer. A voice-owned result goes back to the Live model and never
+  starts a text run; a tool card written during an uncommitted turn is dropped with that turn, and a dropped
+  connection closes its still-open calls as aborted.
 - Audio never reaches disk, and an uncommitted turn is not persisted.
 - Desktop only; the mobile graph never loads the module.
 

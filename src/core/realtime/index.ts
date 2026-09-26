@@ -67,7 +67,7 @@ export const createGeminiLiveRuntime = (
     onAssistantText: options.onAssistantText,
     onTurnOpen: options.onTurnOpen,
     toolHandler: toolBridge
-      ? (calls) => toolBridge.handleFunctionCalls(calls)
+      ? (calls, signal) => toolBridge.handleFunctionCalls(calls, signal)
       : undefined,
     initialHistory,
   })

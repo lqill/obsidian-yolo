@@ -1785,6 +1785,57 @@ describe('AgentSessionService continuation input', () => {
     await runPromise
   })
 
+  it('declines a voice-owned pending call so the Live session keeps ownership', async () => {
+    const service = new AgentSessionService()
+    const userMessage = makeUserMessage('u1', 'write it')
+    const callTool = jest.fn().mockResolvedValue({
+      status: ToolCallResponseStatus.Success,
+      data: { type: 'text', text: 'written' },
+    })
+
+    const runPromise = service.run({
+      conversationId: 'conv-voice-approve',
+      loopConfig: {
+        enableTools: true,
+        maxAutoIterations: 100,
+        includeBuiltinTools: true,
+      },
+      input: {
+        conversationId: 'conv-voice-approve',
+        messages: [userMessage],
+        model: { id: 'model-1' },
+        mcpManager: { callTool },
+      } as unknown as AgentRuntimeRunInput,
+    })
+    const firstRuntime = runtimeInstances[0]
+    firstRuntime.emitSnapshot(
+      makeAssistantToolMessages({
+        userMessage,
+        responseStatus: ToolCallResponseStatus.PendingApproval,
+      }).map((message) =>
+        message.role === 'tool'
+          ? {
+              ...message,
+              metadata: { ...message.metadata, realtimeVoice: true },
+            }
+          : message,
+      ),
+    )
+
+    const approved = await service.approveToolCall({
+      conversationId: 'conv-voice-approve',
+      toolCallId: 'call-1',
+    })
+
+    // Declining routes the chat surface to its recovery path, which executes
+    // the call without resuming a text run the voice bridge would race.
+    expect(approved).toBe(false)
+    expect(callTool).not.toHaveBeenCalled()
+
+    firstRuntime.resolveRun()
+    await runPromise
+  })
+
   it('approveToolCall passes the persisted executionConstraints.bashReadOnly to mcpManager.callTool', async () => {
     const service = new AgentSessionService()
     const userMessage = makeUserMessage('u1', 'dispatch once')
@@ -1937,6 +1988,56 @@ describe('AgentSessionService continuation input', () => {
 
     runtimeInstances[1].resolveRun()
     expect(await answerPromise).toEqual({ kind: 'continued' })
+    firstRuntime.resolveRun()
+    await runPromise
+  })
+
+  it('answers a voice-owned question through recovery instead of a text run', async () => {
+    const service = new AgentSessionService()
+    const userMessage = makeUserMessage('u1', 'ask then continue')
+
+    const runPromise = service.run({
+      conversationId: 'conv-voice-answer',
+      loopConfig: {
+        enableTools: true,
+        maxAutoIterations: 100,
+        includeBuiltinTools: true,
+      },
+      input: {
+        conversationId: 'conv-voice-answer',
+        messages: [userMessage],
+      } as unknown as AgentRuntimeRunInput,
+    })
+    const firstRuntime = runtimeInstances[0]
+    firstRuntime.emitSnapshot(
+      makeAssistantToolMessages({
+        userMessage,
+        responseStatus: ToolCallResponseStatus.AwaitingUserInput,
+        toolName: 'yolo_local__ask_user_question',
+      }).map((message) =>
+        message.role === 'tool'
+          ? {
+              ...message,
+              metadata: { ...message.metadata, realtimeVoice: true },
+            }
+          : message,
+      ),
+    )
+
+    const result = await service.answerUserQuestion({
+      conversationId: 'conv-voice-answer',
+      toolCallId: 'call-1',
+      payload: {
+        type: 'user_answers',
+        answers: [],
+      },
+    })
+
+    // No second runtime: the voice bridge hands the answer back to the Live
+    // model, so the text loop must not pick it up.
+    expect(result.kind).toBe('needs_recovery')
+    expect(runtimeInstances).toHaveLength(1)
+
     firstRuntime.resolveRun()
     await runPromise
   })

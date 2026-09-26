@@ -452,6 +452,9 @@ export function useChatDomainActions({
         if (
           toolMessageIndex === resolvedMessages.length - 1 &&
           latestToolMessage?.role === 'tool' &&
+          // See `updateToolMessageInChatHistory`: the voice bridge owns the
+          // continuation for a live voice session, so never start a text run.
+          latestToolMessage.metadata?.realtimeVoice !== true &&
           latestToolMessage.toolCalls.every((toolCall) =>
             [
               ToolCallResponseStatus.Success,
@@ -1062,6 +1065,9 @@ export function useChatDomainActions({
 
       const shouldResume =
         toolMessageIndex === sourceMessages.length - 1 &&
+        // A voice-owned tool call's result goes back to the Live session through
+        // `voiceToolCallResolution`, not into a fresh text run.
+        nextToolMessage.metadata?.realtimeVoice !== true &&
         nextToolMessage.toolCalls.every((toolCall) =>
           [
             ToolCallResponseStatus.Success,

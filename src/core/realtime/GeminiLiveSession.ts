@@ -51,6 +51,7 @@ export type GeminiLiveSessionOptions = {
   onTurnOpen?: () => void
   toolHandler?: (
     calls: GeminiLiveFunctionCall[],
+    signal?: AbortSignal,
   ) => Promise<GeminiLiveFunctionResponse[]>
   /** Prior turns replayed on `setupComplete`; already normalized by the caller. */
   initialHistory?: GeminiLiveHistoryTurn[]
@@ -67,11 +68,17 @@ export class GeminiLiveSession {
   // concurrently would let the later batch overwrite the active-tool chip and
   // send responses out of request order.
   private toolCallChain: Promise<void> = Promise.resolve()
+  /**
+   * Aborts a tool batch that is still waiting on the user when the session
+   * stops, so a pending approval card cannot outlive the turn that produced it.
+   */
+  private toolAbortController = new AbortController()
 
   constructor(private readonly options: GeminiLiveSessionOptions) {}
 
   async start(): Promise<void> {
     this.stopped = false
+    this.toolAbortController = new AbortController()
     this.options.store.setStatus('connecting')
     // With history, capture waits for `ready`: the server must receive the
     // seeded `clientContent` before any realtime input reaches the session.
@@ -83,6 +90,7 @@ export class GeminiLiveSession {
 
   stop(): void {
     this.stopped = true
+    this.toolAbortController.abort()
     this.options.client.sendAudioStreamEnd()
     this.options.microphone.stop()
     this.options.player.flush()
@@ -179,6 +187,7 @@ export class GeminiLiveSession {
           .then(() => this.handleToolCall(event.functionCalls))
         break
       case 'closed':
+        this.toolAbortController.abort()
         this.commitTurn()
         this.options.player.flush()
         this.options.microphone.stop()
@@ -194,7 +203,10 @@ export class GeminiLiveSession {
     if (this.stopped || !this.options.toolHandler || calls.length === 0) return
     this.options.store.setActiveTool(calls.map((call) => call.name).join(', '))
     try {
-      const responses = await this.options.toolHandler(calls)
+      const responses = await this.options.toolHandler(
+        calls,
+        this.toolAbortController.signal,
+      )
       if (this.stopped) return
       this.options.client.sendToolResponse(responses)
     } catch (error) {
