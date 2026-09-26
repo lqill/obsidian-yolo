@@ -208,6 +208,7 @@ export const RUNTIME_CAPABILITIES: Record<
     skipsImageModelCapabilityCheck: true,
     supportsImageAttachments: true,
     supportsQueueWhileGenerating: false,
+    supportsRealtimeVoice: false,
   },
   grok: {
     supportsPlanMode: false,

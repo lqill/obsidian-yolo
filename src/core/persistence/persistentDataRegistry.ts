@@ -88,6 +88,7 @@ export const HOST_SETTINGS_CLASSIFICATIONS = [
     'config',
     'legacy global fallback; active behavior is stored per assistant',
   ),
+  hostSetting('voice', '实时语音设置'),
   excludedHostSetting(
     'softDismissedUpdateVersion',
     'runtime-state',
