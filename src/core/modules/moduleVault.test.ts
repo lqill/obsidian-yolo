@@ -99,8 +99,18 @@ function createApp(entries: Array<TFile | TFolder>) {
       refs.delete(ref)
     }),
   }
+  const fileManager = {
+    generateMarkdownLink: jest.fn(
+      (file: TFile, sourcePath: string, subpath?: string, alias?: string) =>
+        `[[${file.path}${subpath ?? ''}|${alias ?? `from ${sourcePath}`}]]`,
+    ),
+    getAvailablePathForAttachment: jest.fn(
+      async (fileName: string, sourcePath: string) =>
+        `${sourcePath.split('/').slice(0, -1).join('/')}/attachments/${fileName}`,
+    ),
+  }
   return {
-    app: { vault } as unknown as App,
+    app: { vault, fileManager } as unknown as App,
     binary,
     emit: (event: string, ...args: unknown[]) => {
       for (const ref of [...refs]) {
@@ -201,6 +211,31 @@ describe('ObsidianModuleVaultCapabilityProvider', () => {
     expect(() => capability.api.getResourceUrl('../escape.png')).toThrow(
       'dot segments',
     )
+
+    // Links are Obsidian's own, written for the given source; a path that is
+    // no file has no link, and a subpath is only ever a `#` fragment.
+    expect(
+      capability.api.generateLink('notes/card.md', 'boards/b.yoloboard', '#x'),
+    ).toBe('[[notes/card.md#x|from boards/b.yoloboard]]')
+    expect(
+      capability.api.generateLink('notes/card.md', '', '#page=2', 'card, p.2'),
+    ).toBe('[[notes/card.md#page=2|card, p.2]]')
+    expect(capability.api.generateLink('notes/missing.md', '')).toBeNull()
+
+    // An attachment's place is the user's attachment setting, asked of
+    // Obsidian for the document it belongs to; only a bare file name is one.
+    await expect(
+      capability.api.getAvailableAttachmentPath('x.png', 'boards/b.yoloboard'),
+    ).resolves.toBe('boards/attachments/x.png')
+    await expect(
+      capability.api.getAvailableAttachmentPath(
+        '../x.png',
+        'boards/b.yoloboard',
+      ),
+    ).rejects.toThrow('must be a file name')
+    expect(() =>
+      capability.api.generateLink('notes/card.md', '', 'page=1'),
+    ).toThrow('must start with "#"')
 
     lifecycle.dispose()
     expect(() => capability.api.getEntry('notes')).toThrow('not active')

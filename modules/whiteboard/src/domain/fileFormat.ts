@@ -1,26 +1,23 @@
 // `.yoloboard` schema v1 — the single point that knows this file format.
-// See docs/plans/08-25-yolo-whiteboard/p1-design.md §1.1 for the schema this
-// formalizes, and p3-canvas-parity.md D5 for why it is shaped the way it is.
 //
 // The format is a **superset of JSON Canvas 1.0** (https://jsoncanvas.org/
 // spec/1.0/). Every concept Canvas has, we spell the way Canvas spells it:
 //
 //   - one flat `nodes` array holding `text` / `file` / `link` / `group` nodes, rather
 //     than a `cards` array beside a separate `groups` collection — a group is
-//     a kind of node, not a second population (D5);
+//     a kind of node, not a second population;
 //   - `color` is a node (and edge) attribute, with Canvas's `canvasColor`
 //     values: the presets "1".."6", or a hex string;
 //   - edges name their ends `fromNode`/`toNode`, their anchors
 //     `fromSide`/`toSide`, and their arrowheads `fromEnd`/`toEnd`, with
 //     Canvas's defaults (no arrow at the source, an arrow at the target).
 //
-// Two deliberate deviations, both documented in the P3 report:
+// Two deliberate deviations:
 //   - geometry is `w`/`h`, not Canvas's `width`/`height` (an abbreviation, not
 //     a different concept; renaming would churn every geometry helper for no
 //     conceptual gain);
 //   - we add `version` and `camera` at the top level — the viewport state
-//     Canvas cannot hold is one of the reasons this is our own format
-//     (master.md's "存储格式" decision).
+//     Canvas cannot hold is one of the reasons this is our own format.
 //
 // Everything else Canvas defines but we do not yet render (`subpath` on file
 // nodes, `background`/`backgroundStyle` on groups) round-trips untouched
@@ -83,24 +80,106 @@ export type BoardNodeBase = Readonly<{
  */
 type ReadingWindow = Readonly<{ startLine?: number }>
 
+/**
+ * Where a PDF card is being read: the same window as `startLine`, in the
+ * coordinate a paged document speaks. The integer part is the 1-based page at
+ * the card's top edge and the fraction how far down that page the edge sits —
+ * 3.25 is page 3 with its top quarter scrolled past.
+ *
+ * A fraction of the page rather than a pixel offset, because nothing about a
+ * card fixes its pixels: the card can be resized, which re-lays every page at
+ * a new width, and the same place has to come back. Absent means the top of
+ * page 1. A separate field rather than `startLine` read differently: a file
+ * node's kind follows its path, and a card whose file is renamed from `.md`
+ * to `.pdf` must not reinterpret a line number as a page.
+ */
+type PageWindow = Readonly<{ startPage?: number }>
+
+/** A rectangle in world units — what a spread remembers for its title and
+ * each of its pages. Written to the file as an `[x, y, w, h]` tuple: a
+ * three-hundred-page spread is three hundred of them. */
+export type SpreadRect = Readonly<{
+  x: number
+  y: number
+  w: number
+  h: number
+}>
+
+/**
+ * A PDF card's other way of being drawn: its pages laid out on the board like
+ * sheets of paper, each one placed on its own, under a title that stands for
+ * the whole document.
+ *
+ * Not in JSON Canvas, and the node's own `x`/`y`/`w`/`h` stay the reader
+ * card's whichever way it is drawn: a reader that does not know the field
+ * (Obsidian Canvas) shows an ordinary PDF card where the card last was. The
+ * layout outlives `open` — putting the pages away and bringing them back puts
+ * every sheet where it was left.
+ *
+ * On the board a spread is never this field (domain/spread.ts's
+ * `expandBoard`): while it is open, the node stands for its title and each page
+ * is a `pdf-page` node of its own, so dragging, snapping, grouping and edges
+ * reach a sheet the way they reach any card. The field is what those are
+ * folded back into for the file.
+ */
+export type PdfSpread = Readonly<{
+  open: boolean
+  title: SpreadRect
+  pages: readonly SpreadPage[]
+}>
+
+/** Where a spread's page was left, and the colour it was given if any —
+ * the one thing a sheet carries of its own besides its place. Written as
+ * `[x, y, w, h]`, or `[x, y, w, h, color]` for a coloured one. */
+export type SpreadPage = SpreadRect & Readonly<{ color?: NodeColor }>
+
+/**
+ * The spread fields a file node can carry: `spread` as it is in the file,
+ * and `readerRect` only on the board, where an open spread's node is its
+ * title and the reader card's rectangle has to wait somewhere for it to be
+ * put away (domain/spread.ts). A node carries one or neither, never both.
+ */
+type SpreadDisplay = Readonly<{ spread?: PdfSpread; readerRect?: SpreadRect }>
+
+/**
+ * How a text node is drawn: as a card, or as bare text written on the board.
+ *
+ * Not in JSON Canvas. Bare text has no frame and no window: it shows all of
+ * its content, and its height is whatever that content takes at its width —
+ * the node's `h` is what it was last measured at, kept so that edges,
+ * placement and a board opened elsewhere have a size to work with. A reader
+ * that does not know the field (Obsidian Canvas) shows the same markdown as a
+ * card, which loses nothing.
+ *
+ * `autoWidth` says who chose the width: set, the text is as wide as its
+ * longest line up to a cap, and `w` follows it as it is typed; absent, the
+ * width is the one someone gave it and the text wraps inside it. Two
+ * fields rather than one, because a width alone cannot say which of the two
+ * it is, and the two behave oppositely the next time the text changes.
+ */
+type TextDisplay = Readonly<{ plain?: boolean; autoWidth?: boolean }>
+
 /** JSON Canvas text node: markdown that lives in the board file itself. */
 export type TextNode = BoardNodeBase &
   ReadingWindow &
+  TextDisplay &
   Readonly<{
     type: 'text'
     text: string
   }>
 
 /**
- * JSON Canvas file node: a reference to a vault file. Markdown, image, audio
- * and video files each render as their own kind of card (domain/naming.ts's
- * `fileNodeKind`); every other extension renders as a placeholder until the
- * PDF card lands (M2). One node type rather than the old `note`/`pdf` pair,
+ * JSON Canvas file node: a reference to a vault file. Markdown, PDF, image,
+ * audio, video and HTML files each render as their own kind of card
+ * (domain/naming.ts's `fileNodeKind`); every other extension renders as a
+ * placeholder. One node type rather than the old `note`/`pdf` pair,
  * because "which file is this" is a path question, not a schema question —
  * and Canvas has always modelled it that way.
  */
 export type FileNode = BoardNodeBase &
   ReadingWindow &
+  PageWindow &
+  SpreadDisplay &
   Readonly<{
     type: 'file'
     /** Vault-relative path to the backing file. */
@@ -121,8 +200,7 @@ export type LinkNode = BoardNodeBase &
 /**
  * JSON Canvas group node: a labelled frame behind the cards. Membership is
  * geometric (a node inside the frame is in the group) rather than stored, the
- * same way Canvas does it; the interactions that act on membership are P3
- * batch 3.
+ * same way Canvas does it.
  */
 export type GroupNode = BoardNodeBase &
   Readonly<{
@@ -130,7 +208,34 @@ export type GroupNode = BoardNodeBase &
     label?: string
   }>
 
-export type BoardNode = TextNode | FileNode | LinkNode | GroupNode
+/**
+ * One sheet of an open spread (`PdfSpread`), on the board.
+ *
+ * Never in a file: it exists only between domain/spread.ts's `expandBoard`,
+ * which makes one per page when a board is read, and `collapseBoard`, which
+ * folds them back into their PDF's node before it is written. Its id is
+ * derived from its parent's (`pdfPageNodeId`), so an edge or a selection can
+ * name it like any node.
+ */
+export type PdfPageNode = BoardNodeBase &
+  Readonly<{
+    type: 'pdf-page'
+    /** The PDF node whose spread this sheet belongs to. */
+    parent: NodeId
+    /** The parent's file, copied so a sheet can be drawn from itself. */
+    file: string
+    /** 1-based. */
+    page: number
+  }>
+
+export type BoardNode = TextNode | FileNode | LinkNode | GroupNode | PdfPageNode
+
+/** Whether a node is bare text rather than a card (`TextDisplay`). */
+export function isPlainText(
+  node: BoardNode | undefined,
+): node is TextNode & Readonly<{ plain: true }> {
+  return node?.type === 'text' && node.plain === true
+}
 
 export type Edge = Readonly<{
   id: EdgeId
@@ -139,6 +244,15 @@ export type Edge = Readonly<{
   /** Anchor side on the source/target node. Omitted = pick from relative position at render time (not this module's job). */
   fromSide?: NodeSide
   toSide?: NodeSide
+  /**
+   * The page of a PDF node an end is attached to (1-based), when it is one
+   * sheet of the document rather than the whole of it. Not in JSON Canvas:
+   * there the edge reaches the PDF's card, which is still where it goes while
+   * the spread is put away. On the board an open spread's page is a node of
+   * its own and the edge names it instead (domain/spread.ts).
+   */
+  fromPage?: number
+  toPage?: number
   /** JSON Canvas defaults: 'none' at the source, 'arrow' at the target. */
   fromEnd: EdgeEnd
   toEnd: EdgeEnd
@@ -228,7 +342,15 @@ export function parseBoard(raw: string): BoardParseResult {
       ],
     }
   }
+  return parseBoardValue(json)
+}
 
+/**
+ * `parseBoard` for a value already read out of JSON — the same rules, for a
+ * caller that has an object in hand rather than file text (domain/
+ * clipboard.ts, whose payload is a board fragment in JSON Canvas spelling).
+ */
+export function parseBoardValue(json: unknown): BoardParseResult {
   if (!isPlainObject(json)) {
     return {
       ok: false,
@@ -312,8 +434,20 @@ export function serializeBoard(board: Board): string {
 // --- nodes ---------------------------------------------------------------
 
 const NODE_COMMON_KEYS = ['id', 'type', 'x', 'y', 'w', 'h', 'color'] as const
-const TEXT_NODE_KEYS = [...NODE_COMMON_KEYS, 'text', 'startLine'] as const
-const FILE_NODE_KEYS = [...NODE_COMMON_KEYS, 'file', 'startLine'] as const
+const TEXT_NODE_KEYS = [
+  ...NODE_COMMON_KEYS,
+  'text',
+  'startLine',
+  'plain',
+  'autoWidth',
+] as const
+const FILE_NODE_KEYS = [
+  ...NODE_COMMON_KEYS,
+  'file',
+  'startLine',
+  'startPage',
+  'spread',
+] as const
 const LINK_NODE_KEYS = [...NODE_COMMON_KEYS, 'url'] as const
 const GROUP_NODE_KEYS = [...NODE_COMMON_KEYS, 'label'] as const
 
@@ -378,6 +512,7 @@ function parseNode(
         type: 'text',
         text,
         ...parseReadingWindow(entry),
+        ...parseTextDisplay(entry),
         extra: extractExtra(entry, TEXT_NODE_KEYS),
       }
     }
@@ -397,6 +532,8 @@ function parseNode(
         type: 'file',
         file,
         ...parseReadingWindow(entry),
+        ...parsePageWindow(entry),
+        ...parseSpread(entry),
         extra: extractExtra(entry, FILE_NODE_KEYS),
       }
     }
@@ -452,6 +589,79 @@ function parseReadingWindow(entry: Record<string, unknown>): {
   return { startLine: value }
 }
 
+/** Bare text is written `true` or not at all; anything else is a card. */
+function parseTextDisplay(entry: Record<string, unknown>): {
+  plain?: boolean
+  autoWidth?: boolean
+} {
+  if (entry.plain !== true) return {}
+  return entry.autoWidth === true
+    ? { plain: true, autoWidth: true }
+    : { plain: true }
+}
+
+/** The same rule for a page window: the top of page 1 is 1, and anything
+ * that is not a place at or past it is no window at all. */
+function parsePageWindow(entry: Record<string, unknown>): {
+  startPage?: number
+} {
+  const value = entry.startPage
+  if (!isFiniteNumber(value) || value <= 1) return {}
+  return { startPage: value }
+}
+
+/**
+ * A spread is kept only whole: a title and at least one page, every one of
+ * them a finite rectangle. Anything less is dropped, and the card is a card —
+ * expanding it again lays its pages out afresh, which loses a layout nobody
+ * could have been shown anyway.
+ */
+function parseSpread(entry: Record<string, unknown>): { spread?: PdfSpread } {
+  const raw = entry.spread
+  if (!isPlainObject(raw)) return {}
+  const title = parseSpreadRect(raw.title)
+  if (!title || !Array.isArray(raw.pages) || raw.pages.length === 0) return {}
+  const pages: SpreadPage[] = []
+  for (const value of raw.pages) {
+    const page = parseSpreadPage(value)
+    if (!page) return {}
+    pages.push(page)
+  }
+  return { spread: { open: raw.open === true, title, pages } }
+}
+
+function parseSpreadRect(value: unknown): SpreadRect | null {
+  if (!Array.isArray(value) || value.length !== 4) return null
+  if (!value.every(isFiniteNumber)) return null
+  const [x, y, w, h] = value
+  if (w <= 0 || h <= 0) return null
+  return { x, y, w, h }
+}
+
+function parseSpreadPage(value: unknown): SpreadPage | null {
+  if (!Array.isArray(value) || value.length !== 5) {
+    return parseSpreadRect(value)
+  }
+  const rect = parseSpreadRect(value.slice(0, 4))
+  const color: unknown = value[4]
+  if (!rect || !isNonEmptyString(color)) return null
+  return { ...rect, color }
+}
+
+function serializeSpread(
+  spread: PdfSpread | undefined,
+): Record<string, unknown> | undefined {
+  if (!spread) return undefined
+  const tuple = (rect: SpreadRect) => [rect.x, rect.y, rect.w, rect.h]
+  return {
+    open: spread.open ? true : undefined,
+    title: tuple(spread.title),
+    pages: spread.pages.map((page) =>
+      page.color === undefined ? tuple(page) : [...tuple(page), page.color],
+    ),
+  }
+}
+
 function parseNodeGeometry(
   entry: Record<string, unknown>,
   index: number,
@@ -479,7 +689,7 @@ function parseNodeGeometry(
   }
 }
 
-function serializeNode(node: BoardNode): Record<string, unknown> {
+export function serializeNode(node: BoardNode): Record<string, unknown> {
   const common = {
     id: node.id,
     type: node.type,
@@ -495,6 +705,9 @@ function serializeNode(node: BoardNode): Record<string, unknown> {
         ...common,
         text: node.text,
         startLine: node.startLine,
+        plain: node.plain === true ? true : undefined,
+        autoWidth:
+          node.plain === true && node.autoWidth === true ? true : undefined,
         ...node.extra,
       }
     case 'file':
@@ -502,12 +715,21 @@ function serializeNode(node: BoardNode): Record<string, unknown> {
         ...common,
         file: node.file,
         startLine: node.startLine,
+        startPage: node.startPage,
+        spread: serializeSpread(node.spread),
         ...node.extra,
       }
     case 'link':
       return { ...common, url: node.url, ...node.extra }
     case 'group':
       return { ...common, label: node.label, ...node.extra }
+    case 'pdf-page':
+      // A board is folded back (domain/spread.ts's `collapseBoard`) before
+      // anything writes it; a sheet reaching here would be written as a node
+      // no reader knows and dropped from its PDF's spread.
+      throw new Error(
+        `serializeNode: "${node.id}" is a spread page, which only exists on the board`,
+      )
   }
 }
 
@@ -521,6 +743,8 @@ const EDGE_KNOWN_KEYS = [
   'toSide',
   'fromEnd',
   'toEnd',
+  'fromPage',
+  'toPage',
   'color',
   'label',
 ] as const
@@ -602,12 +826,16 @@ function parseEdge(
   const toEnd = isEdgeEnd(entry.toEnd) ? entry.toEnd : 'arrow'
   const color = isNonEmptyString(entry.color) ? entry.color : undefined
   const label = typeof entry.label === 'string' ? entry.label : undefined
+  const fromPage = parseEdgePage(entry.fromPage)
+  const toPage = parseEdgePage(entry.toPage)
   return {
     id,
     fromNode,
     toNode,
     fromSide,
     toSide,
+    ...(fromPage === undefined ? {} : { fromPage }),
+    ...(toPage === undefined ? {} : { toPage }),
     fromEnd,
     toEnd,
     color,
@@ -616,13 +844,24 @@ function parseEdge(
   }
 }
 
-function serializeEdge(edge: Edge): Record<string, unknown> {
+/** A page an edge end names is a whole page number, from 1; anything else
+ * attaches the end to the PDF as a whole, which is what an edge without the
+ * field does. */
+function parseEdgePage(value: unknown): number | undefined {
+  return Number.isInteger(value) && (value as number) >= 1
+    ? (value as number)
+    : undefined
+}
+
+export function serializeEdge(edge: Edge): Record<string, unknown> {
   return {
     id: edge.id,
     fromNode: edge.fromNode,
     toNode: edge.toNode,
     fromSide: edge.fromSide,
     toSide: edge.toSide,
+    fromPage: edge.fromPage,
+    toPage: edge.toPage,
     fromEnd: edge.fromEnd,
     toEnd: edge.toEnd,
     color: edge.color,

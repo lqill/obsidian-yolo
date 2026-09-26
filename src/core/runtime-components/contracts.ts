@@ -1,8 +1,11 @@
+import type { ClaudeSdkModule } from '../cli-runtime/claude/types'
+
 export type RuntimeComponentId =
   | 'tokenizer'
   | 'pdf-engine'
   | 'bash-engine'
   | 'embedding-engine'
+  | 'claude-agent-sdk'
 
 export type TokenizerComponentApi = Readonly<{
   count(text: string): number
@@ -15,7 +18,173 @@ export type PdfSliceErrorKind =
   | 'too-many-pages'
   | 'too-large'
 
+/** `[x, y]`. PDF user space (y up) or viewport CSS pixels (y down). */
+export type PdfPoint = readonly [x: number, y: number]
+
+/** Two opposite corners in PDF user space, in any order. */
+export type PdfRect = readonly [x1: number, y1: number, x2: number, y2: number]
+
+/**
+ * Obsidian's native `#page=N&selection=a,b,c,d` tuple: `a`/`c` are the start
+ * and end text-layer span indices (`data-idx`, the span's index among the
+ * page's text content items), `b`/`d` the character offsets within those
+ * spans; `d` is exclusive.
+ */
+export type PdfTextSelectionTuple = readonly [
+  startIndex: number,
+  startOffset: number,
+  endIndex: number,
+  endOffset: number,
+]
+
+export type PdfTextSelection = Readonly<{
+  pageNumber: number
+  /** The selected text, `\n` at the page's line breaks, Unicode-normalized. */
+  text: string
+  /**
+   * One quadrilateral per visual line, 8 numbers each — top-left, top-right,
+   * bottom-left, bottom-right as seen on screen — in PDF user space (the
+   * order PDF Highlight annotations use).
+   */
+  quadPoints: readonly number[]
+  tuple: PdfTextSelectionTuple
+}>
+
+export type PdfTask<T> = Readonly<{
+  /** Rejects with an `AbortError` `DOMException` once cancelled. */
+  promise: Promise<T>
+  cancel(): void
+}>
+
+export type PdfTextLayer = Readonly<{
+  pageNumber: number
+  /**
+   * The part of `range` inside this layer, or null when none of it is.
+   * A selection spanning pages is described one layer at a time.
+   */
+  describeRange(range: Range): PdfTextSelection | null
+  /** The DOM range a tuple names in this layer, or null when it names none. */
+  createRange(tuple: PdfTextSelectionTuple): Range | null
+  /** Re-lays the existing spans out for a new scale without refetching text. */
+  setScale(scale: number): void
+  /** Cancels a pending build and empties the container. */
+  destroy(): void
+}>
+
+/** One text content item of a page — one text-layer span. */
+export type PdfTextItem = Readonly<{
+  /** The item's text exactly as the span holds it (not normalized). */
+  text: string
+  /** A line ends after this item. */
+  endsLine: boolean
+}>
+
+export type PdfEnginePage = Readonly<{
+  pageNumber: number
+  /** Viewport size at scale 1 (PDF units, page rotation applied). */
+  width: number
+  height: number
+  rotation: 0 | 90 | 180 | 270
+  /**
+   * Renders the page at `scale` CSS pixels per PDF unit. The canvas backing
+   * store is sized to `scale * pixelRatio` (pixel ratio defaults to the
+   * canvas window's `devicePixelRatio`, and is lowered if the canvas would
+   * be too large; the effective ratio is returned); CSS sizing stays with
+   * the caller. The canvas is only touched once rendering succeeds, so it
+   * keeps its previous picture while a re-render is pending or cancelled.
+   * A new render into the same canvas cancels the previous one.
+   */
+  render(
+    options: Readonly<{
+      canvas: HTMLCanvasElement
+      scale: number
+      pixelRatio?: number
+    }>,
+  ): PdfTask<Readonly<{ pixelRatio: number }>>
+  /**
+   * Builds the page's selectable text layer into `container` (emptied
+   * first), sized and positioned for `scale` exactly as `render` draws it;
+   * the container is expected to sit over the rendered page at the same
+   * CSS size. Spans carry `data-idx` in Obsidian's native numbering.
+   */
+  renderTextLayer(
+    options: Readonly<{ container: HTMLElement; scale: number }>,
+  ): PdfTask<PdfTextLayer>
+  /** PNG bytes of `rect` (PDF user space) rendered at `scale`. */
+  renderRegion(
+    rect: PdfRect,
+    options: Readonly<{ scale: number }>,
+  ): Promise<ArrayBuffer>
+  toViewportPoint(point: PdfPoint, scale: number): PdfPoint
+  toPdfPoint(point: PdfPoint, scale: number): PdfPoint
+  /** Frees the page's operator list and decoded images once no render of it
+   * is in flight (pdf.js `PDFPageProxy.cleanup`); the page stays usable. */
+  cleanup(): void
+  /**
+   * The page's text, one entry per text-layer span in `data-idx` order — so
+   * an entry's index and a character offset into its text are the
+   * coordinates a selection tuple names. Fetched once per page and kept.
+   */
+  getTextItems(): Promise<readonly PdfTextItem[]>
+}>
+
+export type PdfEngineDocument = Readonly<{
+  pageCount: number
+  getPage(pageNumber: number): Promise<PdfEnginePage>
+  destroy(): Promise<void>
+}>
+
+/**
+ * A standard PDF annotation to write into a document. Geometry is PDF user
+ * space of the page, exactly as `describeRange` / `toPdfPoint` give it —
+ * the page's own rotation and box offsets are the viewer's business.
+ */
+export type PdfAnnotationInput = Readonly<
+  (
+    | {
+        /** A text highlight (`/Highlight`), painted with a multiply blend. */
+        type: 'highlight'
+        /** Eight numbers per line: top-left, top-right, bottom-left,
+         * bottom-right as the text reads (PDF `/QuadPoints` order). */
+        quadPoints: readonly number[]
+      }
+    | {
+        /** A rectangle outline (`/Square`) around `rect`. */
+        type: 'square'
+        rect: PdfRect
+        /** Stroke width in PDF units; default 1. Drawn outside `rect`. */
+        borderWidth?: number
+      }
+  ) & {
+    /** 1-based. */
+    page: number
+    /** `#rrggbb`. */
+    color: string
+    /** The annotation's note (`/Contents`). */
+    contents?: string
+    /** The note's author (`/T`). */
+    author?: string
+    /** A name unique on the page (`/NM`), e.g. the caller's own id. */
+    id?: string
+    /** ISO 8601 (`/CreationDate`, `/M`). */
+    createdAt?: string
+    modifiedAt?: string
+  }
+>
+
 export type PdfEngineComponentApi = Readonly<{
+  /** A long-lived document for interactive use; the caller destroys it. */
+  openDocument(bytes: Uint8Array): Promise<PdfEngineDocument>
+  /**
+   * A new PDF: `bytes` with `annotations` added after each page's existing
+   * ones, every one carrying its own appearance stream. `bytes` is not
+   * modified. Rejects on an annotation it cannot write and on a document it
+   * cannot rewrite (encrypted, damaged).
+   */
+  addAnnotations(
+    bytes: Uint8Array,
+    annotations: readonly PdfAnnotationInput[],
+  ): Promise<Uint8Array>
   extractPages(
     bytes: Uint8Array,
     options: { maxPages: number; signal?: AbortSignal },
@@ -46,6 +215,7 @@ export type PdfEngineComponentApi = Readonly<{
     actualStart: number
     actualEnd: number
   }>
+  /** Also destroys every document still open. */
   dispose(): void
 }>
 
@@ -260,7 +430,7 @@ export type EmbeddingEngineSpec = Readonly<{
  * Callbacks injected by the host so the component never touches the network
  * or the vault directly. `loadWasm` reads a runtime-component asset (see
  * `readRuntimeComponentAsset`); `loadModelFile` reads a file from the
- * `LocalEmbeddingModelManager`-owned model directory (host-only, P2). Both
+ * `LocalEmbeddingModelManager`-owned model directory (host-only). Both
  * receive `createSession`'s own `signal` so a caller that aborts while
  * assets/model files are still loading (network fetch, vault read) can
  * cancel that work instead of it running to completion unobserved.
@@ -270,13 +440,10 @@ export type EmbeddingEngineCreateSessionOptions = Readonly<{
   loadModelFile(file: string, signal?: AbortSignal): Promise<Uint8Array>
   spec: EmbeddingEngineSpec
   /**
-   * `'webgpu'` is kept in the type for forward compatibility but is not
-   * supported in this release — `createSession` rejects it rather than
-   * silently falling back to `'wasm'`, since the component doesn't ship the
-   * JSEP/WebGPU wasm variant as a declared asset. Omit this option (or pass
-   * `'wasm'` explicitly) until WebGPU support returns in a future release.
-   * `dtype` (on `EmbeddingEngineSpec` above) is independent of device and
-   * already supported on `'wasm'`.
+   * Defaults to `'wasm'`. A `'webgpu'` session that fails to initialize
+   * rejects instead of falling back to `'wasm'` — choosing a device is the
+   * caller's decision. Only worthwhile for fp16 weights: q8 on WebGPU is
+   * slower than on wasm.
    */
   device?: 'wasm' | 'webgpu'
   signal?: AbortSignal
@@ -309,6 +476,12 @@ export type RuntimeComponentApiMap = {
   'pdf-engine': PdfEngineComponentApi
   'bash-engine': BashEngineComponentApi
   'embedding-engine': EmbeddingEngineComponentApi
+  /**
+   * Desktop-only: the Claude Agent SDK's entry points, exactly as the SDK
+   * package exports them. Stateless — the child process a `query` spawns
+   * belongs to the query object, which its caller closes.
+   */
+  'claude-agent-sdk': ClaudeSdkModule
 }
 
 export type RuntimeComponentDefinition<

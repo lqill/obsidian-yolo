@@ -7,6 +7,7 @@ import type {
 } from '@yolo/claude-agent-sdk-runtime'
 import { v4 as uuidv4 } from 'uuid'
 
+import type { EditReviewSnapshotApp } from '../../../database/edit-review/editReviewSnapshotStore'
 import type {
   ChatAssistantMessage,
   ChatMessage,
@@ -14,24 +15,27 @@ import type {
 } from '../../../types/chat'
 import type { ContentPart } from '../../../types/llm/request'
 import {
+  type FileChangeRows,
   type ToolCallRequest,
   type ToolCallResponse,
   ToolCallResponseStatus,
   createPartialToolCallArguments,
 } from '../../../types/tool-call.types'
 import { ReasoningPhaseTracker } from '../../../utils/chat/reasoningPhaseTracker'
+import { readNativeCurrentText } from '../../tools/native/current-text'
 import {
   mapClaudeGetContextUsage,
   mapClaudeResultContextUsage,
   mapClaudeResultResponseUsage,
 } from '../context-usage'
 import { assertCliRuntimeAvailable } from '../desktop'
+import { recordCliEditReviewSnapshot } from '../edit-review'
 import { includeActiveCliModel } from '../model-catalog'
 import {
   type CliChatMode,
   resolveClaudePermissionMode,
 } from '../permission-profile'
-import { createCliToolCallRequest } from '../tool-call'
+import { createCliToolCallRequest, toCliEditSummaryPath } from '../tool-call'
 import type {
   CliApprovalResponse,
   CliPermissionProfileUpdate,
@@ -58,11 +62,18 @@ import {
 } from './askUserQuestion'
 import { AsyncPushQueue } from './asyncQueue'
 import {
-  CLAUDE_BASH_TOOL,
+  applyClaudeFileChangeResult,
+  buildClaudePendingFileChangeRows,
+  claudeToolMessageId,
+  getClaudePendingFilePath,
+  readClaudeCompletedFileChange,
+} from './fileChange'
+import {
   extractTextContent,
   extractThinkingContent,
   extractToolResults,
   extractToolUses,
+  getClaudeToolCapability,
   hydrateClaudeSessionMessages,
   hydrateClaudeSessionTranscript,
   parseClaudeTaskNotification,
@@ -111,6 +122,13 @@ export type ClaudeCliRuntimeOptions = {
   cliChatMode?: CliChatMode
   /** When true with agent mode, maps to bypassPermissions. */
   yoloEnabled?: boolean
+  /**
+   * Where edit review snapshots are stored. A completed Edit / Write /
+   * NotebookEdit whose result the disk bears out is recorded there, so the
+   * edit summary panel can open it in the review overlay. Absent in tests
+   * that do not exercise that.
+   */
+  app?: EditReviewSnapshotApp
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -141,14 +159,6 @@ const toCliMcpServerStatus = (status: {
 
 const getErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
-
-const toVaultRelativePath = (vaultPath: string, filePath: string): string => {
-  const normalizedVaultPath = vaultPath.replace(/\\/g, '/').replace(/\/$/, '')
-  const normalizedFilePath = filePath.replace(/\\/g, '/')
-  return normalizedFilePath.startsWith(`${normalizedVaultPath}/`)
-    ? normalizedFilePath.slice(normalizedVaultPath.length + 1)
-    : normalizedFilePath
-}
 
 const cloneToolMessage = (message: ChatToolMessage): ChatToolMessage => ({
   ...message,
@@ -268,6 +278,7 @@ export class ClaudeCliRuntime implements CliRuntime {
   readonly runtimeId = 'claude-code' as const
 
   private readonly vaultPath: string
+  private readonly reviewSnapshotApp?: EditReviewSnapshotApp
   private readonly getConfiguredCliPath?: () => string | undefined
   private readonly loadSdk: ClaudeSdkLoader
   private readonly resolveProcessSupport: ClaudeProcessSupportResolver
@@ -299,6 +310,7 @@ export class ClaudeCliRuntime implements CliRuntime {
 
   constructor(options: ClaudeCliRuntimeOptions) {
     this.vaultPath = options.vaultPath
+    this.reviewSnapshotApp = options.app
     this.getConfiguredCliPath = options.getConfiguredCliPath
     this.loadSdk = options.loadSdk ?? loadClaudeAgentSdk
     this.resolveProcessSupport =
@@ -316,7 +328,7 @@ export class ClaudeCliRuntime implements CliRuntime {
     this.assertClaudeRef(ref)
     const sdk = await this.getSdk()
     const messages = await sdk.getSessionMessages(ref.nativeSessionId)
-    return { ref, ...hydrateClaudeSessionTranscript(messages) }
+    return { ref, ...hydrateClaudeSessionTranscript(messages, this.vaultPath) }
   }
 
   async readSubagent(ref: CliSubagentRef): Promise<readonly ChatMessage[]> {
@@ -327,7 +339,7 @@ export class ClaudeCliRuntime implements CliRuntime {
       ref.parentSessionRef.nativeSessionId,
       ref.subagentId,
     )
-    return hydrateClaudeSessionMessages(messages)
+    return hydrateClaudeSessionMessages(messages, this.vaultPath)
   }
 
   async ensureReady(input: CliRuntimeReadyInput): Promise<void> {
@@ -884,7 +896,12 @@ export class ClaudeCliRuntime implements CliRuntime {
 
   private getSdk(): Promise<ClaudeSdkModule> {
     assertCliRuntimeAvailable('claude-code')
-    this.sdkPromise ??= this.loadSdk()
+    // Loading can fail (the SDK component may still be downloading, be
+    // offline, or be turned off); forget the failure so the next turn retries.
+    this.sdkPromise ??= this.loadSdk().catch((error: unknown) => {
+      this.sdkPromise = undefined
+      throw error
+    })
     return this.sdkPromise
   }
 
@@ -905,7 +922,25 @@ export class ClaudeCliRuntime implements CliRuntime {
           toolUseID: options.toolUseID,
         }
       }
-      this.ensureToolRequest(options.toolUseID, toolName, normalizedInput)
+      // Only a file tool waits on a disk read before its pending card goes
+      // up; every other tool registers its approval synchronously.
+      const pendingFilePath =
+        kind === 'approval'
+          ? getClaudePendingFilePath(toolName, normalizedInput)
+          : null
+      const fileChangeRows = pendingFilePath
+        ? await this.buildPendingFileChangeRows(
+            pendingFilePath,
+            toolName,
+            normalizedInput,
+          )
+        : null
+      this.ensureToolRequest(
+        options.toolUseID,
+        toolName,
+        normalizedInput,
+        fileChangeRows,
+      )
       this.upsertTool(
         options.toolUseID,
         kind === 'question'
@@ -937,6 +972,23 @@ export class ClaudeCliRuntime implements CliRuntime {
         else options.signal.addEventListener('abort', abort, { once: true })
       })
     }
+  }
+
+  private async buildPendingFileChangeRows(
+    filePath: string,
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Promise<FileChangeRows | null> {
+    // The file as it is on disk right now is the approval preview's
+    // before-text; anything that is not a small text file gets no preview.
+    const current = await readNativeCurrentText(filePath)
+    if (current.state === 'unreadable') return null
+    return buildClaudePendingFileChangeRows(
+      this.vaultPath,
+      toolName,
+      input,
+      current.state === 'text' ? current.text : null,
+    )
   }
 
   private settlePending(
@@ -1349,27 +1401,38 @@ export class ClaudeCliRuntime implements CliRuntime {
       const files = [
         ...new Set(
           (result.filesChanged ?? []).map((path) =>
-            toVaultRelativePath(this.vaultPath, path),
+            toCliEditSummaryPath(path, this.vaultPath),
           ),
         ),
       ]
-      if (!result.canRewind || files.length === 0) return
+      // The checkpoint reports insertions/deletions for the whole turn, not
+      // per file. With exactly one file those *are* that file's turn-wide
+      // numbers — better than any single call's `editSummary`, which counts
+      // only its own change — and the summary is attached after every call
+      // of the turn, so it wins the panel's by-path overwrite
+      // (`collectGroupEditSummary`). With several files it has nothing true
+      // to say per file, so it is not published and each Edit / Write
+      // call's own `editSummary` stands.
+      const [path] = files
+      if (!result.canRewind || files.length !== 1 || !path) return
       const insertions = result.insertions ?? 0
       const deletions = result.deletions ?? 0
-      const hasPerFileStats = files.length === 1
+      const reviewRoundId = this.findLatestReviewRoundId(path)
       this.emit({
         type: 'turn_edit_summary',
         sourceUserMessageId,
         summary: {
-          files: files.map((path, index) => ({
-            path,
-            addedLines: index === 0 ? insertions : 0,
-            removedLines: index === 0 ? deletions : 0,
-            lineStatsAvailable: hasPerFileStats,
-            operation: 'edit',
-            undoStatus: 'unavailable',
-          })),
-          totalFiles: files.length,
+          files: [
+            {
+              path,
+              addedLines: insertions,
+              removedLines: deletions,
+              operation: 'edit',
+              undoStatus: 'unavailable',
+              ...(reviewRoundId ? { reviewRoundId } : {}),
+            },
+          ],
+          totalFiles: 1,
           totalAddedLines: insertions,
           totalRemovedLines: deletions,
           undoStatus: 'unavailable',
@@ -1381,6 +1444,25 @@ export class ClaudeCliRuntime implements CliRuntime {
         error,
       )
     }
+  }
+
+  /**
+   * The review round of the latest call that changed `path`. The turn summary
+   * replaces the `editSummary` of whichever call it is attached to — the
+   * turn's last successful call, not necessarily one that touched the file —
+   * so it has to name the latest change's round itself, or the panel would
+   * look the file's latest review snapshot up under the wrong call.
+   */
+  private findLatestReviewRoundId(path: string): string | undefined {
+    let latest: string | undefined
+    for (const { response } of this.tools.values()) {
+      if (response.status !== ToolCallResponseStatus.Success) continue
+      const file = response.data.metadata?.editSummary?.files.find(
+        (candidate) => candidate.path === path,
+      )
+      if (file?.reviewRoundId) latest = file.reviewRoundId
+    }
+    return latest
   }
 
   private ensureActiveAssistant(key: string, id: string): ChatAssistantMessage {
@@ -1429,6 +1511,7 @@ export class ClaudeCliRuntime implements CliRuntime {
 
   private ensurePartialToolRequest(tool: StreamedToolInput): void {
     if (tool.name === CLAUDE_ASK_USER_QUESTION_TOOL) return
+    const capability = getClaudeToolCapability(tool.name)
     const request = createCliToolCallRequest({
       id: tool.id,
       arguments: createPartialToolCallArguments(tool.rawInput),
@@ -1437,9 +1520,7 @@ export class ClaudeCliRuntime implements CliRuntime {
         eventType: 'tool_use',
         name: tool.name,
         ...(tool.parentCallId ? { parentCallId: tool.parentCallId } : {}),
-        ...(tool.name === CLAUDE_BASH_TOOL
-          ? { capability: 'command_execution' as const }
-          : {}),
+        ...(capability ? { capability } : {}),
       },
     })
     if (tool.parentCallId) {
@@ -1471,12 +1552,22 @@ export class ClaudeCliRuntime implements CliRuntime {
     toolUseId: string,
     toolName: string,
     input: Record<string, unknown>,
+    fileChangeRows: FileChangeRows | null,
   ): void {
-    const request = toToolCallRequest({
+    const baseRequest = toToolCallRequest({
       id: toolUseId,
       name: toolName,
       input,
     })
+    const request: ToolCallRequest = fileChangeRows
+      ? {
+          ...baseRequest,
+          metadata: {
+            ...baseRequest.metadata,
+            fileChangeRows: [fileChangeRows],
+          },
+        }
+      : baseRequest
     this.setAssistantToolRequest(request)
     const existing = this.tools.get(toolUseId)
     this.tools.set(toolUseId, {
@@ -1506,8 +1597,53 @@ export class ClaudeCliRuntime implements CliRuntime {
       id: toolUseId,
       name: 'unknown',
     }
-    this.tools.set(toolUseId, { request, response })
+    const toolCall = applyClaudeFileChangeResult(this.vaultPath, {
+      request,
+      response,
+    })
+    this.tools.set(toolUseId, toolCall)
     this.emitTool(toolUseId)
+    this.recordReviewSnapshot(toolUseId, toolCall)
+  }
+
+  /**
+   * Records a completed file change as an edit review snapshot, once the disk
+   * bears it out. `originalFile` is the whole file before the call and the
+   * after-text is computed from the result, but only the disk proves the
+   * file really ended up that way — Claude may already have changed it again,
+   * or the result may be a partial picture — and the review overlay diffs the
+   * before-text against the file as it is. Not borne out, not recorded; the
+   * panel then just opens the file.
+   */
+  private recordReviewSnapshot(toolUseId: string, toolCall: ToolState): void {
+    const app = this.reviewSnapshotApp
+    const sessionRef = this.currentSessionRef
+    if (
+      !app ||
+      !sessionRef ||
+      toolCall.response.status !== ToolCallResponseStatus.Success
+    ) {
+      return
+    }
+    const change = readClaudeCompletedFileChange(
+      toolCall.request.name,
+      toolCall.response.data.metadata?.cliToolResult,
+    )
+    if (!change) return
+    void (async () => {
+      const disk = await readNativeCurrentText(change.filePath)
+      if (disk.state !== 'text' || disk.text !== change.after) return
+      await recordCliEditReviewSnapshot({
+        app,
+        sessionRef,
+        roundId: claudeToolMessageId(toolUseId),
+        path: toCliEditSummaryPath(change.filePath, this.vaultPath),
+        beforeContent: change.before,
+        afterContent: change.after,
+      })
+    })().catch((error: unknown) => {
+      console.warn('[YOLO] Failed to record Claude edit review snapshot', error)
+    })
   }
 
   private emitTool(toolUseId: string): void {
@@ -1517,7 +1653,7 @@ export class ClaudeCliRuntime implements CliRuntime {
       type: 'message_upsert',
       message: cloneToolMessage({
         role: 'tool',
-        id: `claude-tool-${toolUseId}`,
+        id: claudeToolMessageId(toolUseId),
         toolCalls: [tool],
       }),
     })

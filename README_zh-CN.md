@@ -25,29 +25,16 @@
 </p>
 
 <p align="center">
+  <a href="./documentation/zh-CN/README.md"><b>使用文档</b></a> | <a href="./documentation/zh-CN/getting-started.md">快速开始</a> | <a href="./documentation/zh-CN/faq.md">常见问题</a>
+</p>
+
+<p align="center">
   QQ 群: <code>793057867</code> | <a href="./assets/wechat-group.png">微信群</a>
 </p>
 
 ## Sponsors
 
 <table>
-<tr>
-<td width="200" align="center" valign="middle">
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://www.atlascloud.ai/logo-white.svg">
-      <img src="https://www.atlascloud.ai/logo.svg" alt="Atlas Cloud" width="163">
-    </picture>
-  </a>
-</td>
-<td valign="middle">
-  <b><a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo">Atlas Cloud</a></b> 为开发者提供覆盖语言、图像与视频生成的统一 AI API。一次接入即可使用横跨多种模态的 300+ 精选模型，无需分别维护不同模型供应商的集成。从 LLM Agent 到图像和视频生成，Atlas Cloud 让模型探索、效果比较与生产接入更加简单。
-  <br><br>
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo"><b>探索 Atlas Cloud →</b></a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://www.atlascloud.ai/console/coding-plan"><b>查看 Coding Plan →</b></a>
-</td>
-</tr>
 <tr>
 <td width="200" align="center" valign="middle">
   <a href="https://go.apimart.ai/gh-obsidian-yolo">
@@ -60,13 +47,25 @@
   <a href="https://go.apimart.ai/gh-obsidian-yolo"><b>注册 APIMart →</b></a>
 </td>
 </tr>
+<tr>
+<td width="200" align="center" valign="middle">
+  <a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO">
+    <img src="./assets/sponsor-fluxion.png" alt="Fluxion AI" width="163">
+  </a>
+</td>
+<td valign="middle">
+  感谢 <b><a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO">Fluxion AI</a></b> 赞助了本项目！Fluxion AI 中转站帮助个人开发者与企业，通过统一 API 接入并管理全球主流 AI 模型；通过多线路动态调度提升可用性，模型表现、响应时间与费用透明可查。使用 Fable 5.1 时，相较 Claude 官方 API 费用，Fluxion AI 最高可节省约 90%。通过此链接注册，即可获得 3 美元等值 API 额度。
+  <br><br>
+  <a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO"><b>注册 Fluxion AI →</b></a>
+</td>
+</tr>
 </table>
 
 ## 最近更新
 
 - **`1.6`**
   - **支持本地推理 Embedding 模型与多知识库**：无需 API Key 即可完成知识库索引，还能按需拆分、独立管理多个知识库，检索时 Agent 会自动按名称匹配
-  - **新增 CLI 对话**：桌面端可在同一个对话界面里直接驱动本机已登录的 Claude Code、Codex、Hermes 或 Pi
+  - **新增 CLI 对话**：桌面端可在同一个对话界面里直接驱动本机已登录的 Claude Code、Codex、Hermes、Pi 或 Grok
   - **推出全新学习模式**：根据学习主题、目标和参考资料生成个性化学习项目，包括结构化大纲、知识点、闪卡与交互式知识地图，配合 FSRS 间隔复习和 Anki 卡包导入，将学习与长期复习串成完整工作流
 
 - **`1.5`**：引入全新 Agent 运行时，让 AI 从「问答」升级为「协作」，完整支持工具调用、MCP、Skills、桌面 Bash、子 Agent 与联网搜索；同时带来长会话上下文与记忆、混合检索 RAG、焦点同步与 PDF 感知，以及多窗口对话与后台 Agent
@@ -83,7 +82,7 @@
 <td align="center"><img src="./assets/learning-mode.gif" alt="Learning Mode" width="100%"></td>
 </tr>
 <tr valign="top">
-<td align="center">不止回答问题。YOLO 能理解并操作你的 Vault，调用工具与 MCP，并通过 Skills 按你的方式完成任务。桌面端还能一键切到你已登录的 Claude Code 或 Codex，让它们直接在 Vault 里工作。</td>
+<td align="center">不止回答问题。YOLO 能理解并操作你的 Vault，调用工具与 MCP，并通过 Skills 按你的方式完成任务。桌面端还能一键切到你已登录的受支持 CLI Agent，让它直接在 Vault 里工作。</td>
 <td align="center">把主题与资料转化为专属学习内容，再用闪卡与 FSRS 持续复习，让知识从被收藏走向真正掌握。</td>
 </tr>
 <tr>
@@ -103,7 +102,7 @@
 
 | 特性 | 说明 |
 |------|------|
-| 🖥️ CLI Agent（桌面端） | 复用本机已登录的 Claude Code / Codex，直接在 Obsidian 里和 CLI Agent 对话 |
+| 🖥️ CLI Agent（桌面端） | 复用本机已登录的受支持 CLI Agent，包括 Claude Code、Codex、Hermes、Pi 和 Grok，直接在 Obsidian 里对话 |
 | 🔌 外部 Agent 支持 | 通过 MCP，让 Hermes、OpenClaw 等外部 Agent 使用 YOLO 的 Vault 搜索，或派遣已配置的 YOLO Agent 执行任务 |
 | ⚡ Quick Ask | 无需离开编辑器即可提问、修改和续写内容 |
 | 🔎 Vault RAG | 检索整个 Vault，让回答建立在你自己的笔记之上 |
@@ -114,7 +113,6 @@
 | 🎛️ 多模型支持 | OpenAI、Claude、Gemini、DeepSeek 等主流模型，自由切换 |
 | 🌍 i18n 国际化 | 原生多语言支持 |
 
-
 ## Quick Start
 
 1. 打开 Obsidian 设置 → 社区插件 → 浏览 → 搜索 **"YOLO"**
@@ -122,7 +120,6 @@
 3. 在插件设置中配置你的 API Key，或者使用你自己的 ChatGPT OAuth / Gemini OAuth：
    - [OpenAI](https://platform.openai.com/api-keys) / [Anthropic](https://console.anthropic.com/settings/keys) / [Gemini](https://aistudio.google.com/apikey) / [Groq](https://console.groq.com/keys)
 4. 打开侧边栏，开始对话——或者在编辑器里输入 `@` 试试 Quick Ask
-
 
 ## Installation
 
@@ -150,6 +147,23 @@
 - [ ] 更好的 AI 白板
 - [ ] 语音输入与会议纪要
 
+## 文档
+
+完整使用文档在 **[documentation/zh-CN](./documentation/zh-CN/README.md)**，覆盖从第一次配置到进阶玩法：
+
+| | |
+|---|---|
+| [快速开始](./documentation/zh-CN/getting-started.md) | 装好、配一个能用的模型、完成第一次对话 |
+| [模型与提供商](./documentation/zh-CN/models.md) | 接入各家服务、OAuth 登录、模型参数 |
+| [对话](./documentation/zh-CN/chat.md) | 引用笔记、Ask/Agent/Max 三种模式、工具审批、改动落地 |
+| [灵光写作](./documentation/zh-CN/sparkle.md) | Quick Ask、Tab 补全、选区改写 |
+| [知识库与检索](./documentation/zh-CN/knowledge-base.md) | 建索引、多知识库、本地嵌入模型 |
+| [工具与权限](./documentation/zh-CN/tools-and-permissions.md) | 它能做什么、怎么管住它 |
+| [记忆](./documentation/zh-CN/memory.md) · [Skills](./documentation/zh-CN/skills.md) · [Agent](./documentation/zh-CN/assistants.md) | 让它更懂你 |
+| [MCP](./documentation/zh-CN/mcp.md) · [CLI Agent](./documentation/zh-CN/cli-agent.md) · [模块](./documentation/zh-CN/modules.md) | 进阶扩展 |
+| [设置参考](./documentation/zh-CN/settings-reference.md) · [常见问题](./documentation/zh-CN/faq.md) | 查阅 |
+
+文档也提供 [English](./documentation/en/README.md) 和 [Italiano](./documentation/it/README.md) 版本。截图统一使用英文界面，各语言共用同一套图。
 
 ## 反馈与 Issue
 
@@ -165,7 +179,6 @@
 
 提交前请先搜一下已有 issue,避免重复。
 
-
 ## Contributing
 
 欢迎各种形式的贡献——Bug 报告、文档改进、功能增强都可以。
@@ -173,7 +186,6 @@
 **重大功能请先开 issue 讨论可行性和实现方案。**
 
 详细规则请看 [CONTRIBUTING_zh-CN.md](./CONTRIBUTING_zh-CN.md)：什么样的贡献会被欢迎、AI 辅助 PR 的要求、PR 体量参考、开发环境搭建。
-
 
 ## Acknowledgments
 
@@ -186,7 +198,6 @@
     <img src="https://img.shields.io/badge/Sponsored_by-Kilo_Code-FF6B6B?style=for-the-badge" alt="Sponsored by Kilo Code" height="30">
   </a>
 </p>
-
 
 ## Support
 
@@ -208,11 +219,9 @@
 
 开发日志会定期更新在[博客](https://www.lapis.cafe)上。
 
-
 ## License
 
 [MIT License](LICENSE)
-
 
 ## Star History
 

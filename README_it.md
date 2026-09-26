@@ -1,6 +1,6 @@
 <h1 align="center">YOLO</h1>
 <p align="center">
-  Assistente AI native per Obsidian — chat, scrittura, knowledge base e orchestrazione, tutto in un unico posto.
+  Assistente AI Agent-native per Obsidian — chat, scrittura, knowledge base e orchestrazione, tutto in un unico posto.
 </p>
 
 <p align="center"><a href="https://github.com/Lapis0x0/obsidian-yolo/commits/main">
@@ -25,6 +25,10 @@
 </p>
 
 <p align="center">
+  <a href="./documentation/it/README.md"><b>Documentazione</b></a> | <a href="./documentation/it/getting-started.md">Guida rapida</a> | <a href="./documentation/it/faq.md">Domande frequenti</a>
+</p>
+
+<p align="center">
   <a href="https://discord.gg/d8EHm48ppU">
     <img src="https://img.shields.io/badge/Discord-Unisciti_alla_community-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Unisciti alla community Discord">
   </a>
@@ -33,23 +37,6 @@
 ## Sponsors
 
 <table>
-<tr>
-<td width="200" align="center" valign="middle">
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://www.atlascloud.ai/logo-white.svg">
-      <img src="https://www.atlascloud.ai/logo.svg" alt="Atlas Cloud" width="163">
-    </picture>
-  </a>
-</td>
-<td valign="middle">
-  <b><a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo">Atlas Cloud</a></b> offre agli sviluppatori un'unica API per creare con modelli AI linguistici, visivi e video. Una sola integrazione dà accesso a oltre 300 modelli selezionati per ogni modalità, senza dover gestire separatamente ciascun provider. Dagli agent basati su LLM alla generazione di immagini e video, Atlas Cloud semplifica la sperimentazione, il confronto tra modelli e l'adozione dell'AI multimodale in produzione.
-  <br><br>
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo"><b>Scopri Atlas Cloud →</b></a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://www.atlascloud.ai/console/coding-plan"><b>Scopri il Coding Plan →</b></a>
-</td>
-</tr>
 <tr>
 <td width="200" align="center" valign="middle">
   <a href="https://go.apimart.ai/gh-obsidian-yolo">
@@ -62,13 +49,25 @@
   <a href="https://go.apimart.ai/gh-obsidian-yolo"><b>Registrati su APIMart →</b></a>
 </td>
 </tr>
+<tr>
+<td width="200" align="center" valign="middle">
+  <a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO">
+    <img src="./assets/sponsor-fluxion.png" alt="Fluxion AI" width="163">
+  </a>
+</td>
+<td valign="middle">
+  Grazie a <b><a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO">Fluxion AI</a></b> per aver sponsorizzato questo progetto! Fluxion AI è un servizio di inoltro API che aiuta sviluppatori indipendenti e aziende ad accedere e gestire i principali modelli di AI del mondo tramite un'unica API. La pianificazione dinamica su più linee migliora la disponibilità, e prestazioni dei modelli, tempi di risposta e costi sono trasparenti. Con Fable 5.1, Fluxion AI consente di risparmiare fino a circa il 90% rispetto ai prezzi dell'API ufficiale di Claude. Registrandoti tramite questo link ricevi 3 $ di credito API gratuito.
+  <br><br>
+  <a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO"><b>Registrati su Fluxion AI →</b></a>
+</td>
+</tr>
 </table>
 
-## Novita recenti
+## Novità recenti
 
 - **`1.6`**
   - **Modelli di embedding locali on-device e knowledge base multiple**: indicizza senza alcuna chiave API, suddividi e gestisci le knowledge base in modo indipendente, e lascia che l'Agent scelga automaticamente quella giusta in base al nome.
-  - **Chat CLI**: su desktop puoi pilotare Claude Code, Codex, Hermes o Pi CLI già autenticati sul tuo dispositivo dalla stessa interfaccia di chat.
+  - **Chat CLI**: su desktop puoi pilotare Claude Code, Codex, Hermes, Pi o Grok CLI già autenticati sul tuo dispositivo dalla stessa interfaccia di chat.
   - **La nuova Modalità di apprendimento**: trasforma qualsiasi argomento e materiale di riferimento in un progetto di studio personalizzato con scalette strutturate, concetti chiave, flashcard e una mappa interattiva delle conoscenze, supportata dalla ripetizione dilazionata FSRS e dall'importazione di pacchetti Anki `.apkg` per un ripasso sostenibile nel lungo periodo.
 
 - **`1.5`**: Introduce un nuovo runtime Agent che trasforma l'AI da semplice Q&A in collaborazione attiva—con tool calling completo, MCP, Skills, Bash desktop, subagent e ricerca web—oltre a contesto e memoria per sessioni lunghe, RAG ibrido rinnovato, sincronizzazione del focus e consapevolezza PDF, e chat multi-finestra con Agent in background.
@@ -85,7 +84,7 @@
 <td align="center"><img src="./assets/learning-mode.gif" alt="Learning Mode" width="100%"></td>
 </tr>
 <tr valign="top">
-<td align="center">Non si limita a rispondere. YOLO comprende e gestisce direttamente il tuo Vault, utilizza strumenti e server MCP e applica le Skills per completare il lavoro secondo il tuo metodo. Su desktop puoi passare con un clic a Claude Code o Codex già autenticati e lasciarli lavorare direttamente nel tuo Vault.</td>
+<td align="center">Non si limita a rispondere. YOLO comprende e gestisce direttamente il tuo Vault, utilizza strumenti e server MCP e applica le Skills per completare il lavoro secondo il tuo metodo. Su desktop puoi passare con un clic a un agent CLI supportato già autenticato e lasciarlo lavorare direttamente nel tuo Vault.</td>
 <td align="center">Trasforma argomenti e materiali in un sistema di apprendimento personale, poi usa flashcard e ripassi basati su FSRS per convertire gli appunti salvati in conoscenze durature.</td>
 </tr>
 <tr>
@@ -105,12 +104,12 @@ Oltre alle capacità principali sopra descritte, YOLO fornisce anche:
 
 | Funzionalità | Descrizione |
 |--------------|-------------|
-| 🖥️ Agent CLI (desktop) | Riutilizza Claude Code / Codex già autenticati sul tuo dispositivo e dialoga con l'agent CLI direttamente dentro Obsidian |
+| 🖥️ Agent CLI (desktop) | Riutilizza un agent CLI supportato già autenticato sul tuo dispositivo, tra cui Claude Code, Codex, Hermes, Pi e Grok, direttamente dentro Obsidian |
 | 🔌 Supporto per Agent esterni | Collega client MCP come Hermes e OpenClaw alla ricerca nel Vault di YOLO oppure delega attività a un Agent YOLO configurato |
 | ⚡ Quick Ask | Chiedi, modifica e continua a scrivere senza lasciare l'editor |
 | 🔎 Vault RAG | Cerca nell'intero Vault per ottenere risposte fondate sui tuoi appunti |
 | 🪟 Chat Multi-Finestra | Gestisci in parallelo attività e contesti diversi in finestre di chat indipendenti |
-| 🧠 Sistema di memoria | Permette a YOLO di ricordare preferenze, abitudini e contesto a lungo termine per conversazioni piu coerenti |
+| 🧠 Sistema di memoria | Permette a YOLO di ricordare preferenze, abitudini e contesto a lungo termine per conversazioni più coerenti |
 | 🪡 Cursor Chat | Aggiunta contesto con un click, conversazione a portata di mano |
 | ⌨️ Completamento Tab | Completamento AI in tempo reale per una scrittura più fluida e naturale |
 | 🎛️ Supporto Multi-Modello | OpenAI, Claude, Gemini, DeepSeek e altri modelli mainstream, liberamente commutabili |
@@ -144,11 +143,27 @@ Vedi Quick Start sopra.
 - [x] Ricerca Vault AI migliore e più forte
 - [x] Agent in Background (automazione task lunghi)
 - [x] Orchestrazione Multi-Agent (tramite subagent)
-- [x] Learning Mode — una vista di studio dedicata
-- [ ] Annotation Mode — annotazioni e suggerimenti AI in tempo reale sulle note
+- [x] Modalità di apprendimento — una vista di studio dedicata
+- [ ] Modalità di annotazione — annotazioni e suggerimenti AI in tempo reale sulle note
 - [ ] Assistente integrato — helper fissato nell'angolo per config/agent, con compattazione automatica e task programmati
 - [ ] Lavagna AI migliore
 - [ ] Input vocale e note riunione
+
+## Documentazione
+
+La documentazione completa si trova in **[documentation/it](./documentation/it/README.md)**: dalla prima configurazione alle funzionalità avanzate.
+
+| | |
+|---|---|
+| [Primi passi](./documentation/it/getting-started.md) | Installazione, configurazione di un modello, prima conversazione |
+| [Modelli e provider](./documentation/it/models.md) | Collegare i vari servizi, login OAuth, parametri dei modelli |
+| [Chat](./documentation/it/chat.md) | Citare note, le tre modalità, approvazione degli strumenti |
+| [Sparkle](./documentation/it/sparkle.md) | Quick Ask, completamento con Tab, riscrittura della selezione |
+| [Knowledge base](./documentation/it/knowledge-base.md) | Indicizzazione, knowledge base multiple, embedding locali |
+| [Strumenti e permessi](./documentation/it/tools-and-permissions.md) | Cosa può fare e come limitarlo |
+| [Impostazioni](./documentation/it/settings-reference.md) · [FAQ](./documentation/it/faq.md) | Consultazione |
+
+> Gli screenshot usano l'interfaccia in inglese e sono condivisi tra tutte le lingue.
 
 ## Feedback & Issue
 
@@ -170,11 +185,13 @@ Sono benvenuti tutti i tipi di contributo — segnalazioni bug, miglioramenti do
 
 **Per funzionalità maggiori, apri prima una issue per discutere fattibilità e implementazione.**
 
+Consulta [CONTRIBUTING.md](./CONTRIBUTING.md) per la guida completa: quali contributi sono benvenuti, la policy sulle PR assistite dall'AI, le linee guida sulle dimensioni e la configurazione dell'ambiente di sviluppo.
+
 ## Riconoscimenti
 
 Grazie a [Smart Composer](https://github.com/glowingjade/obsidian-smart-composer) per il lavoro originale — senza di loro, YOLO non esisterebbe.
 
-Ringraziamenti speciali a [Kilo Code](https://kilo.ai) per il loro sponsorship. Kilo è una piattaforma open-source di assistenti AI con 500+ modelli AI, che aiuta gli sviluppatori a costruire e iterare più velocemente.
+Ringraziamenti speciali a [Kilo Code](https://kilo.ai) per il loro sponsorship. Kilo è una piattaforma open-source di assistenti AI per la programmazione con 500+ modelli AI, che aiuta gli sviluppatori a costruire e iterare più velocemente.
 
 <p align="center">
   <a href="https://kilo.ai" target="_blank">

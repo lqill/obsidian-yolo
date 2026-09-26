@@ -1,8 +1,13 @@
 import {
   DndContext,
   type DragEndEvent,
+  DragOverlay,
+  type DragStartEvent,
+  type DropAnimation,
+  MeasuringStrategy,
   PointerSensor,
   closestCenter,
+  defaultDropAnimationSideEffects,
   useSensor,
   useSensors,
 } from '@dnd-kit/core'
@@ -13,6 +18,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { useReducedMotion } from 'framer-motion'
 import {
   Activity,
   ChevronDown,
@@ -25,11 +31,16 @@ import {
 } from 'lucide-react'
 import { App, Notice, Platform } from 'obsidian'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useLanguage } from '../../../contexts/language-context'
 import { useSettings } from '../../../contexts/settings-context'
 import { getEmbeddingModelClient } from '../../../core/rag/embedding'
 import type YoloPlugin from '../../../main'
+import {
+  MOTION_DURATION_ENTER_S,
+  MOTION_EASE_OUT_CSS,
+} from '../../../styles/tokens/motion'
 import { ChatModel } from '../../../types/chat-model.types'
 import { EmbeddingModel } from '../../../types/embedding-model.types'
 import { LLMProvider } from '../../../types/provider.types'
@@ -42,6 +53,8 @@ import { ObsidianSetting } from '../../common/ObsidianSetting'
 import { ObsidianTextArea } from '../../common/ObsidianTextArea'
 import { ObsidianTextInput } from '../../common/ObsidianTextInput'
 import { ObsidianToggle } from '../../common/ObsidianToggle'
+import { useOptimisticOrder } from '../common/useOptimisticOrder'
+import { useSortableDragSensors } from '../common/useSortableDragSensors'
 import { AddChatModelModal } from '../modals/AddChatModelModal'
 import { AddEmbeddingModelModal } from '../modals/AddEmbeddingModelModal'
 import { ConnectivityTestModal } from '../modals/ConnectivityTestModal'
@@ -49,6 +62,18 @@ import { EditChatModelModal } from '../modals/EditChatModelModal'
 import { EditEmbeddingModelModal } from '../modals/EditEmbeddingModelModal'
 import { EditProviderModal } from '../modals/ProviderFormModal'
 import { ProviderPickerModal } from '../modals/ProviderPickerModal'
+
+// Rows make way for the dragged one on the same curve the sortable card grid
+// uses, so reordering feels the same wherever it appears in settings.
+const SORT_TRANSITION = {
+  duration: MOTION_DURATION_ENTER_S * 1000,
+  easing: MOTION_EASE_OUT_CSS,
+}
+
+// Declared once so `useOptimisticOrder` keeps a stable reference across renders.
+function getEntityId<T extends { id: string }>(entity: T) {
+  return entity.id
+}
 
 type ProvidersAndModelsSectionProps = {
   app: App
@@ -75,7 +100,6 @@ type ProviderSectionItemProps = {
   handleToggleEnableChatModel: (modelId: string, value: boolean) => void
   handleChatModelDragEnd: (event: DragEndEvent) => void
   handleEmbeddingModelDragEnd: (event: DragEndEvent) => void
-  onCollapseForDrag: () => void
 }
 
 function getProviderDisplayBaseUrl(provider: LLMProvider): string {
@@ -699,6 +723,129 @@ function ClaudeOAuthPanel({
   )
 }
 
+/**
+ * The collapsed-row summary of a provider.
+ *
+ * Rendered twice while a row is being dragged: once by the row itself, which
+ * stays put as the empty slot, and once inside the drag overlay as the copy
+ * that follows the pointer. The overlay's copy leaves `interactions` out — it
+ * is a picture of the row, not a second set of working controls.
+ */
+type ProviderHeaderProps = {
+  provider: LLMProvider
+  t: Translator
+  isExpanded: boolean
+  chatModelCount: number
+  embeddingModelCount: number
+  interactions?: {
+    dragListeners: ReturnType<typeof useSortable>['listeners']
+    onToggle: () => void
+    onEdit: () => void
+    onRequestDelete: () => void
+  }
+}
+
+function ProviderHeader({
+  provider,
+  t,
+  isExpanded,
+  chatModelCount,
+  embeddingModelCount,
+  interactions,
+}: ProviderHeaderProps) {
+  const displayBaseUrl = getProviderDisplayBaseUrl(provider)
+  const chatModelsLabel = `${chatModelCount} ${t('settings.providers.chatModels').replace(/^个/, '')}`
+  const embeddingModelsLabel = `${embeddingModelCount} ${t('settings.providers.embeddingModels').replace(/^个/, '')}`
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // Keys pressed on a nested control belong to that control.
+    if (event.target !== event.currentTarget) return
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      interactions?.onToggle()
+    }
+  }
+
+  return (
+    <div
+      className="yolo-provider-header"
+      role={interactions ? 'button' : undefined}
+      tabIndex={interactions ? 0 : undefined}
+      aria-expanded={interactions ? isExpanded : undefined}
+      onClick={interactions?.onToggle}
+      onKeyDown={interactions ? handleKeyDown : undefined}
+      {...interactions?.dragListeners}
+    >
+      {/* The expand arrow, the provider name and the model counts are not
+          controls of their own — pressing any of them means pressing the row.
+          They stay plain elements so the row can own both the click and the
+          drag, the way the sortable cards do. */}
+      <div className="yolo-provider-main-trigger">
+        <div className="yolo-provider-expand-btn">
+          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </div>
+
+        <div className="yolo-provider-info">
+          <span className="yolo-provider-id">{provider.id}</span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        className="yolo-provider-type yolo-provider-base-url-btn"
+        onClick={
+          interactions
+            ? (e) => {
+                e.stopPropagation()
+                interactions.onEdit()
+              }
+            : undefined
+        }
+      >
+        <span className="yolo-provider-base-url-text">{displayBaseUrl}</span>
+      </button>
+
+      <div className="yolo-provider-secondary-trigger">
+        <span className="yolo-provider-model-counts">
+          {chatModelsLabel} · {embeddingModelsLabel}
+        </span>
+      </div>
+
+      <div className="yolo-provider-actions">
+        <button
+          type="button"
+          onClick={
+            interactions
+              ? (e) => {
+                  e.stopPropagation()
+                  interactions.onEdit()
+                }
+              : undefined
+          }
+          className="clickable-icon"
+        >
+          <Settings />
+        </button>
+        <button
+          type="button"
+          onClick={
+            interactions
+              ? (e) => {
+                  e.stopPropagation()
+                  interactions.onRequestDelete()
+                }
+              : undefined
+          }
+          className="clickable-icon"
+          aria-label={t('settings.providers.requestDelete', '删除提供商')}
+        >
+          <Trash2 />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function ProviderSectionItem({
   provider,
   app,
@@ -719,26 +866,37 @@ function ProviderSectionItem({
   handleToggleEnableChatModel,
   handleChatModelDragEnd,
   handleEmbeddingModelDragEnd,
-  onCollapseForDrag,
 }: ProviderSectionItemProps) {
   const isChatGPTOAuth = provider.presetType === 'chatgpt-oauth'
   const isGeminiOAuth = provider.presetType === 'gemini-oauth'
   const isClaudeOAuth = provider.presetType === 'claude-oauth'
-  const displayBaseUrl = getProviderDisplayBaseUrl(provider)
-  const chatModelsLabel = `${chatModels.length} ${t('settings.providers.chatModels').replace(/^个/, '')}`
-  const embeddingModelsLabel = `${embeddingModels.length} ${t('settings.providers.embeddingModels').replace(/^个/, '')}`
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: provider.id })
+  // `attributes` is left out: it re-declares role/tabIndex/aria on the row for
+  // keyboard sorting, which this list doesn't offer (no KeyboardSensor), and
+  // it would fight the header's own button semantics.
+  const { listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: provider.id, transition: SORT_TRANSITION })
 
   const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
+    // Translate only: rows differ in height, and letting dnd-kit's scale
+    // through would stretch the row while it stands in as the empty slot.
+    transform: CSS.Translate.toString(transform),
     transition,
+  }
+
+  // dnd-kit swallows clicks while a drag is active, but it detaches that
+  // listener on teardown, so the click that lands just after the drop gets
+  // through and would toggle the row. Ignore clicks briefly after a drag.
+  const suppressToggleUntilRef = useRef(0)
+  useEffect(() => {
+    if (!isDragging) return
+    return () => {
+      suppressToggleUntilRef.current = Date.now() + 250
+    }
+  }, [isDragging])
+
+  const handleToggle = () => {
+    if (Date.now() < suppressToggleUntilRef.current) return
+    toggleProvider(provider.id)
   }
 
   return (
@@ -747,99 +905,20 @@ function ProviderSectionItem({
       style={style}
       className={`yolo-provider-section ${isDragging ? 'yolo-provider-dragging' : ''}`}
       data-provider-id={provider.id}
-      {...attributes}
     >
-      <div
-        className="yolo-provider-header"
-        onClick={(e) => {
-          if ((e.target as HTMLElement).closest('button')) {
-            return
-          }
-          toggleProvider(provider.id)
+      <ProviderHeader
+        provider={provider}
+        t={t}
+        isExpanded={isExpanded}
+        chatModelCount={chatModels.length}
+        embeddingModelCount={embeddingModels.length}
+        interactions={{
+          dragListeners: listeners,
+          onToggle: handleToggle,
+          onEdit: () => new EditProviderModal(app, plugin, provider).open(),
+          onRequestDelete: () => onRequestDeleteProvider(provider.id),
         }}
-      >
-        <button
-          type="button"
-          className="yolo-provider-drag-handle"
-          aria-label={t('settings.providers.dragHandle', 'Drag to reorder')}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          {...listeners}
-          onPointerDown={(e) => {
-            onCollapseForDrag()
-            ;(
-              listeners as
-                | Record<string, (e: React.PointerEvent) => void>
-                | undefined
-            )?.onPointerDown?.(e)
-          }}
-        >
-          <GripVertical />
-        </button>
-
-        <button
-          type="button"
-          className="yolo-provider-main-trigger yolo-clickable"
-          onClick={() => toggleProvider(provider.id)}
-        >
-          <div className="yolo-provider-expand-btn">
-            {isExpanded ? (
-              <ChevronDown size={16} />
-            ) : (
-              <ChevronRight size={16} />
-            )}
-          </div>
-
-          <div className="yolo-provider-info">
-            <span className="yolo-provider-id">{provider.id}</span>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          className="yolo-provider-type yolo-provider-base-url-btn"
-          onClick={(e) => {
-            e.stopPropagation()
-            new EditProviderModal(app, plugin, provider).open()
-          }}
-        >
-          <span className="yolo-provider-base-url-text">{displayBaseUrl}</span>
-        </button>
-
-        <button
-          type="button"
-          className="yolo-provider-secondary-trigger yolo-clickable"
-          onClick={() => toggleProvider(provider.id)}
-        >
-          <span className="yolo-provider-model-counts">
-            {chatModelsLabel} · {embeddingModelsLabel}
-          </span>
-        </button>
-
-        <div className="yolo-provider-actions">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              new EditProviderModal(app, plugin, provider).open()
-            }}
-            className="clickable-icon"
-          >
-            <Settings />
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onRequestDeleteProvider(provider.id)
-            }}
-            className="clickable-icon"
-            aria-label={t('settings.providers.requestDelete', '删除提供商')}
-          >
-            <Trash2 />
-          </button>
-        </div>
-      </div>
+      />
 
       {isDeleteConfirming && (
         <div
@@ -1151,7 +1230,7 @@ function ChatModelRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: model.id })
+  } = useSortable({ id: model.id, transition: SORT_TRANSITION })
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -1169,12 +1248,13 @@ function ChatModelRow({
       {...listeners}
     >
       <td>
-        <button
-          type="button"
-          className="yolo-drag-handle"
-          aria-label={t('settings.models.dragHandle', 'Drag to reorder')}
-        >
+        <button type="button" className="yolo-drag-handle">
           <GripVertical />
+          {/* Hidden text rather than aria-label, which Obsidian would render
+              as a hover tooltip on the handle. */}
+          <span className="yolo-sr-only">
+            {t('settings.models.dragHandle', 'Drag to reorder')}
+          </span>
         </button>
       </td>
       <td title={model.id}>{model.name || model.model || model.id}</td>
@@ -1236,7 +1316,7 @@ function EmbeddingModelRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: model.id })
+  } = useSortable({ id: model.id, transition: SORT_TRANSITION })
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -1254,12 +1334,13 @@ function EmbeddingModelRow({
       {...listeners}
     >
       <td>
-        <button
-          type="button"
-          className="yolo-drag-handle"
-          aria-label={t('settings.models.dragHandle', 'Drag to reorder')}
-        >
+        <button type="button" className="yolo-drag-handle">
           <GripVertical />
+          {/* Hidden text rather than aria-label, which Obsidian would render
+              as a hover tooltip on the handle. */}
+          <span className="yolo-sr-only">
+            {t('settings.models.dragHandle', 'Drag to reorder')}
+          </span>
         </button>
       </td>
       <td title={model.id}>{model.name ?? model.model ?? model.id}</td>
@@ -1421,20 +1502,63 @@ export function ProvidersAndModelsSection({
     string | null
   >(null)
   const deleteConfirmTimeoutRef = useRef<number | null>(null)
-  const providerSensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
-    }),
-  )
+  // The row itself is the drag source, so it shares the cards' sensors: a
+  // short pointer travel lifts it, while touch asks for a long press so a
+  // swipe still scrolls the settings pane.
+  const providerSensors = useSortableDragSensors()
   const modelSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
     }),
   )
+  const [activeProviderId, setActiveProviderId] = useState<string | null>(null)
+  // Portals are resolved from the list's own document so the overlay lands in
+  // the right window when settings are open in an Obsidian popout.
+  const [portalBody, setPortalBody] = useState<HTMLElement | null>(null)
+  const providerListRef = useCallback((node: HTMLDivElement | null) => {
+    setPortalBody(node?.ownerDocument.body ?? null)
+  }, [])
+  const reducedMotion = useReducedMotion()
+
+  // Every reorderable list here saves asynchronously, so each one renders the
+  // dropped order locally until its save lands.
+  const {
+    ordered: orderedProviders,
+    applyOrder: applyProviderOrder,
+    revertOrder: revertProviderOrder,
+  } = useOptimisticOrder(settings.providers, getEntityId)
+  const {
+    ordered: orderedChatModels,
+    applyOrder: applyChatModelOrder,
+    revertOrder: revertChatModelOrder,
+  } = useOptimisticOrder(settings.chatModels, getEntityId)
+  const {
+    ordered: orderedEmbeddingModels,
+    applyOrder: applyEmbeddingModelOrder,
+    revertOrder: revertEmbeddingModelOrder,
+  } = useOptimisticOrder(settings.embeddingModels, getEntityId)
+
   const providerIds = useMemo(
-    () => settings.providers.map((provider) => provider.id),
-    [settings.providers],
+    () => orderedProviders.map((provider) => provider.id),
+    [orderedProviders],
   )
+  const activeProvider =
+    activeProviderId === null
+      ? undefined
+      : orderedProviders.find((provider) => provider.id === activeProviderId)
+
+  const providerDropAnimation: DropAnimation | null = reducedMotion
+    ? null
+    : {
+        duration: SORT_TRANSITION.duration,
+        easing: SORT_TRANSITION.easing,
+        sideEffects: defaultDropAnimationSideEffects({
+          className: { dragOverlay: 'is-dropping' },
+          // Keep the empty slot empty until the overlay has landed on it,
+          // otherwise the row appears to settle twice.
+          styles: { active: { opacity: '0' } },
+        }),
+      }
   const providersCountLabel = t(
     'settings.providers.providersCount',
     '已添加 {count} 个提供商',
@@ -1530,18 +1654,39 @@ export function ProvidersAndModelsSection({
     requestAnimationFrame(() => tryFind())
   }
 
+  // A tall expanded provider is unwieldy to drag, so it collapses — but only
+  // once the drag is real. Collapsing on pointer down would shrink the row
+  // while a plain tap is still undecided, and dnd-kit would be left holding
+  // the geometry the row had before it shrank.
+  const handleProviderDragStart = ({ active }: DragStartEvent) => {
+    const providerId = String(active.id)
+    setActiveProviderId(providerId)
+    setExpandedProviders((prev) => {
+      if (!prev.has(providerId)) return prev
+      const next = new Set(prev)
+      next.delete(providerId)
+      return next
+    })
+  }
+
   const handleProviderDragEnd = async ({ active, over }: DragEndEvent) => {
+    setActiveProviderId(null)
     if (!over || active.id === over.id) {
       return
     }
 
-    const oldIndex = settings.providers.findIndex((p) => p.id === active.id)
-    const newIndex = settings.providers.findIndex((p) => p.id === over.id)
+    const oldIndex = orderedProviders.findIndex((p) => p.id === active.id)
+    const newIndex = orderedProviders.findIndex((p) => p.id === over.id)
     if (oldIndex < 0 || newIndex < 0) {
       return
     }
 
-    const reorderedProviders = arrayMove(settings.providers, oldIndex, newIndex)
+    const reorderedProviders = arrayMove(
+      [...orderedProviders],
+      oldIndex,
+      newIndex,
+    )
+    applyProviderOrder(reorderedProviders)
     try {
       await setSettings({
         ...settings,
@@ -1550,6 +1695,7 @@ export function ProvidersAndModelsSection({
       triggerProviderDropSuccessFeedback(String(active.id))
     } catch (error) {
       console.error('[YOLO] Failed to reorder providers:', error)
+      revertProviderOrder()
       new Notice('Failed to reorder providers.')
     }
   }
@@ -1562,7 +1708,7 @@ export function ProvidersAndModelsSection({
       return
     }
 
-    const providerModels = settings.chatModels.filter(
+    const providerModels = orderedChatModels.filter(
       (model) => model.providerId === providerId,
     )
     const oldIndex = providerModels.findIndex((model) => model.id === active.id)
@@ -1576,14 +1722,17 @@ export function ProvidersAndModelsSection({
       oldIndex,
       newIndex,
     )
+    // Models of other providers keep their slots; only this provider's models
+    // are re-dealt into the positions they already occupied.
     const queue = [...reorderedProviderModels]
-    const updatedChatModels = settings.chatModels.map((model) => {
+    const updatedChatModels = orderedChatModels.map((model) => {
       if (model.providerId !== providerId) {
         return model
       }
       return queue.shift() ?? model
     })
 
+    applyChatModelOrder(updatedChatModels)
     try {
       await setSettings({
         ...settings,
@@ -1592,6 +1741,7 @@ export function ProvidersAndModelsSection({
       triggerProviderDropSuccess(providerId, String(active.id))
     } catch (error) {
       console.error('[YOLO] Failed to reorder chat models:', error)
+      revertChatModelOrder()
       new Notice('Failed to reorder chat models.')
     }
   }
@@ -1604,7 +1754,7 @@ export function ProvidersAndModelsSection({
       return
     }
 
-    const providerModels = settings.embeddingModels.filter(
+    const providerModels = orderedEmbeddingModels.filter(
       (model) => model.providerId === providerId,
     )
     const oldIndex = providerModels.findIndex((model) => model.id === active.id)
@@ -1619,13 +1769,14 @@ export function ProvidersAndModelsSection({
       newIndex,
     )
     const queue = [...reorderedProviderModels]
-    const updatedEmbeddingModels = settings.embeddingModels.map((model) => {
+    const updatedEmbeddingModels = orderedEmbeddingModels.map((model) => {
       if (model.providerId !== providerId) {
         return model
       }
       return queue.shift() ?? model
     })
 
+    applyEmbeddingModelOrder(updatedEmbeddingModels)
     try {
       await setSettings({
         ...settings,
@@ -1634,6 +1785,7 @@ export function ProvidersAndModelsSection({
       triggerProviderDropSuccess(providerId, String(active.id))
     } catch (error) {
       console.error('[YOLO] Failed to reorder embedding models:', error)
+      revertEmbeddingModelOrder()
       new Notice('Failed to reorder embedding models.')
     }
   }
@@ -1898,22 +2050,28 @@ export function ProvidersAndModelsSection({
           </div>
         </div>
 
-        <div className="yolo-providers-models-container">
+        <div className="yolo-providers-models-container" ref={providerListRef}>
           <DndContext
             sensors={providerSensors}
             collisionDetection={closestCenter}
+            // The dragged provider collapses as it is lifted, so the rows below
+            // move; re-measure throughout instead of trusting the one snapshot
+            // taken when the drag started.
+            measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+            onDragStart={handleProviderDragStart}
             onDragEnd={(event) => void handleProviderDragEnd(event)}
+            onDragCancel={() => setActiveProviderId(null)}
           >
             <SortableContext
               items={providerIds}
               strategy={verticalListSortingStrategy}
             >
-              {settings.providers.map((provider) => {
+              {orderedProviders.map((provider) => {
                 const isExpanded = expandedProviders.has(provider.id)
-                const chatModels = settings.chatModels.filter(
+                const chatModels = orderedChatModels.filter(
                   (m) => m.providerId === provider.id,
                 )
-                const embeddingModels = settings.embeddingModels.filter(
+                const embeddingModels = orderedEmbeddingModels.filter(
                   (m) => m.providerId === provider.id,
                 )
 
@@ -1943,18 +2101,41 @@ export function ProvidersAndModelsSection({
                     handleEmbeddingModelDragEnd={(event) =>
                       void handleEmbeddingModelDragEnd(provider.id, event)
                     }
-                    onCollapseForDrag={() =>
-                      setExpandedProviders((prev) => {
-                        if (!prev.has(provider.id)) return prev
-                        const next = new Set(prev)
-                        next.delete(provider.id)
-                        return next
-                      })
-                    }
                   />
                 )
               })}
             </SortableContext>
+            {portalBody &&
+              createPortal(
+                <DragOverlay
+                  dropAnimation={providerDropAnimation}
+                  // The row collapses as it is lifted, but dnd-kit sized this
+                  // wrapper from the rect captured before that. Let the header
+                  // inside decide the height instead.
+                  style={{ height: 'auto' }}
+                >
+                  {activeProvider && (
+                    <div className="yolo-provider-section yolo-provider-lifted">
+                      <ProviderHeader
+                        provider={activeProvider}
+                        t={t}
+                        isExpanded={false}
+                        chatModelCount={
+                          orderedChatModels.filter(
+                            (m) => m.providerId === activeProvider.id,
+                          ).length
+                        }
+                        embeddingModelCount={
+                          orderedEmbeddingModels.filter(
+                            (m) => m.providerId === activeProvider.id,
+                          ).length
+                        }
+                      />
+                    </div>
+                  )}
+                </DragOverlay>,
+                portalBody,
+              )}
           </DndContext>
         </div>
       </section>

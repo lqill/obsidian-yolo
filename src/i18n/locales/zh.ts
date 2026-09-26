@@ -74,19 +74,15 @@ export const zh: TranslationKeys = {
       menuLabel: 'CLI 提供方',
       claudeCodeLabel: 'Claude Code',
       claudeCodeShortLabel: 'CC',
-      claudeCodeDescription: '本机 Claude Code 运行时',
       codexLabel: 'Codex',
-      codexDescription: '本机 Codex 运行时',
       hermesLabel: 'Hermes',
-      hermesDescription: '本机 Hermes 运行时',
       piLabel: 'Pi',
-      piDescription: '本机 Pi 运行时',
       ompLabel: 'omp',
-      ompDescription: '本机 Oh My Pi 运行时',
       variantToggleHint:
         '在 {base} 与 {variant} 之间切换——更换渠道会开启新会话',
       grokLabel: 'Grok',
-      grokDescription: '本机 Grok Build 运行时',
+      codebuddyLabel: 'CodeBuddy',
+      codebuddyShortLabel: 'CB',
     },
     chatList: {
       searchPlaceholder: '搜索聊天记录',
@@ -126,8 +122,6 @@ export const zh: TranslationKeys = {
       subtitle: '在续写之前先配置模型、上下文与规则',
       backToChat: '返回 Chat',
       modelSectionTitle: '模型设置',
-      continuationModel: '续写模型',
-      continuationModelDesc: '在开启超级续写时，灵光写作将使用该模型处理续写。',
       contextSectionTitle: '上下文来源',
       ragToggle: '启用 RAG 检索',
       ragToggleDesc: '续写前通过 embedding 召回相似的笔记片段。',
@@ -171,7 +165,9 @@ export const zh: TranslationKeys = {
     },
     supportYolo: {
       name: '支持 YOLO',
-      desc: '如果你觉得 YOLO 有价值，请考虑支持它的开发！',
+      desc: '如果你觉得 YOLO 有价值，请考虑支持它的开发。',
+      feedbackHint: '遇到问题或有新想法，可以{bug}或{feature}',
+      star: 'Star YOLO',
       afdian: '爱发电',
       buyMeACoffee: 'Buy Me a Coffee',
       reportBug: '报 Bug',
@@ -314,6 +310,13 @@ export const zh: TranslationKeys = {
           description: '在本地设备上运行嵌入模型，实现私密、离线的索引构建。',
           impact: '关闭后本地嵌入模型将不可用，RAG 将回退到远程嵌入服务。',
         },
+        claudeAgentSdk: {
+          name: 'Claude Agent SDK',
+          description:
+            '连接本机的 Claude Code，供 Claude Code Agent 与 Claude Code 登录提供商使用。',
+          impact:
+            '关闭后 Claude Code Agent 与使用 Claude Code 登录的模型将不可用。',
+        },
         statuses: {
           missing: '等待安装',
           downloading: '正在下载',
@@ -347,8 +350,6 @@ export const zh: TranslationKeys = {
       actionCategoryDesc: '选项所属的分类',
       actionIcon: '图标',
       actionIconDesc: '选择一个图标',
-      actionEnabled: '启用',
-      actionEnabledDesc: '是否在续写预设中显示此选项',
       moveUp: '上移',
       moveDown: '下移',
       duplicate: '复制',
@@ -403,6 +404,9 @@ export const zh: TranslationKeys = {
       actionInstructionRewriteDesc: '改写指令（仅在“预置指令”类型时必填）',
       actionInstructionRewritePlaceholder:
         '例如：语气更简洁，保留 Markdown 结构。',
+      actionAssistant: '使用助手',
+      actionAssistantDesc: '运行此指令时使用的助手；留空则跟随当前选择。',
+      actionAssistantFollowCurrent: '跟随当前选择',
       duplicate: '复制',
       copySuffix: '（副本）',
       dragHandleAria: '拖拽排序',
@@ -416,36 +420,8 @@ export const zh: TranslationKeys = {
       chatFontScaleDesc: '调整聊天界面的整体缩放比例（默认 100%）。',
     },
     assistants: {
-      title: '助手',
-      desc: '创建和管理自定义AI助手',
-      configureAssistants: '配置助手',
-      assistantsCount: '已配置 {count} 个助手',
-      addAssistant: '添加助手',
-      name: '名称',
-      nameDesc: '助手名称',
-      description: '描述',
-      descriptionDesc: '简要描述此助手的用途',
-      descriptionPlaceholder: '输入描述',
-      systemPrompt: '系统提示词',
-      systemPromptDesc: '该提示将添加到每次聊天的开头。',
-      systemPromptPlaceholder: '输入系统提示词，用于定义助手的行为与能力',
-      namePlaceholder: '输入助手名称',
-      defaultAssistantName: '新建助手',
-      deleteConfirmTitle: '确认删除助手',
-      deleteConfirmMessagePrefix: '确定要删除助手',
-      deleteConfirmMessageSuffix: '？该操作不可撤销。',
-      addAssistantAria: '添加新助手',
-      deleteAssistantAria: '删除助手',
-      dragHandleAria: '拖拽排序',
-      actions: '操作',
-      noAssistants: '暂无助手',
       editAssistant: '编辑助手',
-      deleteAssistant: '删除助手',
-      duplicate: '复制',
       noAssistant: '默认',
-      selectAssistant: '选择助手',
-      copySuffix: ' (副本)',
-      currentBadge: '当前',
       manageAll: '管理全部…',
     },
     agent: {
@@ -463,10 +439,6 @@ export const zh: TranslationKeys = {
       skillsCountWithEnabled: '{count} 个技能（已启用 {enabled} 个）',
       skillsGlobalDesc:
         '技能会从内置技能、{path}/*.md 文件与 {path}/<folder>/SKILL.md 目录包中自动发现。在这里禁用后，所有 Agent 都无法使用。',
-      yoloBaseDir: 'YOLO 根目录',
-      yoloBaseDirDesc:
-        '填写库内相对路径（不要以 / 开头）。例如：放在库根目录填 YOLO；放在 setting 文件夹下填 setting/YOLO。',
-      yoloBaseDirPlaceholder: 'YOLO',
       yoloBaseDirHiddenPath:
         'YOLO 根目录不能使用隐藏文件夹。请移除文件夹名称开头的“.”，例如将 .yolo 改为 yolo。',
       yoloBaseDirMigrated:
@@ -481,8 +453,6 @@ export const zh: TranslationKeys = {
       yoloBaseDirConflictTitle: 'YOLO 根目录未移动',
       yoloBaseDirConflictMessage:
         '{target} 已存在且包含文件。为避免覆盖或合并数据，本次未移动任何内容。请选择空目录或尚不存在的路径。',
-      skillsSourcePath:
-        '来源：内置技能 + {path}/*.md + {path}/<folder>/SKILL.md',
       refreshSkills: '刷新',
       skillsEmptyHint:
         '未发现技能。请在 {path} 下创建 Markdown 文件或包含 SKILL.md 的文件夹。',
@@ -633,7 +603,6 @@ export const zh: TranslationKeys = {
         toolBypassNotice:
           '若该 Agent 启用了终端命令或第三方 MCP 工具，此范围可被绕过，不构成安全边界。',
       },
-      editorTabModel: '模型',
       editorName: '名称',
       editorNameDesc: 'Agent 显示名称',
       editorDescription: '描述',
@@ -658,32 +627,10 @@ export const zh: TranslationKeys = {
       toolApprovalRequire: '需要审批',
       toolApprovalDangerousOnly: '危险操作审批',
       toolDisclosureAlways: '常驻上下文',
-      toolDisclosureMixed: '混合',
       toolDisclosureOnDemand: '按需披露',
-      editorEnabled: '已启用',
-      editorDisabled: '已禁用',
       editorModel: '模型',
       editorModelDesc: '选择此 Agent 使用的模型',
       followDefaultModel: '跟随默认模型',
-      editorModelCurrent: '当前：{model}',
-      editorModelSampling: '采样参数',
-      editorModelResetDefaults: '恢复默认值',
-      modelPresetFocused: '专注',
-      modelPresetBalanced: '平衡',
-      modelPresetCreative: '创意',
-      editorTemperature: '温度',
-      editorTemperatureDesc: '0.0 - 2.0',
-      editorTopP: 'Top P',
-      editorTopPDesc: '0.0 - 1.0',
-      editorMaxOutputTokens: '最大输出 token',
-      editorMaxOutputTokensDesc: '最大生成 token 数',
-      editorMaxContextMessages: '上下文条数',
-      editorCustomParameters: '自定义参数',
-      editorCustomParametersDesc:
-        '为此 Agent 附加额外请求字段。同名参数会覆盖模型侧参数',
-      editorCustomParametersAdd: '添加参数',
-      editorCustomParametersKeyPlaceholder: '参数名',
-      editorCustomParametersValuePlaceholder: '参数值',
       editorToolsCount: '{count} 个工具',
       editorEstimatedContextTokens: '约 {count} tokens',
       editorSkillsCount: '{count} 个技能',
@@ -729,6 +676,9 @@ export const zh: TranslationKeys = {
       grokCliPathName: 'Grok CLI 路径',
       grokCliPathDesc:
         '自定义 grok 可执行文件路径，可粘贴 which grok（Windows 为 where grok）的输出。留空则自动检测；仅保存在本设备，不随库同步。',
+      codebuddyCliPathName: 'CodeBuddy CLI 路径',
+      codebuddyCliPathDesc:
+        '自定义 codebuddy 可执行文件路径，可粘贴 which codebuddy（Windows 为 where codebuddy）的输出。留空则自动检测；仅保存在本设备，不随库同步。',
       cliPathMissing: '该路径在本设备上不存在，将回退到自动检测。',
       autoContextCompactionBlockTitle: '上下文压缩',
       autoContextCompaction: '自动压缩上下文',
@@ -1052,6 +1002,7 @@ export const zh: TranslationKeys = {
       addCustomEmbeddingModel: '添加自定义嵌入模型',
       editChatModel: '编辑聊天模型',
       editEmbeddingModel: '编辑嵌入模型',
+      dragHandle: '拖拽排序',
       editCustomChatModel: '编辑自定义聊天模型',
       editCustomEmbeddingModel: '编辑自定义嵌入模型',
       modelId: '调用ID',
@@ -1087,6 +1038,7 @@ export const zh: TranslationKeys = {
       },
       availableModelsAuto: '可用模型（自动获取）',
       searchModels: '搜索模型...',
+      addMode: '添加方式',
       modeSingle: '单个',
       modeBatch: '批量',
       batchSelectAll: '全选',
@@ -1161,6 +1113,8 @@ export const zh: TranslationKeys = {
       maxOutputTokens: '最大输出 token',
       requestParameters: '请求参数',
       requestParametersDesc: '通常无需调整；未启用的字段使用 Provider 默认值。',
+      samplingNotSentForModel:
+        '该模型不接受 Temperature 和 Top P，请求中不会发送。',
       requestParametersEnabledCount: '已启用 {count} 项请求参数',
       clearRequestParameterOverrides: '清除覆盖',
       additionalParameters: '其他参数',
@@ -1297,6 +1251,10 @@ export const zh: TranslationKeys = {
       chunks: '向量块',
       pendingFiles: '{{n}} 个文件已修改',
       lastUpdated: '最近更新 {{time}}',
+      updatedJustNow: '刚刚更新',
+      updatedMinutesAgo: '{{n}} 分钟前更新',
+      updatedHoursAgo: '{{n}} 小时前更新',
+      updatedDaysAgo: '{{n}} 天前更新',
       enableAndIndex: '开启并建立索引',
       disable: '关闭知识库索引',
       rebuildThis: '重建此库',
@@ -1312,6 +1270,10 @@ export const zh: TranslationKeys = {
       localEmbedding: {
         groupLabel: '本地',
         groupDesc: '在你的设备上运行，笔记内容不出本机',
+        deviceAriaLabel: '本地推理设备',
+        deviceCpu: 'CPU',
+        deviceGpu: 'GPU',
+        deviceGpuUnsupported: '此设备不支持 GPU 推理',
         desktopOnly: '本地嵌入模型仅支持桌面端。',
         metaLine: '{{dimension}} 维 · {{size}}',
         download: '下载',
@@ -1367,6 +1329,10 @@ export const zh: TranslationKeys = {
       fieldDescriptionPlaceholder: '例如：日常会议记录与在做的项目文档',
       scopeTitle: '范围',
       scopeDesc: '决定哪些文件夹会进入这个知识库。',
+      scopeWholeVault: '整个库',
+      scopeOnlyPrefix: '仅',
+      scopeAndMore: ' 等 {{n}} 处',
+      scopeExcludeSuffix: '，排除 {{n}} 处',
       nameRequired: '请输入知识库名称',
       nameDuplicate: '已存在同名知识库',
       saveFailed: '保存知识库失败',
@@ -1520,11 +1486,6 @@ export const zh: TranslationKeys = {
       title: '灵光写作',
       aiSubsectionTitle: '超级续写',
       tabSubsectionTitle: 'Tab 补全',
-      superContinuation: '启用灵光写作视图',
-      superContinuationDesc:
-        '开启后，侧边栏将提供灵光写作视图，可为续写配置专用模型、参数、规则与参考范围。关闭后，仅保留 Chat 视图。',
-      continuationModel: '续写模型',
-      continuationModelDesc: '指定在灵光写作中用于续写的模型。',
       selectionChatSubsectionTitle: 'Cursor Chat',
       selectionChatDescription:
         '围绕选中文本提供就地提问、改写、解释等快捷操作。',
@@ -1563,8 +1524,6 @@ export const zh: TranslationKeys = {
       tabCompletion: '启用 Tab 补全',
       tabCompletionDesc:
         '当触发规则命中时自动请求补全，并以灰色幽灵文本形式给出建议，按下 Tab 接受。',
-      tabCompletionMultipleCandidates: '生成多条候选',
-      tabCompletionMultipleCandidatesDesc: '开启后将会生成三条补全建议。',
       tabCompletionModel: '补全模型',
       tabCompletionModelDesc: '选择用于 Tab 补全和调整篇幅的模型。',
       tabCompletionTriggerDelay: '触发延迟（毫秒）',
@@ -1585,15 +1544,6 @@ export const zh: TranslationKeys = {
       tabCompletionLengthPresetMedium: '中',
       tabCompletionLengthPresetLong: '长',
       tabCompletionAdvanced: '高级设置',
-      tabCompletionContextRange: '上下文范围',
-      tabCompletionContextRangeDesc:
-        '发送给模型的上下文总字符数（按 4:1 比例分配给光标前后）。',
-      tabCompletionMinContextLength: '最小上下文长度',
-      tabCompletionMinContextLengthDesc:
-        '光标前文本长度不足该值时不触发 Tab 补全。',
-      tabCompletionTemperature: '采样温度',
-      tabCompletionTemperatureDesc:
-        '控制补全的创造性（0 为确定性，值越大越发散）。',
       tabCompletionRequestTimeout: '请求超时（秒）',
       tabCompletionRequestTimeoutDesc:
         '若补全请求超过该秒数仍未返回则强制中止。适合较慢或需要较长推理的模型。',
@@ -1843,11 +1793,15 @@ export const zh: TranslationKeys = {
       controlsLabel: '图表控制',
     },
     stopGeneration: '停止生成',
+    scrollToBottom: '回到底部',
+    scrollToBottomWhileStreaming: '回到底部继续跟随',
     queueMessage: {
       tooltip: '加入排队，等当前回合完成后继续',
       hint: '等待 Agent 完成当前步骤...',
       blockedApproval: '请先批准或拒绝待审批工具，再发送新消息。',
       blockedAwaitingInput: '请先在对话中回答模型的提问，再发送新消息。',
+      blockedActiveTool: '请等待当前工具调用完成后再发送新消息。',
+      blockedActiveTooltip: '当前工具调用完成后才能继续发送',
       abortedRestoredOne: '已将排队消息恢复到输入框',
       abortedRestoredMany:
         '已恢复最新 1 条排队消息到输入框（共取消 {{count}} 条）',
@@ -1961,6 +1915,7 @@ export const zh: TranslationKeys = {
       cancelError: '无法停止 CLI 运行：{message}',
       openError: '无法打开 CLI 会话：{message}',
       transitionError: '无法离开当前 CLI 会话：{message}',
+      unboundMessageError: 'CLI 会话尚未建立，无法显示这条 Provider 消息。',
       sessionFallbackDividerTitle: '已切换到 default',
       sessionFallbackDividerDescription:
         '原 agent「{profile}」不可用，已切换到 default，此前的对话不在它的记忆中。',
@@ -1973,6 +1928,9 @@ export const zh: TranslationKeys = {
       defaultModel: '{provider} 默认模型',
       loadError: '无法加载 CLI 模型：{message}',
       updateError: '无法更新 CLI 配置：{message}',
+      defaultBadge: '默认',
+      setAsDefault: '设为默认',
+      removeDefault: '取消默认',
     },
     claudePlugins: {
       title: '插件管理',
@@ -2017,6 +1975,10 @@ export const zh: TranslationKeys = {
         'Codex 的 MCP 服务器状态为只读展示，如需开关或重连请在终端中操作。',
       codexUnsupportedVersion:
         '当前 Codex CLI 版本不支持查询 MCP 服务器状态，请升级 Codex CLI 后重试。',
+    },
+    modelSelect: {
+      searchPlaceholder: '搜索模型',
+      empty: '没有匹配的模型',
     },
     quickAccess: {
       manage: '管理常用入口',
@@ -2133,8 +2095,10 @@ export const zh: TranslationKeys = {
       fileMissing: '文件不存在或已被移动。',
       snapshotUnavailable:
         '本设备没有这次编辑的快照，无法撤销或评审（快照只保存在本机，不随笔记同步）。',
-      reviewOutsideVault:
-        '该文件在 vault 之外，无法在编辑器中评审；撤销仍然可用。',
+      reviewOutsideVault: '该文件在 vault 之外，无法在编辑器中评审。',
+      reviewWhileRunning:
+        'Agent 仍在运行，可能继续修改文件。请等它结束后再评审。',
+      reviewContentChanged: '文件在这次修改之后又被改动过，无法打开修订视图。',
     },
     errorCard: {
       title: '本次回复生成失败',
@@ -2235,6 +2199,7 @@ export const zh: TranslationKeys = {
           '改前内容在本设备不可用，以下只是本次写入的新内容。',
         collapsedLines: '⋯ 省略 {{count}} 行',
         truncatedLines: '还有 {{count}} 行未显示',
+        readingCurrent: '正在读取文件当前内容…',
       },
     },
     toolSummary: {
@@ -2329,6 +2294,7 @@ export const zh: TranslationKeys = {
     indexedWithSkipped: '索引完成 · {{count}} 个文件无法索引',
     continueComplete: '继续索引完成',
     continueFailed: '继续索引失败',
+    indexCancelled: '索引已取消',
     openYoloNewChatFailed: '打开 YOLO 聊天窗口失败，请先用命令面板尝试',
     updatingIndex: '正在更新库索引...',
     indexUpdated: '库索引已更新',
@@ -2337,6 +2303,7 @@ export const zh: TranslationKeys = {
     migrationFailed: 'JSON 存储迁移失败。请查看控制台了解详情。',
     reloadingPlugin: '由于迁移，正在重新加载 "next-composer"',
     settingsInvalid: '设置无效',
+    settingsUpdateFailed: '设置更新失败',
     transportModeAutoPromoted:
       '检测到网络/CORS 问题，已自动将该 Provider 切换为 {mode}。',
     capturePdfNoLeaf: '当前没有打开的 PDF 文件。',
@@ -2674,6 +2641,10 @@ export const zh: TranslationKeys = {
     viewOnGitHub: '在 GitHub 查看',
     updateInCommunityPlugins: '在社区插件中更新',
     manualInstallOnGitHub: '无法更新？前往 GitHub 手动安装',
+    modulesFollowedCore: '{modules} 已随 YOLO 一起更新',
+    updatesAvailable: '{count} 项更新',
+    updateAll: '全部更新',
+    updated: '更新完成',
   },
   moduleFileView: {
     inactivePlaceholder: '该文件类型由一个当前未启用的模块提供。',

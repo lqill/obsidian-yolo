@@ -45,7 +45,7 @@ Verify what you touched: host code → type-check + relevant tests; module code 
 - Core must not import module source or bundle module implementation into the host artifact. Communicate only through registration, manifests, and Host API contracts.
 - A module ships skills as packages: declared files are projected on activation into `<YOLO base>/modules/<moduleId>/skills/<package>/` and are then ordinary Vault skills. Do not introduce a module-skill path protocol.
 - The host's refusal to text-edit a module-owned structured format is an unconditional static extension check (`src/core/tools/structured-vault-formats.ts`); never make it query a runtime registry, or the same call on the same file would behave differently depending on which modules a machine happens to have installed.
-- Treat versioned `entry.js`, module `style.css`, generated manifest metadata (hashes, sizes, and URLs), and `modules/bundled.json` as build outputs. Change source or compatibility declarations, run `npm run module:build`, and commit the regenerated artifacts rather than editing generated metadata.
+- Treat versioned `entry.js`, module `style.css`, generated manifest metadata (hashes, sizes, and URLs), and `modules/bundled.json` as build outputs. Change source or compatibility declarations and run `npm run module:build` rather than editing generated metadata. Versioned artifact directories (`modules/<id>/<version>/`) are git-ignored and never committed — a release rebuilds them and publishes them to GitHub Releases. `modules/bundled.json` is git-ignored too: it is the local catalog only the development build reads.
 
 ### Runtime Components
 
@@ -83,6 +83,7 @@ Obsidian popouts are separate BrowserWindows. Plugin JS still runs in one realm,
 
 - React event handlers that call async functions must use `void` wrappers.
 - Do not directly set `element.style.cursor` or `element.style.userSelect`; use `setCssProps`.
+- Obsidian renders every `aria-label` as a hover tooltip. Use it only where that tooltip is wanted (icon-only buttons); an element that already shows its name as visible text is named by that text or by `aria-labelledby`, never by a duplicate `aria-label`.
 - Every `eslint-disable` directive must include a reason.
 - All CSS classes must use the `yolo-` prefix. Host styles live in `src/styles/**`; module styles live with their module.
 - When styling native controls, assume Obsidian core and theme styles apply globally. Use component-scoped `element.yolo-*` selectors, explicitly reset affected properties, and use `!important` only for a confirmed host-style collision.

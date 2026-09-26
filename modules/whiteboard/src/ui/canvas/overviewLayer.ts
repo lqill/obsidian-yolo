@@ -1,7 +1,6 @@
 // The overview tier's renderer for the `.yoloboard` canvas: one `<canvas>`
 // that draws every card and edge itself, replacing their DOM entirely below
-// OVERVIEW_SCALE_THRESHOLD (docs/plans/08-25-yolo-whiteboard/p4-perf-overview.md
-// §二/§三).
+// OVERVIEW_SCALE_THRESHOLD.
 //
 // Why a canvas at all, on a board whose whole rendering architecture is DOM:
 // the measured ceiling is not what a card *contains* but that it exists.
@@ -18,7 +17,7 @@
 // bitmap and force a re-raster on every zoom frame. Here it is redrawn instead
 // — which costs a pass over the board data per frame and nothing at rest.
 //
-// Groups deliberately stay in the DOM at every tier (P4-D2): there are a few
+// Groups deliberately stay in the DOM at every tier: there are a few
 // dozen of them, they are the most common thing to drag at this zoom, and
 // keeping them means dragging one needs no new code. That is also why the
 // canvas is inserted *before* the world layer: groups paint over it, as they
@@ -35,13 +34,27 @@ import {
   computeEdgeGeometry,
   resolveEdgeSides,
 } from '../../domain/edges'
-import type { BoardNode, Edge, EdgeId, NodeId } from '../../domain/fileFormat'
+import {
+  type BoardNode,
+  type Edge,
+  type EdgeId,
+  type NodeId,
+  isPlainText,
+} from '../../domain/fileFormat'
+import { fileNodeKind } from '../../domain/naming'
+import {
+  type AnnotationColor,
+  type PdfAnnotation,
+  displayColor,
+} from '../../domain/pdfAnnotations'
 import type { CardRect } from '../../domain/resize'
+import { SPREAD_METRICS, isSpreadTitle } from '../../domain/spread'
 import {
   type CanvasView,
   computeWorldViewportRect,
 } from '../../domain/virtualization'
 import {
+  ARRANGE_ANIMATION_MS,
   EDGE_ARROW_WORLD_PX,
   EDGE_LABEL_FONT_PX,
   EDGE_LABEL_MAX_WIDTH_EM,
@@ -49,16 +62,41 @@ import {
   EDGE_STROKE_WORLD_PX,
   OVERVIEW_ARROW_MIN_SCREEN_PX,
   OVERVIEW_CARD_WASH_ALPHA,
+  OVERVIEW_GROUP_LABEL_MIN_SCREEN_PX,
   OVERVIEW_LABEL_MIN_FONT_PX,
   OVERVIEW_MIN_EDGE_STROKE_PX,
   OVERVIEW_THEMED_BORDER_ALPHA,
   OVERVIEW_TITLE_MIN_CARD_PX,
+  SPREAD_TITLE_WORLD,
+  TITLE_BLOCK_LINE_HEIGHT,
   TITLE_BLOCK_WORLD_FONT_PX,
+  TITLE_BLOCK_WORLD_PADDING,
 } from '../constants'
-import { nodeTitleText } from '../lod'
+import { type PdfPageLabels, nodeTitleText, wrapTitleLines } from '../lod'
+import type { PageBox, PageFrame } from '../pdf/annotationGeometry'
+import { boxesFor, outlinesFor } from '../pdf/annotationLayer'
+import { READER_METRICS } from '../pdf/readerLayout'
 
 const OVERVIEW_CANVAS_CLASS = 'yolo-whiteboard-overview'
 const OVERVIEW_HIDDEN_CLASS = 'yolo-whiteboard-overview-hidden'
+/** How dark bare text's block of ink is drawn, zoomed out past reading it. */
+const OVERVIEW_TEXT_ALPHA = 0.18
+/** Past this many wrapped titles the cache starts over rather than growing
+ * with every card a long session has ever shown. */
+const TITLE_LINES_CACHE_LIMIT = 2000
+
+/** A page's annotations as the overview draws them: its highlights one path
+ * per colour, in page fractions, and its framed areas. */
+type PageMarks = Readonly<{
+  highlights: ReadonlyMap<AnnotationColor, Path2D>
+  areas: readonly Readonly<{ color: AnnotationColor; box: PageBox }>[]
+}>
+
+/** By the page's list of annotations, then by where its PDF points land. */
+const pageMarksCache = new WeakMap<
+  readonly PdfAnnotation[],
+  WeakMap<PageFrame, PageMarks>
+>()
 
 /**
  * Concrete colour values for one draw.
@@ -66,8 +104,8 @@ const OVERVIEW_HIDDEN_CLASS = 'yolo-whiteboard-overview-hidden'
  * The rest of the module never asks what colour anything is — every element
  * carries `--yolo-whiteboard-color` and the stylesheet paints from it. A canvas
  * cannot: it needs the value. Read once through `getComputedStyle` when the
- * tier is entered and cached for as long as it lasts (p4-perf-overview §三's
- * "勿逐帧读"); a theme change lands on the next entry.
+ * tier is entered and cached for as long as it lasts ("勿逐帧读"); a theme
+ * change lands on the next entry.
  *
  * The strings are kept as the browser gave them and handed straight back to
  * `fillStyle`, so any colour syntax a theme uses works. Where the stylesheet
@@ -84,8 +122,14 @@ type Palette = Readonly<{
   border: string
   accent: string
   text: string
+  muted: string
   background: string
   fontFamily: string
+  /** What each PDF annotation colour paints with (styles/pdf/
+   * annotations.css). */
+  annotations: Readonly<Record<AnnotationColor, string>>
+  /** A dark theme, which shows PDF pages inverted (styles/pdf/card.css). */
+  dark: boolean
 }>
 
 /**
@@ -95,7 +139,7 @@ type Palette = Readonly<{
  */
 export type OverviewLayerCallbacks = Readonly<{
   getView: () => CanvasView
-  /** Every non-group node, in board order — groups keep their DOM (P4-D2). */
+  /** Every non-group node, in board order — groups keep their DOM. */
   getCardNodes: () => readonly BoardNode[]
   getEdges: () => readonly Edge[]
   getNode: (id: NodeId) => BoardNode | undefined
@@ -112,6 +156,26 @@ export type OverviewLayerCallbacks = Readonly<{
    * element; here it is the same numbers, drawn.
    */
   getLiveRects: () => ReadonlyMap<NodeId, CardRect> | null
+  /** What a PDF card's or a sheet's title says about its page — see
+   * ui/lod.ts's `nodeTitleText`. */
+  pdfPageLabels: PdfPageLabels
+  /** A small picture of a spread's page (ui/pdf/thumbnails.ts), as the
+   * theme shows it, or null while it has none. */
+  pageThumbnail: (
+    path: string,
+    page: number,
+    dark: boolean,
+  ) => ImageBitmap | null
+  /** The annotations on a page that has a thumbnail, and where its PDF
+   * points land on it (../pdf/thumbnails.ts's `frame`); null when there are
+   * none to draw. */
+  pageAnnotations: (
+    path: string,
+    page: number,
+  ) => Readonly<{
+    frame: PageFrame
+    annotations: readonly PdfAnnotation[]
+  }> | null
 }>
 
 /**
@@ -125,6 +189,25 @@ export class OverviewLayer {
   private active = false
   private dirty = false
   private palette: Palette | null = null
+  /** Titles already broken into lines, by text and the card's world size.
+   * Kept in world units, so a zoom does not invalidate them; dropped with the
+   * palette, whose font they were measured in. */
+  private readonly titleLines = new Map<string, readonly string[]>()
+  /** Cards in flight — see `animate`. */
+  private readonly motions = new Map<
+    NodeId,
+    Readonly<{
+      direction: 'in' | 'out'
+      offset: Readonly<{ x: number; y: number }>
+      delay: number
+      start: number
+    }>
+  >()
+  /** Where each spread title's line was last drawn, in world units. */
+  private readonly titleRects = new Map<
+    NodeId,
+    Readonly<{ x: number; y: number; w: number; h: number }>
+  >()
   /** Viewport size in CSS pixels, pushed in rather than measured: reading it
    * here would force a layout flush on a frame that has just written the
    * world's transform. `WhiteboardCanvas` already measures the viewport on its
@@ -181,6 +264,7 @@ export class OverviewLayer {
     if (!win) return
     this.themeObserver = new win.MutationObserver(() => {
       this.palette = null
+      this.titleLines.clear()
       this.dirty = true
     })
     this.themeObserver.observe(doc.body, {
@@ -206,9 +290,11 @@ export class OverviewLayer {
     this.lastView = null
     if (active) {
       this.palette = null
+      this.titleLines.clear()
       this.dirty = true
       return
     }
+    this.motions.clear()
     this.clear()
   }
 
@@ -248,7 +334,119 @@ export class OverviewLayer {
     // other way round -- the order the DOM tiers paint in.
     this.drawEdges(ctx, view, live)
     this.drawCards(ctx, view, live)
+    this.drawMotions(ctx, view)
     ctx.globalAlpha = 1
+  }
+
+  /**
+   * Moves a card in from `offset` (world units from where it is) while it
+   * fades in, or out to it while it fades away — the overview tier's side of
+   * a PDF spread being dealt out or gathered back (canvas.ts). The DOM tiers
+   * do this with Web Animations on the elements; here there are no elements,
+   * so the canvas carries the motion and redraws every frame until it ends.
+   * A card that has gone out stays unseen until it leaves the board.
+   */
+  animate(
+    id: NodeId,
+    motion: Readonly<{
+      direction: 'in' | 'out'
+      offset: Readonly<{ x: number; y: number }>
+      delay: number
+    }>,
+  ): void {
+    if (!this.active) return
+    this.motions.set(id, {
+      ...motion,
+      start: this.context.getWindow().performance.now(),
+    })
+    this.dirty = true
+  }
+
+  /** Puts cards back where they are, at full opacity, mid-motion or not. */
+  stopAnimating(ids: Iterable<NodeId>): void {
+    for (const id of ids) this.motions.delete(id)
+    this.dirty = true
+  }
+
+  /** The cards in motion, each at its own place and opacity; the next frame
+   * is owed while any is still moving. */
+  private drawMotions(ctx: CanvasRenderingContext2D, view: CanvasView): void {
+    const palette = this.palette
+    if (!palette || this.motions.size === 0) return
+    const now = this.context.getWindow().performance.now()
+    /** A card came to rest this frame: the next is still owed, since it is
+     * `drawCards` that draws it from there on. */
+    let landed = false
+    let moving = false
+    for (const [id, motion] of this.motions) {
+      const node = this.callbacks.getNode(id)
+      const elapsed = now - motion.start - motion.delay
+      const t = Math.min(1, Math.max(0, elapsed / ARRANGE_ANIMATION_MS))
+      if (!node) {
+        this.motions.delete(id)
+        continue
+      }
+      // Drawn here on the frame it arrives too — `drawCards` skipped it
+      // this frame — and handed back to `drawCards` from the next.
+      if (motion.direction === 'in' && t >= 1) {
+        this.motions.delete(id)
+        landed = true
+      }
+      if (t < 1) moving = true
+      // ARRANGE_ANIMATION_EASING's curve, near enough for 220ms: fast out
+      // of the start, settling into the end.
+      const eased = 1 - (1 - t) ** 4
+      const away = motion.direction === 'in' ? 1 - eased : eased
+      const alpha = 1 - away
+      if (alpha <= 0) continue
+      const x = (node.x + motion.offset.x * away) * view.scale + view.tx
+      const y = (node.y + motion.offset.y * away) * view.scale + view.ty
+      const w = node.w * view.scale
+      const h = node.h * view.scale
+      ctx.globalAlpha = alpha
+      ctx.fillStyle = palette.background
+      ctx.fillRect(x, y, w, h)
+      // The wash every card wears here (`drawCards`), or the card would land
+      // white and turn grey the frame it stops moving.
+      ctx.globalAlpha = alpha * OVERVIEW_CARD_WASH_ALPHA
+      ctx.fillStyle = this.colorOf(node, palette) ?? palette.neutral
+      ctx.fillRect(x, y, w, h)
+      // Its pages, as they will be drawn once it lands (`drawCards`), and
+      // then no title: a PDF's stays put, drawn by `drawCards` throughout.
+      ctx.globalAlpha = alpha
+      const pictured = this.drawPicture(
+        ctx,
+        node,
+        { x, y, w, h },
+        palette.dark,
+        view.scale,
+      )
+      // The border it will have when it lands (`drawCards`): a selection's
+      // ring, the faint accent of a selected spread's sheet, or the plain
+      // one — so nothing changes the frame it stops.
+      const selected = this.callbacks.isSelected(node.id)
+      const ofSelected =
+        !selected &&
+        node.type === 'pdf-page' &&
+        this.callbacks.isSelected(node.parent)
+      ctx.globalAlpha = ofSelected ? alpha * 0.45 : alpha
+      ctx.lineWidth = selected ? 2 : 1
+      ctx.strokeStyle = selected || ofSelected ? palette.accent : palette.border
+      ctx.beginPath()
+      this.strokeRectPath(ctx, { x, y, w, h })
+      ctx.stroke()
+      ctx.globalAlpha = alpha
+      ctx.lineWidth = 1
+      if (pictured || w < OVERVIEW_TITLE_MIN_CARD_PX) continue
+      const title = nodeTitleText(node, this.callbacks.pdfPageLabels)
+      ctx.font = `500 ${TITLE_BLOCK_WORLD_FONT_PX * view.scale}px ${palette.fontFamily}`
+      ctx.fillStyle = palette.text
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(title, x + w / 2, y + h / 2, w)
+    }
+    ctx.globalAlpha = 1
+    if (moving || landed) this.dirty = true
   }
 
   destroy(): void {
@@ -305,8 +503,17 @@ export class OverviewLayer {
       border: read('--background-modifier-border', '#dcddde'),
       accent: read('--interactive-accent', '#7c3aed'),
       text: read('--text-normal', '#222222'),
+      muted: read('--text-muted', '#5c5c5c'),
       background: read('--background-primary', '#ffffff'),
       fontFamily: style.fontFamily || 'sans-serif',
+      annotations: {
+        yellow: read('--color-yellow', '#e0ac00'),
+        green: read('--color-green', '#08b94e'),
+        blue: read('--color-blue', '#086ddd'),
+        pink: read('--color-pink', '#d53984'),
+        purple: read('--color-purple', '#7852ee'),
+      },
+      dark: this.styleSourceEl.closest('.theme-dark') !== null,
     }
   }
 
@@ -355,8 +562,8 @@ export class OverviewLayer {
   // -----------------------------------------------------------------------
   // Cards
   //
-  // Drawn as a DOM card with no content yet is (p4-perf-overview §二: the
-  // switch is direct, so the two tiers have to look the same): an opaque fill,
+  // Drawn as a DOM card with no content yet is (the switch is direct, so the
+  // two tiers have to look the same): an opaque fill,
   // a wash of the node's colour over it, a border, and — only where a card is
   // big enough on screen for the line to mean anything — its title block.
   //
@@ -382,7 +589,10 @@ export class OverviewLayer {
       w: number
       h: number
     }[] = []
+    const texts: typeof visible = []
+    const titles: PdfTitle[] = []
     for (const node of nodes) {
+      const moving = this.motions.has(node.id)
       const rect = live?.get(node.id) ?? node
       const x = rect.x * view.scale + view.tx
       const y = rect.y * view.scale + view.ty
@@ -391,8 +601,50 @@ export class OverviewLayer {
       if (x >= this.width || y >= this.height || x + w <= 0 || y + h <= 0) {
         continue
       }
-      visible.push({ node, x, y, w, h })
+      const item = { node, x, y, w, h }
+      // Its title stands where its spread's does (domain/spread.ts's
+      // `foldedCardOrigin`), and stays drawn here while the card fades in
+      // under it: a spread folding keeps its title in place throughout.
+      if (isFoldedPdf(node)) {
+        const th = SPREAD_METRICS.titleHeight * view.scale
+        titles.push({
+          node,
+          x,
+          y: y - SPREAD_METRICS.titleGap * view.scale - th,
+          w,
+          h: th,
+        })
+      }
+      // The rest of it is drawn on its own, at its own opacity
+      // (`drawMotions`).
+      if (moving) continue
+      if (isPlainText(node)) texts.push(item)
+      else if (isSpreadTitle(node)) titles.push(item)
+      else visible.push(item)
     }
+    // Bare text has no card to draw: at this distance it is a block of ink,
+    // in its colour, as greyed-out text is drawn — and a selection ring when
+    // it is selected, drawn with the cards' below.
+    if (texts.length > 0) {
+      ctx.globalAlpha = OVERVIEW_TEXT_ALPHA
+      for (const text of texts) {
+        ctx.fillStyle = this.colorOf(text.node, palette) ?? palette.text
+        ctx.fillRect(text.x, text.y, text.w, text.h)
+      }
+      ctx.globalAlpha = 1
+      ctx.strokeStyle = palette.accent
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      let anySelected = false
+      for (const text of texts) {
+        if (!this.callbacks.isSelected(text.node.id)) continue
+        this.strokeRectPath(ctx, text)
+        anySelected = true
+      }
+      if (anySelected) ctx.stroke()
+      ctx.lineWidth = 1
+    }
+    this.drawPdfTitles(ctx, view, titles)
     if (visible.length === 0) return
 
     // 1. The opaque surface, in one path.
@@ -416,6 +668,18 @@ export class OverviewLayer {
       ctx.beginPath()
       for (const card of cards) ctx.rect(card.x, card.y, card.w, card.h)
       ctx.fill()
+    }
+
+    // 2b. A PDF's pages, as pictures of themselves where there are some —
+    //     what the card shows in the DOM tiers, over its wash as the page's
+    //     canvas is over its card. Such a card needs no title block: it
+    //     shows its own.
+    const pictured = new Set<NodeId>()
+    ctx.globalAlpha = 1
+    for (const card of visible) {
+      if (this.drawPicture(ctx, card.node, card, palette.dark, view.scale)) {
+        pictured.add(card.node.id)
+      }
     }
 
     // 3. Borders. An uncoloured card takes the theme's border token at full
@@ -459,25 +723,311 @@ export class OverviewLayer {
     if (anySelected) ctx.stroke()
     ctx.lineWidth = 1
 
+    // 4b. The sheets of a selected spread, lit faintly — the stylesheet's
+    //     `.yolo-whiteboard-spread-sheet-of-selected`.
+    ctx.globalAlpha = 0.45
+    ctx.beginPath()
+    let anyLit = false
+    for (const card of visible) {
+      const node = card.node
+      if (node.type !== 'pdf-page') continue
+      if (this.callbacks.isSelected(node.id)) continue
+      if (!this.callbacks.isSelected(node.parent)) continue
+      this.strokeRectPath(ctx, card)
+      anyLit = true
+    }
+    if (anyLit) ctx.stroke()
+    ctx.globalAlpha = 1
+
     // 5. Titles, where a card is wide enough on screen to hold one. The type
-    //    is the DOM card's title block — 32 world units, so it shrinks with
-    //    the card — which is what makes the switch between tiers invisible.
+    //    and the box it wraps in are the DOM card's title block — 32 world
+    //    units, so it shrinks with the card — which is what makes the switch
+    //    between tiers invisible.
     const fontPx = TITLE_BLOCK_WORLD_FONT_PX * view.scale
-    ctx.font = `600 ${fontPx}px ${palette.fontFamily}`
+    const lineHeight = fontPx * TITLE_BLOCK_LINE_HEIGHT
+    ctx.font = `500 ${fontPx}px ${palette.fontFamily}`
     ctx.fillStyle = palette.text
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     for (const card of visible) {
       if (card.w < OVERVIEW_TITLE_MIN_CARD_PX) continue
-      const title = nodeTitleText(card.node)
+      if (pictured.has(card.node.id)) continue
+      const title = nodeTitleText(card.node, this.callbacks.pdfPageLabels)
       if (title.length === 0) continue
-      ctx.fillText(
-        title,
-        card.x + card.w / 2,
-        card.y + card.h / 2,
-        Math.max(1, card.w - 4),
-      )
+      const lines = this.wrapTitle(ctx, title, card.node, view.scale)
+      const top = card.y + card.h / 2 - ((lines.length - 1) * lineHeight) / 2
+      for (let i = 0; i < lines.length; i += 1) {
+        ctx.fillText(lines[i], card.x + card.w / 2, top + i * lineHeight)
+      }
     }
+  }
+
+  /** A PDF's title as the DOM draws it (spread.css): one line with the
+   * type and the name, no box — and a card's ring when it is selected. An
+   * open spread's and its folded card's are the same line in the same
+   * place, so folding one changes nothing about it. */
+  private drawPdfTitles(
+    ctx: CanvasRenderingContext2D,
+    view: CanvasView,
+    titles: readonly PdfTitle[],
+  ): void {
+    this.titleRects.clear()
+    const palette = this.palette
+    if (!palette || titles.length === 0) return
+    // Held at a floor on screen, as a group's label is (constants.ts's
+    // OVERVIEW_GROUP_LABEL_MIN_SCREEN_PX): the name is what an overview is
+    // for. Everything in the line grows by the same factor, upwards from the
+    // title's bottom edge so it never covers the paper, and as far right as
+    // the whole name needs.
+    const grow = Math.max(
+      1,
+      OVERVIEW_GROUP_LABEL_MIN_SCREEN_PX /
+        (SPREAD_TITLE_WORLD.nameFont * view.scale),
+    )
+    const u = view.scale * grow
+    const gap = SPREAD_TITLE_WORLD.gap * u
+    const badgeText = 'PDF'
+    const badgeFont = `600 ${SPREAD_TITLE_WORLD.badgeFont * u}px ${palette.fontFamily}`
+    const nameFont = `500 ${SPREAD_TITLE_WORLD.nameFont * u}px ${palette.fontFamily}`
+    ctx.globalAlpha = 1
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    for (const title of titles) {
+      const name = nodeTitleText(title.node)
+      const pad = SPREAD_TITLE_WORLD.padding * u
+      ctx.font = badgeFont
+      const badgeW =
+        ctx.measureText(badgeText).width +
+        SPREAD_TITLE_WORLD.badgePadding * 2 * u
+      ctx.font = nameFont
+      const nameW = ctx.measureText(name).width
+      const h = title.h * grow
+      const box = {
+        x: title.x,
+        y: title.y + title.h - h,
+        w: Math.max(title.w, pad + badgeW + gap + nameW + pad),
+        h,
+      }
+      // Where it was drawn is where it is pointed at: the line reaches past
+      // the node's rectangle, and a press on any of it is a press on the
+      // title (`spreadTitleAt`).
+      this.titleRects.set(title.node.id, {
+        x: (box.x - view.tx) / view.scale,
+        y: (box.y - view.ty) / view.scale,
+        w: box.w / view.scale,
+        h: box.h / view.scale,
+      })
+      if (this.callbacks.isSelected(title.node.id)) {
+        ctx.strokeStyle = palette.accent
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        this.strokeRectPath(ctx, box)
+        ctx.stroke()
+      }
+      const mid = box.y + box.h / 2
+      // The type, on its tint.
+      const badgeH = SPREAD_TITLE_WORLD.badgeHeight * u
+      ctx.globalAlpha = 0.12
+      ctx.fillStyle = palette.presets['1']
+      ctx.fillRect(box.x + pad, mid - badgeH / 2, badgeW, badgeH)
+      ctx.globalAlpha = 1
+      ctx.font = badgeFont
+      ctx.fillText(
+        badgeText,
+        box.x + pad + SPREAD_TITLE_WORLD.badgePadding * u,
+        mid,
+      )
+      ctx.font = nameFont
+      ctx.fillStyle = palette.text
+      ctx.fillText(name, box.x + pad + badgeW + gap, mid)
+    }
+    ctx.lineWidth = 1
+  }
+
+  /** Where the canvas last drew a PDF's title line (world units), which at
+   * this tier grows past its node to stay readable; null when it drew none,
+   * or the tier is not showing. */
+  titleRect(id: NodeId): CardRect | null {
+    if (!this.active) return null
+    return this.titleRects.get(id) ?? null
+  }
+
+  /** The PDF whose drawn title line is under `point` (world units), if any —
+   * the line reaches past its node's rectangle at this tier. */
+  spreadTitleAt(point: Readonly<{ x: number; y: number }>): NodeId | null {
+    if (!this.active) return null
+    for (const [id, rect] of this.titleRects) {
+      if (
+        point.x >= rect.x &&
+        point.x <= rect.x + rect.w &&
+        point.y >= rect.y &&
+        point.y <= rect.y + rect.h
+      ) {
+        return id
+      }
+    }
+    return null
+  }
+
+  /**
+   * What a PDF card shows at this tier where there are pictures: a sheet its
+   * page; a folded card the pages its reader shows from where it was left
+   * (../pdf/readerLayout.ts: edge to edge at the card's width, a seam between
+   * each), as far down as there are pictures. False when there is none.
+   */
+  private drawPicture(
+    ctx: CanvasRenderingContext2D,
+    node: BoardNode,
+    rect: Readonly<{ x: number; y: number; w: number; h: number }>,
+    dark: boolean,
+    scale: number,
+  ): boolean {
+    if (node.type === 'pdf-page') {
+      const picture = this.callbacks.pageThumbnail(node.file, node.page, dark)
+      if (!picture) return false
+      ctx.drawImage(picture, rect.x, rect.y, rect.w, rect.h)
+      this.drawAnnotations(ctx, node.file, node.page, rect, dark)
+      return true
+    }
+    if (!isFoldedPdf(node)) return false
+    const start = node.startPage ?? 1
+    let page = Math.floor(start)
+    let picture = this.callbacks.pageThumbnail(node.file, page, dark)
+    if (!picture) return false
+    const bottom = rect.y + rect.h
+    let y = rect.y - (start - page) * pageHeight(picture, rect.w)
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(rect.x, rect.y, rect.w, rect.h)
+    ctx.clip()
+    while (picture && y < bottom) {
+      const h = pageHeight(picture, rect.w)
+      ctx.drawImage(picture, rect.x, y, rect.w, h)
+      this.drawAnnotations(ctx, node.file, page, { ...rect, y, h }, dark)
+      y += h + READER_METRICS.gap * scale
+      page += 1
+      picture =
+        y < bottom ? this.callbacks.pageThumbnail(node.file, page, dark) : null
+    }
+    ctx.restore()
+    return true
+  }
+
+  /**
+   * A page's annotations over its picture at `page` (screen pixels), as a
+   * reader's annotation layer draws them (styles/pdf/annotations.css): a
+   * highlight one shape over its lines, multiplied into the page — screened
+   * into the inverted one of a dark theme — and a framed area a box with a
+   * faint wash.
+   *
+   * The highlights are one path per colour in page fractions, made once per
+   * list of annotations (`pageMarks`) and drawn through the page's rectangle
+   * as a transform: a board of annotated pages costs a fill per colour per
+   * page, not a path rebuilt point by point every frame.
+   */
+  private drawAnnotations(
+    ctx: CanvasRenderingContext2D,
+    path: string,
+    pageNumber: number,
+    page: Readonly<{ x: number; y: number; w: number; h: number }>,
+    dark: boolean,
+  ): void {
+    const palette = this.palette
+    const shown = this.callbacks.pageAnnotations(path, pageNumber)
+    if (!palette || !shown) return
+    const marks = this.pageMarks(shown.annotations, shown.frame)
+    const alpha = ctx.globalAlpha
+    ctx.save()
+    if (marks.highlights.size > 0) {
+      ctx.save()
+      ctx.translate(page.x, page.y)
+      ctx.scale(page.w, page.h)
+      ctx.globalCompositeOperation = dark ? 'screen' : 'multiply'
+      ctx.globalAlpha = alpha * (dark ? 0.4 : 0.45)
+      for (const [color, outline] of marks.highlights) {
+        ctx.fillStyle = palette.annotations[color]
+        ctx.fill(outline)
+      }
+      ctx.restore()
+    }
+    ctx.lineWidth = 1
+    for (const { color, box } of marks.areas) {
+      const x = page.x + box.left * page.w
+      const y = page.y + box.top * page.h
+      const w = (box.right - box.left) * page.w
+      const h = (box.bottom - box.top) * page.h
+      ctx.fillStyle = palette.annotations[color]
+      ctx.globalAlpha = alpha * 0.1
+      ctx.fillRect(x, y, w, h)
+      ctx.strokeStyle = palette.annotations[color]
+      ctx.globalAlpha = alpha
+      ctx.strokeRect(x, y, w, h)
+    }
+    ctx.restore()
+  }
+
+  /** A page's annotations as the overview draws them, made once per list —
+   * a store hands out a new one only when the page's annotations change. */
+  private pageMarks(
+    annotations: readonly PdfAnnotation[],
+    frame: PageFrame,
+  ): PageMarks {
+    let perFrame = pageMarksCache.get(annotations)
+    if (!perFrame) {
+      perFrame = new WeakMap()
+      pageMarksCache.set(annotations, perFrame)
+    }
+    const cached = perFrame.get(frame)
+    if (cached) return cached
+    // The view's own window's, like everything else it draws with.
+    const win = this.context.getWindow() as Window & typeof globalThis
+    const highlights = new Map<AnnotationColor, Path2D>()
+    const areas: PageMarks['areas'][number][] = []
+    for (const annotation of annotations) {
+      const color = displayColor(annotation.color)
+      if (annotation.type === 'area') {
+        for (const box of boxesFor(annotation, frame))
+          areas.push({ color, box })
+        continue
+      }
+      const outline = highlights.get(color) ?? new win.Path2D()
+      highlights.set(color, outline)
+      for (const points of outlinesFor(annotation, frame)) {
+        points.forEach(([x, y], at) => {
+          if (at === 0) outline.moveTo(x, y)
+          else outline.lineTo(x, y)
+        })
+        outline.closePath()
+      }
+    }
+    const marks = { highlights, areas }
+    perFrame.set(frame, marks)
+    return marks
+  }
+
+  /** A card's title in the lines its title block would give it. Measured at
+   * the font the context has now and taken back to world units, where the
+   * answer does not change as the camera zooms. */
+  private wrapTitle(
+    ctx: CanvasRenderingContext2D,
+    title: string,
+    node: BoardNode,
+    scale: number,
+  ): readonly string[] {
+    const key = `${node.w}x${node.h}\n${title}`
+    const cached = this.titleLines.get(key)
+    if (cached) return cached
+    if (this.titleLines.size >= TITLE_LINES_CACHE_LIMIT) this.titleLines.clear()
+    const padding = TITLE_BLOCK_WORLD_PADDING
+    const lineHeight = TITLE_BLOCK_WORLD_FONT_PX * TITLE_BLOCK_LINE_HEIGHT
+    const lines = wrapTitleLines(
+      title,
+      node.w - padding.x * 2,
+      Math.max(1, Math.floor((node.h - padding.y * 2) / lineHeight)),
+      (text) => ctx.measureText(text).width / scale,
+    )
+    this.titleLines.set(key, lines)
+    return lines
   }
 
   /** Adds a card's border to the current path, inset by half a line so the
@@ -766,4 +1316,30 @@ export class OverviewLayer {
     ctx.lineTo(baseX + uy * halfWidth, baseY - ux * halfWidth)
     ctx.closePath()
   }
+}
+
+/** A title line the canvas draws for a PDF: an open spread's title node, or
+ * the strip over a folded card (`drawPdfTitles`). Screen pixels. */
+type PdfTitle = Readonly<{
+  node: BoardNode
+  x: number
+  y: number
+  w: number
+  h: number
+}>
+
+/** A PDF card as its reader: not an open spread's title. */
+function isFoldedPdf(
+  node: BoardNode,
+): node is Extract<BoardNode, { type: 'file' }> {
+  return (
+    node.type === 'file' &&
+    fileNodeKind(node.file) === 'pdf' &&
+    !isSpreadTitle(node)
+  )
+}
+
+/** A page's height at `width`, in the shape of its picture. */
+function pageHeight(picture: ImageBitmap, width: number): number {
+  return (width * picture.height) / picture.width
 }

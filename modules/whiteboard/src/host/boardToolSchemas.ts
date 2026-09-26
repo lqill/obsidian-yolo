@@ -58,7 +58,7 @@ const createItem = {
     file: {
       type: 'string',
       description:
-        'Vault path of an existing note or image to show on the card. Use this to put a note that already exists on the board — it does not create the file.',
+        'Vault path of an existing file to show on the card: a note, a PDF, an image, audio, video or an HTML page. Use this to put a file that already exists on the board — it does not create the file, and a path that does not exist rejects the call.',
     },
     url: { type: 'string', description: 'A web page to embed on the card.' },
     x: {
@@ -162,7 +162,7 @@ export const boardToolSchemas = {
   editDescription: [
     'Edit a YOLO whiteboard: add, change, connect, group, move and delete its cards.',
     '',
-    'Read the board first (fs_read on its path) — the summary gives every card an id, a position and a preview, and those ids are what this tool addresses. Read one card in full with "<board path>#<card id>".',
+    'Read the board file first — the summary gives every card an id, a position and a preview, and those ids are what this tool addresses. Read one card in full with "<board path>#<card id>".',
     '',
     CARD_CAPACITY,
     '',

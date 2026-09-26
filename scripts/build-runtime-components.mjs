@@ -20,6 +20,7 @@ const allowedIds = new Set([
   'pdf-engine',
   'bash-engine',
   'embedding-engine',
+  'claude-agent-sdk',
 ])
 const nodeBuiltins = new Set([
   ...builtinModules,
@@ -49,6 +50,7 @@ for (const entry of entries.sort((left, right) =>
   const outputPath = path.join(componentDir, 'dist', 'entry.js')
   await mkdir(path.dirname(outputPath), { recursive: true })
   const workerMetafiles = []
+  const usesNode = config.node === true
   const result = await esbuild.build({
     entryPoints: [path.join(componentDir, 'src', 'entry.ts')],
     outfile: outputPath,
@@ -64,13 +66,15 @@ for (const entry of entries.sort((left, right) =>
       'process.env.NODE_ENV': JSON.stringify(
         production ? 'production' : 'development',
       ),
+      ...(usesNode ? { 'import.meta.url': 'import_meta_url' } : {}),
     },
+    ...(usesNode ? nodeComponentBuildOptions() : {}),
     plugins: componentPlugins(entry.name, workerMetafiles),
     logLevel: 'silent',
   })
-  verifyBoundary(entry.name, result.metafile)
+  verifyBoundary(entry.name, result.metafile, usesNode)
   for (const workerMetafile of workerMetafiles) {
-    verifyBoundary(entry.name, workerMetafile)
+    verifyBoundary(entry.name, workerMetafile, usesNode)
   }
   const output = result.outputFiles?.[0]?.contents
   const bytes = output ?? new Uint8Array(await readFile(outputPath))
@@ -236,6 +240,7 @@ if (check) {
 function validateConfig(value, directoryName) {
   const keys = Object.keys(value)
   const hasAssets = keys.includes('assets')
+  const hasNode = keys.includes('node')
   const expected = [
     'descriptionKey',
     'entry',
@@ -245,6 +250,7 @@ function validateConfig(value, directoryName) {
     'platforms',
     'schemaVersion',
     ...(hasAssets ? ['assets'] : []),
+    ...(hasNode ? ['node'] : []),
   ].sort()
   if (JSON.stringify([...keys].sort()) !== JSON.stringify(expected)) {
     throw new Error(
@@ -279,6 +285,36 @@ function validateConfig(value, directoryName) {
       `Runtime component config has an invalid assets list: ${directoryName}`,
     )
   }
+  // Node builtins only exist in Obsidian's desktop renderer, so a component
+  // that uses them must never be offered to mobile.
+  if (
+    hasNode &&
+    (value.node !== true ||
+      JSON.stringify(value.platforms) !== JSON.stringify(['desktop']))
+  ) {
+    throw new Error(
+      `Runtime component config may only declare "node": true for a desktop-only component: ${directoryName}`,
+    )
+  }
+}
+
+/**
+ * Build options for a desktop-only component that declares `"node": true`.
+ * Node builtins stay external: esbuild turns each import of one into a call
+ * to its `__require` helper, which the component resolves at run time through
+ * the global `require` of Obsidian's desktop renderer (the component executes
+ * in the host's realm via a Blob `<script>`). Dynamic `import("node:fs")` is
+ * lowered to the same `require` instead of a native `import()` that Chromium
+ * would try to fetch, and `import.meta.url`, which has no meaning in a Blob
+ * script, becomes a file URL from the shim — the same treatment
+ * `esbuild.config.mjs` gives the host bundle.
+ */
+function nodeComponentBuildOptions() {
+  return {
+    external: [...nodeBuiltins],
+    inject: [path.resolve('scripts/runtimeComponentImportMetaUrlShim.mjs')],
+    supported: { 'dynamic-import': false },
+  }
 }
 
 function componentPlugins(componentId, workerMetafiles) {
@@ -308,6 +344,19 @@ function componentPlugins(componentId, workerMetafiles) {
             loader: 'js',
           }),
         )
+        build.onResolve({ filter: /^virtual:pdfjs-binary-data$/ }, () => ({
+          path: 'pdf-binary-data',
+          namespace: 'runtime-worker',
+        }))
+        build.onLoad(
+          { filter: /^pdf-binary-data$/, namespace: 'runtime-worker' },
+          async () => ({
+            contents: `export default ${JSON.stringify(
+              await readPdfBinaryData(),
+            )}`,
+            loader: 'js',
+          }),
+        )
       },
     })
   }
@@ -315,6 +364,45 @@ function componentPlugins(componentId, workerMetafiles) {
     plugins.push(embeddingWorkerPlugin(workerMetafiles))
   }
   return plugins
+}
+
+/**
+ * The files pdf.js requests through its `StandardFontDataFactory` and
+ * `WasmFactory` (see pdf-engine's `InlineBinaryDataFactory`), inlined as
+ * base64 so the component never fetches anything at runtime. Keyed by kind.
+ * Stored uncompressed on purpose: registry.json pins this artifact's sha256,
+ * and CI rebuilds it on a different Node/zlib/CPU, where compressed bytes
+ * are not guaranteed to be identical.
+ * - Standard fonts: with pdf.js's browser default `useSystemFonts`, a
+ *   non-embedded standard font resolves to a system font, and only Symbol
+ *   and ZapfDingbats are ever requested, so those are the only two shipped.
+ * - `openjpeg.wasm`: pdf.js 5.4's only JPEG 2000 decoder once its
+ *   `openjpeg_nowasm_fallback.js` is left out (every supported WebView has
+ *   WebAssembly); without it JPX images render blank.
+ * - `jbig2.wasm`: pdf.js 5.4's default JBIG2 decoder; its JS decoder is only
+ *   a fallback after the wasm one fails, with a warning per image. CCITT is
+ *   decoded in JS and needs nothing. `qcms_bg.wasm` is left out: pdf.js only
+ *   uses it with `useWorkerFetch`.
+ */
+async function readPdfBinaryData() {
+  const sources = {
+    standardFontData: [
+      'standard_fonts/FoxitDingbats.pfb',
+      'standard_fonts/FoxitSymbol.pfb',
+    ],
+    wasm: ['wasm/jbig2.wasm', 'wasm/openjpeg.wasm'],
+  }
+  const data = {}
+  for (const [kind, files] of Object.entries(sources)) {
+    data[kind] = {}
+    for (const file of files) {
+      const bytes = await readFile(
+        path.resolve('node_modules/pdfjs-dist', file),
+      )
+      data[kind][path.basename(file)] = bytes.toString('base64')
+    }
+  }
+  return data
 }
 
 /**
@@ -404,7 +492,13 @@ function bashEngineZlibStubPlugin() {
   }
 }
 
-function verifyBoundary(componentId, metafile) {
+/**
+ * `usesNode` is true only for a component whose config declares
+ * `"node": true` (validated to be desktop-only). It lifts the Node-builtin
+ * ban and lets the output reference builtins as externals; every other rule
+ * applies unchanged.
+ */
+function verifyBoundary(componentId, metafile, usesNode) {
   const componentPrefix = `runtime-components/${componentId}/`
   for (const [input, data] of Object.entries(metafile.inputs)) {
     const normalized = input.replaceAll('\\', '/')
@@ -414,17 +508,21 @@ function verifyBoundary(componentId, metafile) {
       normalized.includes('/obsidian/') ||
       normalized.endsWith('/obsidian') ||
       normalized === 'obsidian' ||
-      [...nodeBuiltins].some(
-        (builtin) =>
-          normalized === builtin || normalized.endsWith(`/${builtin}`),
-      )
+      (!usesNode &&
+        [...nodeBuiltins].some(
+          (builtin) =>
+            normalized === builtin || normalized.endsWith(`/${builtin}`),
+        ))
     ) {
       throw new Error(
         `Runtime component ${componentId} crosses a forbidden build boundary: ${input}`,
       )
     }
     for (const imported of data.imports ?? []) {
-      if (nodeBuiltins.has(imported.path) || imported.path === 'obsidian') {
+      if (
+        (!usesNode && nodeBuiltins.has(imported.path)) ||
+        imported.path === 'obsidian'
+      ) {
         throw new Error(
           `Runtime component ${componentId} imports forbidden dependency ${imported.path}`,
         )
@@ -446,7 +544,11 @@ function verifyBoundary(componentId, metafile) {
     }
   }
   for (const output of Object.values(metafile.outputs)) {
-    if ((output.imports ?? []).length > 0) {
+    const imports = (output.imports ?? []).filter(
+      (imported) =>
+        !(usesNode && imported.external && nodeBuiltins.has(imported.path)),
+    )
+    if (imports.length > 0) {
       throw new Error(
         `Runtime component ${componentId} output is not standalone`,
       )

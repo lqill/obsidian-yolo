@@ -1,9 +1,8 @@
 // Structured board operations — the primitives (`addNode`, `updateNode`,
 // `replaceNode`, `removeNode`, `moveNodes`, `addEdge`, `updateEdge`,
-// `removeEdge`) that are
-// the *only* sanctioned way to change a Board in 1.0
-// (docs/plans/08-25-yolo-whiteboard/p1-design.md §1.1). This is also the land for the AI-driven editing
-// primitives promised for a later milestone, so keep this the single choke
+// `removeEdge`) that are the *only* sanctioned way to change a Board in 1.0.
+// This is also the land for the AI-driven editing primitives promised for a
+// later milestone, so keep this the single choke
 // point for board mutation rather than letting callers hand-edit `Board`
 // object literals.
 //
@@ -35,6 +34,10 @@ export type NodePatch = Readonly<{
   file?: string
   text?: string
   label?: string
+  /** A text node's display (fileFormat.ts's `TextDisplay`); `undefined`
+   * clears the field. */
+  plain?: boolean
+  autoWidth?: boolean
 }>
 
 /** Fields `updateEdge` may patch: where an edge is attached, and everything
@@ -110,6 +113,35 @@ export function boardWithReadingWindow(
 }
 
 /**
+ * Moves a PDF card's reading window (fileFormat.ts's `startPage`) — the same
+ * rules as `boardWithReadingWindow`, in pages: the top of the document
+ * carries no field, and the position is kept to two decimals (a hundredth of
+ * a page is a few pixels on any card a page can be read on).
+ */
+export function boardWithPageWindow(
+  board: Board,
+  id: NodeId,
+  page: number,
+): Board {
+  const index = board.nodes.findIndex((node) => node.id === id)
+  if (index === -1) return board
+  const current = board.nodes[index]
+  if (current.type !== 'file') return board
+  const rounded = Math.round(page * 100) / 100
+  const startPage =
+    Number.isFinite(rounded) && rounded > 1 ? rounded : undefined
+  if (current.startPage === startPage) return board
+
+  const next: { startPage?: number } = { ...current }
+  if (startPage === undefined) delete next.startPage
+  else next.startPage = startPage
+
+  const nodes = board.nodes.slice()
+  nodes[index] = next as BoardNode
+  return { ...board, nodes }
+}
+
+/**
  * Swaps one node for another that keeps its id — the "same node, different
  * identity" operation, used when a text node is converted into a file node.
  *
@@ -162,8 +194,9 @@ export function moveNodes(
 ): Board {
   if (ids.length === 0 || (dx === 0 && dy === 0)) return board
   const idSet = new Set(ids)
+  const present = new Set(board.nodes.map((node) => node.id))
   for (const id of idSet) {
-    if (!board.nodes.some((node) => node.id === id)) {
+    if (!present.has(id)) {
       throw new Error(`moveNodes: node "${id}" not found`)
     }
   }
@@ -191,8 +224,11 @@ export function setNodePositions(
   positions: ReadonlyMap<NodeId, Readonly<{ x: number; y: number }>>,
 ): Board {
   if (positions.size === 0) return board
+  // Once over the board, not once per position: a spread's reflow moves
+  // hundreds of pages at every step of the drag.
+  const present = new Set(board.nodes.map((node) => node.id))
   for (const id of positions.keys()) {
-    if (!board.nodes.some((node) => node.id === id)) {
+    if (!present.has(id)) {
       throw new Error(`setNodePositions: node "${id}" not found`)
     }
   }

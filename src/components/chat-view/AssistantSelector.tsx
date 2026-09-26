@@ -56,8 +56,7 @@ export function AssistantSelector({
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const isControlled = typeof currentAssistantId === 'string'
 
-  // Module tool sets (docs/plans/09-03-whiteboard-agent-tools/master.md
-  // D1b): same registry `useSyncExternalStore` pattern as `Chat.tsx`'s
+  // Module tool sets: same registry `useSyncExternalStore` pattern as `Chat.tsx`'s
   // module chat mode subscription, reduced to what
   // `countEnabledVisibleAssistantTools` needs so this selector's per-agent
   // tool count matches what the agent editor and chat runtime resolve.
@@ -179,13 +178,6 @@ export function AssistantSelector({
     setOpen(false)
     openPluginSettingsTab(app, plugin, 'agent')
   }
-
-  const defaultAssistant = assistants.find((assistant) =>
-    isDefaultAssistantId(assistant.id),
-  )
-  const customAssistants = assistants.filter(
-    (assistant) => !isDefaultAssistantId(assistant.id),
-  )
 
   const renderMetaRow = (assistant: Assistant) => {
     const followDefaultLabel = t(
@@ -322,8 +314,7 @@ export function AssistantSelector({
         sideOffset={14}
       >
         <ul className="yolo-assistant-selector-list yolo-model-select-list">
-          {defaultAssistant && renderAssistantRow(defaultAssistant)}
-          {customAssistants.map((assistant) => renderAssistantRow(assistant))}
+          {assistants.map((assistant) => renderAssistantRow(assistant))}
         </ul>
 
         <div className="yolo-assistant-selector-footer">

@@ -1,0 +1,433 @@
+/* --- PDF annotations --------------------------------------------------------
+ * The palette (domain/pdfAnnotations.ts's ANNOTATION_COLORS), in the theme's
+ * own named colours so a theme that re-tunes its yellow re-tunes the
+ * highlights with it — `--color-X`, never `--color-X-rgb`, since themes do
+ * not always keep the `-rgb` twins in step (see root.css). A colour class
+ * sets both the annotation colour and the board's swatch colour, so the
+ * toolbar's swatches paint from the same rule the marks do. */
+
+.yolo-whiteboard-annotation-yellow {
+  --yolo-whiteboard-annotation: var(--color-yellow);
+}
+.yolo-whiteboard-annotation-green {
+  --yolo-whiteboard-annotation: var(--color-green);
+}
+.yolo-whiteboard-annotation-blue {
+  --yolo-whiteboard-annotation: var(--color-blue);
+}
+.yolo-whiteboard-annotation-pink {
+  --yolo-whiteboard-annotation: var(--color-pink);
+}
+.yolo-whiteboard-annotation-purple {
+  --yolo-whiteboard-annotation: var(--color-purple);
+}
+[class*='yolo-whiteboard-annotation-'] {
+  --yolo-whiteboard-color: var(--yolo-whiteboard-annotation);
+}
+
+/* The layer between a page's picture and its text layer
+ * (ui/pdf/annotationLayer.ts). It never takes the pointer: the text layer
+ * above has to keep every press that selects text, and the reader finds the
+ * annotation a click meant by geometry. */
+.yolo-whiteboard-pdf-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Multiplied into the page, so the ink shows through the colour the way a
+ * highlighter pen's does. In a dark theme the page is drawn inverted (light
+ * ink on dark paper, and only the canvas is filtered) — multiplying there
+ * would swallow the ink, so the colour is screened instead, which tints the
+ * paper and leaves the ink standing out. */
+.yolo-whiteboard-pdf-mark {
+  position: absolute;
+  border-radius: 1px;
+  background: color-mix(
+    in srgb,
+    var(--yolo-whiteboard-annotation) 45%,
+    transparent
+  );
+  mix-blend-mode: multiply;
+}
+
+.theme-dark .yolo-whiteboard-pdf-mark {
+  background: color-mix(
+    in srgb,
+    var(--yolo-whiteboard-annotation) 40%,
+    transparent
+  );
+  mix-blend-mode: screen;
+}
+
+/* A highlight: one shape over all its lines (annotationLayer.ts), a path in
+ * the SVG of the page's highlights stretched over it, which is blended like
+ * the marks above — once for the page, not once a highlight: every blended
+ * element is a compositing group of its own. The outlines, drawn only while
+ * one is active, are an SVG of their own that is not blended; the stroke
+ * stays 2px at any page size. */
+svg.yolo-whiteboard-pdf-highlight,
+svg.yolo-whiteboard-pdf-highlight-outline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+svg.yolo-whiteboard-pdf-highlight {
+  mix-blend-mode: multiply;
+}
+
+.theme-dark svg.yolo-whiteboard-pdf-highlight {
+  mix-blend-mode: screen;
+}
+
+.yolo-whiteboard-pdf-highlight path {
+  fill: color-mix(in srgb, var(--yolo-whiteboard-annotation) 45%, transparent);
+}
+
+.theme-dark .yolo-whiteboard-pdf-highlight path {
+  fill: color-mix(in srgb, var(--yolo-whiteboard-annotation) 40%, transparent);
+}
+
+.yolo-whiteboard-pdf-highlight-outline path {
+  display: none;
+  fill: none;
+  stroke: var(--yolo-whiteboard-annotation);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.yolo-whiteboard-pdf-highlight-outline path.yolo-whiteboard-pdf-mark-active {
+  display: inline;
+}
+
+.yolo-whiteboard-pdf-mark.yolo-whiteboard-pdf-mark-area {
+  border: 2px solid var(--yolo-whiteboard-annotation);
+  border-radius: 2px;
+  background: color-mix(
+    in srgb,
+    var(--yolo-whiteboard-annotation) 10%,
+    transparent
+  );
+  mix-blend-mode: normal;
+}
+
+.yolo-whiteboard-pdf-mark.yolo-whiteboard-pdf-mark-active {
+  outline: 2px solid var(--yolo-whiteboard-annotation);
+  outline-offset: 1px;
+}
+
+/* A commented annotation's dot, just past where it ends. The element is
+ * the room a pointer has to hover or click it (annotationController.ts's
+ * preview and editor) — the layer takes no pointer, so the reader finds it
+ * by where it is drawn — and the dot is drawn in its middle. */
+.yolo-whiteboard-pdf-mark-note {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  transform: translate(-2px, -50%);
+}
+
+.yolo-whiteboard-pdf-mark-note::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 8px;
+  height: 8px;
+  margin: auto;
+  border-radius: 50%;
+  background: var(--yolo-whiteboard-annotation);
+  box-shadow: 0 0 0 1.5px var(--background-primary);
+}
+
+.yolo-whiteboard-pdf-pages.yolo-whiteboard-pdf-pages-on-note,
+.yolo-whiteboard-pdf-pages.yolo-whiteboard-pdf-pages-on-note * {
+  cursor: pointer;
+}
+
+/* Area mode: a drag on a page frames a region. The text layer steps out of
+ * the way so the press reaches the page instead of starting a selection. */
+.yolo-whiteboard-pdf-reader-area-mode .yolo-whiteboard-pdf-text {
+  pointer-events: none;
+}
+
+.yolo-whiteboard-pdf-reader-area-mode .yolo-whiteboard-pdf-page {
+  cursor: crosshair;
+}
+
+.yolo-whiteboard-pdf-area-draft {
+  position: absolute;
+  border: 1.5px dashed var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+  pointer-events: none;
+}
+
+/* The text a followed link names, marked for a moment (pdfReader.ts's
+ * `flash`): faded in on arrival, held, faded out. Above the text layer,
+ * never in the way of a press on it. */
+.yolo-whiteboard-pdf-flash {
+  position: absolute;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--interactive-accent) 60%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--yolo-anim-duration-exit) var(--yolo-anim-ease-in);
+}
+
+.yolo-whiteboard-pdf-flash.yolo-whiteboard-pdf-flash-shown {
+  opacity: 1;
+  transition: opacity var(--yolo-anim-duration-enter) var(--yolo-anim-ease-out);
+}
+
+button.yolo-whiteboard-pdf-area-toggle {
+  --icon-size: 12px;
+  align-self: center;
+  width: auto;
+  height: auto;
+  margin-right: 2px;
+  padding: 1px;
+  box-shadow: none;
+}
+
+button.yolo-whiteboard-pdf-area-toggle.is-active {
+  color: var(--interactive-accent);
+  background-color: var(--background-modifier-hover);
+}
+
+/* The annotation toolbar spans the whole view, reading panel included, so it
+ * paints above the panel. */
+.yolo-whiteboard-overlay.yolo-whiteboard-pdf-annotation-overlay {
+  z-index: 2;
+}
+
+/* The one-click highlight button carries the colour it highlights in: a
+ * stroke of it under the pen's tip, where the ink would be. */
+button.yolo-whiteboard-pdf-highlight-button {
+  position: relative;
+}
+
+button.yolo-whiteboard-pdf-highlight-button::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 14px;
+  height: 3px;
+  margin-left: -7px;
+  border-radius: 1.5px;
+  background: var(--yolo-whiteboard-annotation);
+  pointer-events: none;
+}
+
+/* The field a comment is written in, under its passage: one line that
+ * grows with what is written, and — for a comment already written — its
+ * delete and confirm buttons beside it. */
+.yolo-whiteboard-pdf-comment {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  width: 320px;
+  max-width: calc(100% - 16px);
+  padding: 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  background-color: var(--background-primary);
+  box-shadow: var(--shadow-s);
+  pointer-events: auto;
+}
+
+.yolo-whiteboard-pdf-comment.yolo-whiteboard-pdf-comment-new {
+  width: 300px;
+}
+
+.yolo-whiteboard-pdf-comment[hidden],
+.yolo-whiteboard-pdf-comment.yolo-whiteboard-pdf-comment-hidden {
+  display: none;
+}
+
+textarea.yolo-whiteboard-pdf-comment-input {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  max-height: 10em;
+  margin: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-s, 4px);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  font: inherit;
+  font-size: var(--font-ui-medium);
+  line-height: var(--line-height-tight);
+  resize: none;
+  overflow-y: auto;
+}
+
+textarea.yolo-whiteboard-pdf-comment-input:focus,
+textarea.yolo-whiteboard-pdf-comment-input:focus-visible {
+  border: 0;
+  box-shadow: none;
+}
+
+/* Past one line the field takes the whole width and its buttons sit under
+ * it, at the right. */
+.yolo-whiteboard-pdf-comment.yolo-whiteboard-pdf-comment-multiline {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Its height is the one fitted to what is written (`fitEditor`), not a
+ * share of the column. */
+.yolo-whiteboard-pdf-comment-multiline
+  textarea.yolo-whiteboard-pdf-comment-input {
+  flex: none;
+}
+
+.yolo-whiteboard-pdf-comment-multiline .yolo-whiteboard-pdf-comment-actions {
+  align-self: flex-end;
+}
+
+.yolo-whiteboard-pdf-comment-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding-bottom: 2px;
+}
+
+/* A commented annotation's comment, over its dot while the pointer is on
+ * it — or on the preview itself, which is a handle: a drag on it takes the
+ * comment onto the board, a click opens it for editing. */
+.yolo-whiteboard-pdf-comment-preview {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: max-content;
+  max-width: min(240px, calc(100% - 16px));
+  max-height: 12em;
+  padding: 7px 9px;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  background-color: var(--background-secondary);
+  box-shadow: var(--shadow-s);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-tight);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.yolo-whiteboard-pdf-comment-preview[hidden] {
+  display: none;
+}
+
+/* Over the waiting frame or any annotation, a press picks it up
+ * (annotationController.ts's `onGrab`): the pointer says so first. Every
+ * layer of the page is covered — the text layer sets its own cursor. */
+.yolo-whiteboard-pdf-pages.yolo-whiteboard-pdf-pages-grabbable,
+.yolo-whiteboard-pdf-pages.yolo-whiteboard-pdf-pages-grabbable * {
+  cursor: grab;
+}
+
+/* What a frame, an annotation or a comment dragged out carries under the
+ * pointer while it is over the PDF: the region's picture, the passage, or
+ * the comment. Over open board it steps aside for the landing slot, which
+ * shows the same thing as it will be, at the board's scale
+ * (annotationController.ts's `onGrabMove`). Placed with `transform` by the
+ * controller; it arrives by `scale`, which composes with that. */
+.yolo-whiteboard-pdf-drag-ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  background-color: var(--background-primary);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 14%);
+  opacity: 0.9;
+  pointer-events: none;
+  transition: opacity var(--yolo-anim-duration-feedback, 120ms)
+    var(--yolo-anim-ease-out, ease-out);
+  animation: yolo-whiteboard-pdf-drag-ghost-in
+    var(--yolo-anim-duration-feedback, 120ms)
+    var(--yolo-anim-ease-out, ease-out);
+}
+
+.yolo-whiteboard-pdf-drag-ghost.yolo-whiteboard-pdf-drag-ghost-landed {
+  opacity: 0;
+}
+
+@keyframes yolo-whiteboard-pdf-drag-ghost-in {
+  from {
+    scale: 0.92;
+  }
+}
+
+.yolo-whiteboard-pdf-drag-ghost canvas {
+  display: block;
+}
+
+.theme-dark .yolo-whiteboard-pdf-drag-ghost canvas {
+  filter: invert(0.88) hue-rotate(180deg);
+}
+
+.yolo-whiteboard-pdf-drag-ghost-text {
+  display: -webkit-box;
+  width: 220px;
+  padding: 6px 10px;
+  overflow: hidden;
+  border-left: 3px solid var(--yolo-whiteboard-annotation);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+/* A comment being carried: its preview, lifted off the page. */
+.yolo-whiteboard-pdf-drag-ghost.yolo-whiteboard-pdf-drag-ghost-comment {
+  width: max-content;
+  max-width: 240px;
+  max-height: 12em;
+  padding: 7px 9px;
+  border-radius: var(--radius-m, 8px);
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-tight);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.yolo-whiteboard-pdf-grabbing,
+.yolo-whiteboard-pdf-grabbing * {
+  cursor: grabbing;
+}
+
+/* Over a comment dot on a PDF card whose content has not been entered, or
+ * over a link into one of the board's PDFs: a click there opens it (the
+ * card takes the click and opens it itself). */
+.yolo-whiteboard-card.yolo-whiteboard-card-over-openable,
+.yolo-whiteboard-card.yolo-whiteboard-card-over-openable * {
+  cursor: pointer;
+}
+
+/* Over an annotation on such a card: a press takes it, as inside the card
+ * (PdfIntegration's `grabAnnotationAt`). */
+.yolo-whiteboard-card.yolo-whiteboard-card-over-grabbable,
+.yolo-whiteboard-card.yolo-whiteboard-card-over-grabbable * {
+  cursor: grab;
+}

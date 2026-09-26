@@ -1,6 +1,20 @@
 import { PDFDocument } from 'pdf-lib'
+// pdfjs-dist is pinned to exactly 5.4.624 (package.json, no caret): it needs
+// Chrome 110 / Safari 16.4, the same floor as the pdf.js Obsidian bundles, so
+// every device that opens PDFs in Obsidian can run this engine. 5.5 raises
+// the floor to Chrome 118, 6.x to Chrome 125 / Safari 18, and 5.6.83-6.2.107
+// carry GHSA-hq66-cqwq-w95j. Do not bump without revisiting that floor.
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
+import binaryData from 'virtual:pdfjs-binary-data'
 import workerSource from 'virtual:pdfjs-worker-script'
+
+import type {
+  PdfAnnotationInput,
+  PdfEngineDocument,
+} from '../../../src/core/runtime-components/contracts'
+
+import { addAnnotationsToPdf } from './annotations'
+import { RENDER_DOCUMENT, createPdfDocument } from './document'
 
 type PdfTextItem = {
   str: string
@@ -72,6 +86,51 @@ function pageItemsToText(items: unknown[]): string {
   return lines.map((parts) => parts.join(' ').trim()).join('\n')
 }
 
+/**
+ * pdf.js loads standard font programs and the JBIG2/OpenJPEG wasm decoders
+ * on demand. We never let it fetch them from a URL: the component has to work
+ * offline and self-contained, so the files are inlined at build time
+ * (`virtual:pdfjs-binary-data`) and handed over through these factories,
+ * which pdf.js consults on the main thread whenever `useWorkerFetch` is
+ * false. pdf.js 5.4 asks one factory per kind, each with `fetch({ filename })`.
+ */
+function inlineBinaryDataFactory(kind: 'standardFontData' | 'wasm') {
+  return class InlineBinaryDataFactory {
+    async fetch({ filename }: { filename: string }): Promise<Uint8Array> {
+      const encoded = binaryData[kind]?.[filename]
+      if (encoded === undefined) {
+        throw new Error(`PDF engine has no bundled ${kind} file "${filename}"`)
+      }
+      return decodeBase64(encoded)
+    }
+  }
+}
+
+const InlineStandardFontDataFactory =
+  inlineBinaryDataFactory('standardFontData')
+const InlineWasmFactory = inlineBinaryDataFactory('wasm')
+
+function decodeBase64(encoded: string): Uint8Array {
+  const binary = atob(encoded)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
+}
+
+function openDocument(bytes: Uint8Array) {
+  return pdfjs.getDocument({
+    data: bytes.slice(),
+    // Said explicitly because drawing depends on it: fonts are registered
+    // here, and pages are drawn on canvases of this document.
+    ownerDocument: RENDER_DOCUMENT,
+    useWorkerFetch: false,
+    StandardFontDataFactory: InlineStandardFontDataFactory,
+    WasmFactory: InlineWasmFactory,
+  })
+}
+
 function abortIfNeeded(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw new DOMException('PDF operation aborted', 'AbortError')
@@ -89,19 +148,42 @@ globalThis.__yolo_register_runtime_component__({
     const assertActive = (): void => {
       if (disposed) throw new Error('PDF engine is disposed')
     }
+    const openDocuments = new Set<PdfEngineDocument>()
 
     return Object.freeze({
+      async openDocument(bytes: Uint8Array) {
+        assertActive()
+        const opened = await createPdfDocument(openDocument(bytes))
+        const tracked: PdfEngineDocument = Object.freeze({
+          ...opened,
+          destroy: () => {
+            openDocuments.delete(tracked)
+            return opened.destroy()
+          },
+        })
+        openDocuments.add(tracked)
+        if (disposed) {
+          await tracked.destroy()
+          throw new Error('PDF engine is disposed')
+        }
+        return tracked
+      },
+
+      async addAnnotations(
+        bytes: Uint8Array,
+        annotations: readonly PdfAnnotationInput[],
+      ) {
+        assertActive()
+        return addAnnotationsToPdf(bytes, annotations)
+      },
+
       async extractPages(
         bytes: Uint8Array,
         options: { maxPages: number; signal?: AbortSignal },
       ) {
         assertActive()
         abortIfNeeded(options.signal)
-        const task = pdfjs.getDocument({
-          data: bytes.slice(),
-          useWorkerFetch: false,
-          isEvalSupported: false,
-        })
+        const task = openDocument(bytes)
         const document = await task.promise
         try {
           const pages: { page: number; text: string }[] = []
@@ -121,23 +203,19 @@ globalThis.__yolo_register_runtime_component__({
           }
           return { totalPages: document.numPages, pages }
         } finally {
-          await document.destroy()
+          await task.destroy()
         }
       },
 
       async getPageCount(bytes: Uint8Array, signal?: AbortSignal) {
         assertActive()
         abortIfNeeded(signal)
-        const task = pdfjs.getDocument({
-          data: bytes.slice(),
-          useWorkerFetch: false,
-          isEvalSupported: false,
-        })
+        const task = openDocument(bytes)
         const document = await task.promise
         try {
           return document.numPages
         } finally {
-          await document.destroy()
+          await task.destroy()
         }
       },
 
@@ -148,11 +226,7 @@ globalThis.__yolo_register_runtime_component__({
       ) {
         assertActive()
         abortIfNeeded(signal)
-        const task = pdfjs.getDocument({
-          data: bytes.slice(),
-          useWorkerFetch: false,
-          isEvalSupported: false,
-        })
+        const task = openDocument(bytes)
         const document = await task.promise
         try {
           if (pageNumber < 1 || pageNumber > document.numPages) {
@@ -168,7 +242,7 @@ globalThis.__yolo_register_runtime_component__({
             page.cleanup()
           }
         } finally {
-          await document.destroy()
+          await task.destroy()
         }
       },
 
@@ -179,11 +253,7 @@ globalThis.__yolo_register_runtime_component__({
       ) {
         assertActive()
         abortIfNeeded(signal)
-        const task = pdfjs.getDocument({
-          data: bytes.slice(),
-          useWorkerFetch: false,
-          isEvalSupported: false,
-        })
+        const task = openDocument(bytes)
         const document = await task.promise
         try {
           const start = Math.max(1, range.startPage)
@@ -197,17 +267,11 @@ globalThis.__yolo_register_runtime_component__({
             const page = await document.getPage(pageNumber)
             try {
               const viewport = page.getViewport({ scale: RENDER_SCALE })
-              const canvas = documentGlobal().createElement('canvas')
+              const canvas = RENDER_DOCUMENT.createElement('canvas')
               try {
                 canvas.width = viewport.width
                 canvas.height = viewport.height
-                const context = canvas.getContext('2d')
-                if (!context) {
-                  throw new Error(
-                    `Failed to get 2D canvas context for PDF page ${pageNumber}`,
-                  )
-                }
-                await page.render({ canvasContext: context, viewport }).promise
+                await page.render({ canvas, viewport }).promise
                 rendered.push({
                   page: pageNumber,
                   dataUrl: canvas.toDataURL('image/png'),
@@ -222,7 +286,7 @@ globalThis.__yolo_register_runtime_component__({
           }
           return { totalPages: document.numPages, rendered }
         } finally {
-          await document.destroy()
+          await task.destroy()
         }
       },
 
@@ -298,12 +362,9 @@ globalThis.__yolo_register_runtime_component__({
       dispose(): void {
         if (disposed) return
         disposed = true
+        for (const document of openDocuments) void document.destroy()
         URL.revokeObjectURL(workerUrl)
       },
     })
   },
 })
-
-function documentGlobal(): Document {
-  return globalThis.document
-}

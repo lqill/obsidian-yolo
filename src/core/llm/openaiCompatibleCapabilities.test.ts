@@ -15,7 +15,49 @@ describe('openaiCompatibleCapabilities', () => {
     })
 
     expect(request.enable_thinking).toBe(true)
+    expect(request.preserve_thinking).toBe(true)
     expect(request.thinking_budget).toBe(4096)
+  })
+
+  it('treats the international DashScope site the same', () => {
+    const request: Record<string, unknown> = {}
+    applyOpenAICompatibleCapabilities({
+      request,
+      reasoningType: 'gemini',
+      reasoningLevel: 'low',
+      baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    })
+    expect(request.enable_thinking).toBe(true)
+    expect(request.preserve_thinking).toBe(true)
+  })
+
+  it('keeps earlier reasoning on GLM when thinking is on', () => {
+    const on: Record<string, unknown> = {}
+    applyOpenAICompatibleCapabilities({
+      request: on,
+      reasoningType: 'gemini',
+      reasoningLevel: 'medium',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    })
+    expect(on.thinking).toEqual({ type: 'enabled', clear_thinking: false })
+
+    const zai: Record<string, unknown> = {}
+    applyOpenAICompatibleCapabilities({
+      request: zai,
+      reasoningType: 'gemini',
+      reasoningLevel: 'medium',
+      baseUrl: 'https://api.z.ai/api/paas/v4',
+    })
+    expect(zai.thinking).toEqual({ type: 'enabled', clear_thinking: false })
+
+    const off: Record<string, unknown> = {}
+    applyOpenAICompatibleCapabilities({
+      request: off,
+      reasoningType: 'gemini',
+      reasoningLevel: 'off',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    })
+    expect(off.thinking).toEqual({ type: 'disabled' })
   })
 
   it('applies volcengine-style thinking fields', () => {

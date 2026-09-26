@@ -323,8 +323,7 @@ export type YoloModuleToolSetCategoryV1 = 'vault' | 'context' | 'external'
  * than a handful of schemas.
  *
  * No approval knob: a module tool set's safety comes from being undoable, not
- * from a confirmation on every call (docs/plans/09-03-whiteboard-agent-tools
- * Q13). Tools whose every call must be confirmed belong to a chat mode, whose
+ * from a confirmation on every call. Tools whose every call must be confirmed belong to a chat mode, whose
  * `requiresApproval` is unconditional.
  */
 export type YoloModuleToolSetV1 = Readonly<{
@@ -382,6 +381,15 @@ export type YoloModuleFileTextRendererV1 = Readonly<{
   ): string | Promise<string>
 }>
 
+/** Text the user selected in a vault file, as a module's own view shows it. */
+export type YoloModuleChatSelectionV1 = Readonly<{
+  /** Vault path of the file the text was selected in. */
+  path: string
+  text: string
+  /** 1-based page, for a selection in a PDF. */
+  page?: number
+}>
+
 export type YoloModuleChatV1 = Readonly<{
   registerMode(mode: YoloModuleChatModeV1): void
   registerToolSet(set: YoloModuleToolSetV1): void
@@ -389,6 +397,15 @@ export type YoloModuleChatV1 = Readonly<{
   registerFileTextRenderer(
     renderer: YoloModuleFileTextRendererV1,
   ): ModuleDisposer
+  /**
+   * Quotes a selection into the chat: the same thing "add to chat" does for
+   * a selection in a note or in Obsidian's PDF view — the text becomes a
+   * mention of its file (and page) in the chat's input, opening the chat
+   * view when none is open. For a module that draws a file itself (a PDF
+   * read on a board), whose selections the host's own selection watcher can
+   * never see. Rejects when `path` is not a file in the vault.
+   */
+  addSelection(selection: YoloModuleChatSelectionV1): Promise<void>
 }>
 
 export type YoloModulePathsSnapshotV1 = Readonly<{
@@ -760,6 +777,36 @@ export type YoloModuleVaultV1 = {
     linktext: string,
     sourcePath: string,
   ): YoloModuleVaultFileV1 | null
+  /**
+   * A link to `filePath` as the user's settings write one — wiki link or
+   * Markdown link, and the path form ("shortest", relative, absolute) — for
+   * a link written in `sourcePath`. `subpath` is what follows the file name,
+   * starting with `#` (a heading, or a PDF's `#page=3&selection=…`), and
+   * `alias` the text the link displays instead of the path.
+   *
+   * Obsidian's own `generateMarkdownLink`, so a link a module writes or
+   * copies is the link a note would get from the editor. Null when
+   * `filePath` is not a file in the vault.
+   */
+  generateLink(
+    filePath: string,
+    sourcePath: string,
+    subpath?: string,
+    alias?: string,
+  ): string | null
+  /**
+   * Where a new attachment named `fileName` (with its extension) for the
+   * document at `sourcePath` goes under the user's "Default location for new
+   * attachments" setting: a free vault path, its folder created, the name
+   * suffixed when taken. Nothing is written — `createBinary` it there.
+   *
+   * Obsidian's own `getAvailablePathForAttachment`, the one a pasted image
+   * in a note goes through.
+   */
+  getAvailableAttachmentPath(
+    fileName: string,
+    sourcePath: string,
+  ): Promise<string>
   ensureFolder(folderPath: string): Promise<void>
   createFolder(folderPath: string): Promise<void>
   createText(
@@ -797,6 +844,224 @@ export type YoloModuleVaultV1 = {
   ): ModuleDisposer
 }
 
+/** `[x, y]`: PDF user space (points, y up) or viewport CSS pixels (y down). */
+export type YoloModulePdfPointV1 = readonly [x: number, y: number]
+
+/** Two opposite corners in PDF user space, in any order. */
+export type YoloModulePdfRectV1 = readonly [
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+]
+
+export type YoloModulePdfTaskV1<T> = Readonly<{
+  /** Rejects with an `AbortError` `DOMException` once cancelled. */
+  promise: Promise<T>
+  cancel(): void
+}>
+
+/**
+ * The `a,b,c,d` of Obsidian's native `[[x.pdf#page=N&selection=a,b,c,d]]`
+ * link: start span index, offset in it, end span index, (exclusive) offset in
+ * it — spans being the page's text-layer spans, numbered by their `data-idx`.
+ * A tuple produced by `describeRange` resolves back to the same text through
+ * `createRange`; a tuple written by Obsidian's own viewer names the same text
+ * as long as both pdf.js versions split the page into the same items.
+ */
+export type YoloModulePdfSelectionTupleV1 = readonly [
+  startIndex: number,
+  startOffset: number,
+  endIndex: number,
+  endOffset: number,
+]
+
+export type YoloModulePdfTextSelectionV1 = Readonly<{
+  pageNumber: number
+  /** The selected text, `\n` at the page's line breaks, Unicode-normalized. */
+  text: string
+  /**
+   * One quadrilateral per visual line, 8 numbers each — top-left, top-right,
+   * bottom-left, bottom-right as seen on screen — in PDF user space, the
+   * order PDF Highlight annotations use.
+   */
+  quadPoints: readonly number[]
+  tuple: YoloModulePdfSelectionTupleV1
+}>
+
+export type YoloModulePdfTextLayerV1 = Readonly<{
+  pageNumber: number
+  /**
+   * The part of `range` (usually the window selection's range) that lies in
+   * this layer, or null when none does. A selection across several pages is
+   * described one layer at a time.
+   */
+  describeRange(range: Range): YoloModulePdfTextSelectionV1 | null
+  /**
+   * The DOM range a tuple names in this layer — to select it, scroll to it,
+   * or feed it to `describeRange` for its quad points — or null when it names
+   * no text here.
+   */
+  createRange(tuple: YoloModulePdfSelectionTupleV1): Range | null
+  /** Re-lays the spans out for a new scale without refetching page text. */
+  setScale(scale: number): void
+  /** Cancels a pending build and empties the container. */
+  destroy(): void
+}>
+
+/** One text content item of a page: the text of one text-layer span. */
+export type YoloModulePdfTextItemV1 = Readonly<{
+  /** Exactly the span's text — not normalized, so offsets into it are the
+   * offsets a selection tuple uses. */
+  text: string
+  /** A line ends after this item (pdf.js's `hasEOL`). */
+  endsLine: boolean
+}>
+
+/**
+ * One page. `scale` is CSS pixels per PDF unit everywhere, and a page drawn
+ * with `render`, a text layer built with `renderTextLayer`, and the point
+ * conversions all agree whenever they are given the same scale.
+ */
+export type YoloModulePdfPageV1 = Readonly<{
+  pageNumber: number
+  /** Size at scale 1, the page's own rotation applied. */
+  width: number
+  height: number
+  rotation: 0 | 90 | 180 | 270
+  /**
+   * Draws the page into `canvas`. Only the backing store is sized — to
+   * `width * scale * pixelRatio`, the ratio defaulting to the
+   * `devicePixelRatio` of the canvas's own window and lowered when the
+   * canvas would be too large (the ratio used is returned); the canvas's CSS
+   * size stays with the caller. The canvas keeps its previous picture until
+   * the new one is complete, and a later render into the same canvas cancels
+   * an earlier one still running.
+   */
+  render(
+    options: Readonly<{
+      canvas: HTMLCanvasElement
+      scale: number
+      pixelRatio?: number
+    }>,
+  ): YoloModulePdfTaskV1<Readonly<{ pixelRatio: number }>>
+  /**
+   * Builds the selectable text layer into `container`, which is emptied
+   * first and should sit over the drawn page at the same CSS size. The host
+   * styles it (the `yolo-pdf-text-layer` class it adds).
+   */
+  renderTextLayer(
+    options: Readonly<{ container: HTMLElement; scale: number }>,
+  ): YoloModulePdfTaskV1<YoloModulePdfTextLayerV1>
+  /** PNG bytes of `rect` rendered at `scale` (one pixel per CSS pixel). */
+  renderRegion(
+    rect: YoloModulePdfRectV1,
+    options: Readonly<{ scale: number }>,
+  ): Promise<ArrayBuffer>
+  toViewportPoint(
+    point: YoloModulePdfPointV1,
+    scale: number,
+  ): YoloModulePdfPointV1
+  toPdfPoint(point: YoloModulePdfPointV1, scale: number): YoloModulePdfPointV1
+  /**
+   * Lets go of what drawing this page left in memory — its parsed drawing
+   * operations and decoded images — once no render of it is running (a
+   * running one frees them when it ends). The page stays usable; the next
+   * render parses it again. For a reader to call on pages it has scrolled
+   * far away from: without it a long document keeps every page it ever drew.
+   */
+  cleanup(): void
+  /**
+   * The page's text without building a text layer: one item per text-layer
+   * span, in `data-idx` order, so item `i` at character offset `k` is
+   * `(i, k)` in a selection tuple — what `createRange` on the page's layer
+   * resolves once it is built. For searching a document whose pages are
+   * not all laid out. Fetched once per page and kept with the document.
+   */
+  getTextItems(): Promise<readonly YoloModulePdfTextItemV1[]>
+}>
+
+export type YoloModulePdfDocumentV1 = Readonly<{
+  path: string
+  pageCount: number
+  getPage(pageNumber: number): Promise<YoloModulePdfPageV1>
+  /**
+   * True once the file at `path` was modified, renamed or deleted, or the PDF
+   * engine was turned off. A stale document still answers for the bytes it
+   * was opened from (unless the engine was turned off); `open` the path
+   * again for the current file.
+   */
+  isStale(): boolean
+  /** Called once, when the document becomes stale. */
+  subscribe(listener: () => void): ModuleDisposer
+  /** Idempotent; also done for every open document when the module unloads. */
+  release(): void
+}>
+
+/**
+ * A standard PDF annotation for `addAnnotations` to write, which any PDF
+ * viewer shows. Geometry is the page's PDF user space — the space
+ * `describeRange` and `toPdfPoint` answer in — so the page's rotation and box
+ * offsets need no handling by the caller.
+ */
+export type YoloModulePdfAnnotationV1 = Readonly<
+  (
+    | {
+        /** A text highlight (`/Highlight`), painted opaque with a multiply
+         * blend, like a highlighter pen: for a translucent look, pass a
+         * lighter colour (opacity is not written — viewers disagree on how
+         * to apply it). */
+        type: 'highlight'
+        /** Eight numbers per line, as `describeRange` gives them. */
+        quadPoints: readonly number[]
+      }
+    | {
+        /** A rectangle outline (`/Square`) drawn just outside `rect`. */
+        type: 'square'
+        rect: YoloModulePdfRectV1
+        /** In PDF units; default 1. */
+        borderWidth?: number
+      }
+  ) & {
+    /** 1-based. */
+    page: number
+    /** `#rrggbb`. */
+    color: string
+    /** The annotation's note, shown by viewers as its comment. */
+    contents?: string
+    author?: string
+    /** Written as the annotation's name (`/NM`): the caller's own id. */
+    id?: string
+    /** ISO 8601. */
+    createdAt?: string
+    modifiedAt?: string
+  }
+>
+
+export type YoloModulePdfV1 = Readonly<{
+  /**
+   * Opens the PDF at a vault path. Every call returns its own handle, to be
+   * released; handles to the same unchanged file share one parsed document.
+   * Rejects when the file cannot be read or parsed, or the PDF engine runtime
+   * component is disabled or failed to install (it is installed on demand, so
+   * the first open may wait for a download).
+   */
+  open(filePath: string): Promise<YoloModulePdfDocumentV1>
+  /**
+   * The bytes of a new PDF: `pdf` with `annotations` added as standard PDF
+   * annotations, after each page's existing ones, each with its own
+   * appearance so it looks the same in every viewer. Nothing is written to
+   * the vault and `pdf` is left as it was — saving the copy is the caller's.
+   * Rejects when an annotation is malformed (none is written then), when the
+   * document cannot be rewritten (encrypted or damaged), or when the PDF
+   * engine is unavailable.
+   */
+  addAnnotations(
+    pdf: ArrayBuffer,
+    annotations: readonly YoloModulePdfAnnotationV1[],
+  ): Promise<ArrayBuffer>
+}>
+
 export type YoloModuleCapabilitiesV1 = Readonly<{
   agent: YoloModuleAgentV1
   assets: YoloModuleAssetsV1
@@ -805,6 +1070,7 @@ export type YoloModuleCapabilitiesV1 = Readonly<{
   config: ModuleConfigV1
   i18n: YoloModuleI18nV1
   paths: YoloModulePathsV1
+  pdf: YoloModulePdfV1
   privateStorage: ModulePrivateStorageV1
   settings: YoloModuleSettingsV1
   ui: YoloModuleUiV1
@@ -860,6 +1126,16 @@ export type ModuleCatalogEntry = {
     sha256: string
   }>
   compatibilityIssues?: readonly ModuleCompatibilityIssue[]
+  /**
+   * A newer version the catalog has that this host cannot run yet, held back
+   * by the Host API alone. Release order makes it an update that comes with
+   * the core update: a core always converges before any module needing its
+   * Host API is tagged, so the latest core in the same feed runs it.
+   */
+  awaitingCoreUpdate?: Readonly<{
+    version: string
+    releaseNotes?: ModuleCatalogEntry['releaseNotes']
+  }>
 }
 
 export type InstalledModuleState = {

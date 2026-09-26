@@ -1,5 +1,4 @@
 import { SquareTerminal } from 'lucide-react'
-import { Notice, TFile } from 'obsidian'
 import {
   type ReactNode,
   useCallback,
@@ -12,6 +11,7 @@ import {
 
 import { useApp } from '../../contexts/app-context'
 import { useLanguage } from '../../contexts/language-context'
+import { usePlugin } from '../../contexts/plugin-context'
 import type { AgentConversationRunSummary } from '../../core/agent/service'
 import {
   type ChatRuntimeActions,
@@ -19,9 +19,9 @@ import {
   type CliRuntimeModel,
   type CliRuntimeRunState,
   type CliRuntimeScope,
-  type CliSessionRef,
   type CliTurnConfiguration,
   RUNTIME_CAPABILITIES,
+  getCliSessionConversationId,
 } from '../../core/cli-runtime'
 import type {
   ChatMessage,
@@ -48,6 +48,7 @@ import { buildCliSubagentReadModel } from './cliSubagentReadModel'
 import type { ConversationTimelineRendererContract } from './conversation-surface-contract'
 import { ConversationSurface } from './ConversationSurface'
 import { LiveEdgeFollowProvider } from './live-edge-follow-context'
+import { openEditSummaryFile } from './openEditSummaryFile'
 import { useAutoScroll } from './useAutoScroll'
 import { useChatHistoryWindow } from './useChatHistoryWindow'
 import {
@@ -278,9 +279,6 @@ function CliUserMessage({
   )
 }
 
-const getNativeConversationId = (sessionRef: CliSessionRef): string =>
-  `${sessionRef.runtimeId}:${sessionRef.nativeSessionId}`
-
 const getLatestUserMessageId = (
   messages: readonly ChatMessage[],
 ): string | undefined => {
@@ -441,6 +439,7 @@ export function CliChatSurface({
   onDeleteAssistantQuote = noop,
 }: CliChatSurfaceProps) {
   const app = useApp()
+  const plugin = usePlugin()
   const { t } = useLanguage()
   const [focusedUserMessageId, setFocusedUserMessageId] = useState<
     string | null
@@ -613,16 +612,20 @@ export function CliChatSurface({
       }),
     [readModel.groupedChatMessages, runSummary.anchorMessageId],
   )
+  const reviewConversationId = snapshot.sessionRef
+    ? getCliSessionConversationId(snapshot.sessionRef)
+    : null
   const handleOpenEditSummaryFile = useCallback(
-    ({ path }: GroupEditSummary['files'][number]) => {
-      const targetFile = app.vault.getAbstractFileByPath(path)
-      if (!(targetFile instanceof TFile)) {
-        new Notice(t('chat.editSummary.fileMissing', '文件不存在或已被移动。'))
-        return
-      }
-      void app.workspace.getLeaf(false).openFile(targetFile)
-    },
-    [app.vault, app.workspace, t],
+    (file: GroupEditSummary['files'][number]) =>
+      void openEditSummaryFile({
+        app,
+        openApplyReview: (state) => plugin.openApplyReview(state),
+        t,
+        conversationId: reviewConversationId,
+        isRunActive: isConversationBusy,
+        file,
+      }),
+    [app, isConversationBusy, plugin, reviewConversationId, t],
   )
 
   const chatMessagesRef = useRef<HTMLDivElement>(null)
@@ -758,7 +761,7 @@ export function CliChatSurface({
             timelineItem.messageIds,
           )
           return {
-            conversationId: getNativeConversationId(snapshot.sessionRef),
+            conversationId: getCliSessionConversationId(snapshot.sessionRef),
             conversationRunSummary:
               timelineItem.groupId === runSummaryAssistantGroupId
                 ? runSummary

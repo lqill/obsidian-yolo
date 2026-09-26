@@ -1,11 +1,11 @@
 import type { App, TFile } from 'obsidian'
 
 import {
-  YoloSettingsLike,
-  batchLookupImageCache,
-  batchWriteImageCache,
+  type LocalCacheApp,
   buildImageCacheKey,
-} from '../../database/json/chat/imageCacheStore'
+  lookupImageDataUrls,
+  writeImageDataUrls,
+} from '../../database/local-cache/localCacheStore'
 import { MentionableImage } from '../../types/mentionable'
 import { arrayBufferToBase64 } from '../base64'
 
@@ -32,6 +32,19 @@ const EXTENSION_TO_MIME: Record<string, string> = {
   gif: 'image/gif',
   webp: 'image/webp',
 }
+
+export type ImageCompressionOptions = {
+  enabled: boolean
+  quality: number // 1-100
+}
+
+/**
+ * Largest image file a read tool (`fs_read`, `read_file`) will decode. The
+ * file is read whole and drawn onto a canvas to compress, so the bound is on
+ * memory, not on what a provider accepts — compression brings anything under
+ * it down to a sendable size.
+ */
+export const IMAGE_READ_MAX_BYTES = 20 * 1024 * 1024
 
 export function isImageTFile(file: TFile): boolean {
   const ext = file.extension?.toLowerCase() ?? ''
@@ -67,47 +80,121 @@ export async function fileToMentionableImage(
 }
 
 /**
+ * Encode image bytes as a base64 data URL, compressing with the Canvas API
+ * when `compression` is enabled below quality 100.
+ * GIF is never compressed (may be animated).
+ * PNG is converted to JPEG (transparency becomes white).
+ * JPEG/WebP are re-encoded at the given quality.
+ */
+export async function encodeImageDataUrl(
+  buffer: ArrayBuffer,
+  ext: string,
+  compression?: ImageCompressionOptions,
+): Promise<string> {
+  const normalizedExt = ext.toLowerCase()
+  const mimeType =
+    getImageMimeTypeFromExtension(normalizedExt) ?? 'application/octet-stream'
+  if (
+    !compression?.enabled ||
+    compression.quality >= 100 ||
+    normalizedExt === 'gif'
+  ) {
+    return `data:${mimeType};base64,${arrayBufferToBase64(buffer)}`
+  }
+
+  const scale = compression.quality / 100
+  const blob = new Blob([buffer], { type: mimeType })
+  const bitmap = await createImageBitmap(blob)
+
+  // Scale dimensions and quality by the same factor
+  const targetWidth = Math.round(bitmap.width * scale)
+  const targetHeight = Math.round(bitmap.height * scale)
+
+  const canvas = new OffscreenCanvas(targetWidth, targetHeight)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    bitmap.close()
+    return `data:${mimeType};base64,${arrayBufferToBase64(buffer)}`
+  }
+
+  // For PNG → JPEG conversion, fill white background first
+  if (normalizedExt === 'png') {
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, targetWidth, targetHeight)
+  }
+
+  ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight)
+  bitmap.close()
+
+  const outputMime = normalizedExt === 'webp' ? 'image/webp' : 'image/jpeg'
+  const outputBlob = await canvas.convertToBlob({
+    type: outputMime,
+    quality: scale,
+  })
+  const base64 = arrayBufferToBase64(await outputBlob.arrayBuffer())
+  return `data:${outputMime};base64,${base64}`
+}
+
+/**
  * Read a vault image TFile and return a base64 data URL suitable for the
  * `image_url` content part used by OpenAI / Anthropic vision payloads.
  *
- * Pass `options.cache` to enable the persistent image cache.
- * When cache is disabled (default), behaviour is unchanged.
+ * Pass `options.cache` to enable the local image cache, and
+ * `options.compression` to compress on a cache miss. Both default to off.
  */
 export async function tFileToImageDataUrl(
   app: App,
   file: TFile,
-  options?: { cache?: { enabled: true; settings?: YoloSettingsLike | null } },
+  options?: {
+    cache?: boolean
+    compression?: ImageCompressionOptions
+  },
 ): Promise<string> {
   const ext = file.extension?.toLowerCase() ?? ''
-  const mimeType =
-    getImageMimeTypeFromExtension(ext) ?? 'application/octet-stream'
 
-  if (options?.cache?.enabled) {
-    const key = buildImageCacheKey(file.path, file.stat.mtime, file.stat.size)
-    const hits = await batchLookupImageCache(app, [key], options.cache.settings)
-    const cached = hits.get(key)
-    if (cached !== undefined) {
-      return cached
-    }
-
-    const buffer = await app.vault.readBinary(file)
-    const base64 = arrayBufferToBase64(buffer)
-    const dataUrl = `data:${mimeType};base64,${base64}`
-
-    void batchWriteImageCache(
-      app,
-      [{ hash: key, dataUrl, sourcePath: file.path }],
-      options.cache.settings,
-    ).catch((error) => {
-      console.warn('[YOLO] Failed to write image cache', file.path, error)
+  if (options?.cache) {
+    return cachedImageDataUrl(app, {
+      key: buildImageCacheKey(file.path, file.stat.mtime, file.stat.size),
+      sourcePath: file.path,
+      ext,
+      readBytes: () => app.vault.readBinary(file),
+      compression: options.compression,
     })
-
-    return dataUrl
   }
 
   const buffer = await app.vault.readBinary(file)
-  const base64 = arrayBufferToBase64(buffer)
-  return `data:${mimeType};base64,${base64}`
+  return encodeImageDataUrl(buffer, ext, options?.compression)
+}
+
+/**
+ * The encoded data URL for an image, served from the local cache when present
+ * and encoded then cached otherwise. The source only supplies its identity and
+ * a way to read its bytes, so a vault file and a file read straight from disk
+ * share one cache and one compression path.
+ */
+export async function cachedImageDataUrl(
+  app: LocalCacheApp,
+  source: {
+    key: string
+    sourcePath: string
+    ext: string
+    readBytes: () => Promise<ArrayBuffer>
+    compression?: ImageCompressionOptions
+  },
+): Promise<string> {
+  const cached = (await lookupImageDataUrls(app, [source.key])).get(source.key)
+  if (cached !== undefined) {
+    return cached
+  }
+  const dataUrl = await encodeImageDataUrl(
+    await source.readBytes(),
+    source.ext,
+    source.compression,
+  )
+  await writeImageDataUrls(app, [
+    { key: source.key, dataUrl, sourcePath: source.sourcePath },
+  ])
+  return dataUrl
 }
 
 function fileToBase64(file: File): Promise<string> {

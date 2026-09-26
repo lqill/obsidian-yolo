@@ -904,8 +904,7 @@ describe('RequestContextBuilder compileUserMessagePrompt', () => {
     expect(textContent).toContain('```notes/empty.md\n\n```')
   })
 
-  // D3 of docs/plans/09-03-whiteboard-agent-tools/master.md: the @mention
-  // `full` mode dispatches a claimed extension to the module's renderer
+  // The @mention `full` mode dispatches a claimed extension to the module's renderer
   // instead of inlining raw bytes — same dispatch fs_read uses, threaded in
   // here as `resolveModuleFileTextRenderer`.
   it('renders a claimed extension through the module renderer in full mode instead of raw content', async () => {
@@ -1113,7 +1112,7 @@ describe('RequestContextBuilder generateRequestMessages', () => {
     })
   })
 
-  it('hides pruned tool results from future request context', async () => {
+  it('replaces pruned tool results with a placeholder and keeps the call', async () => {
     const app = {
       vault: {
         adapter: {
@@ -1228,11 +1227,11 @@ describe('RequestContextBuilder generateRequestMessages', () => {
     })
 
     expect(
-      requestMessages.some(
+      requestMessages.find(
         (message) =>
           message.role === 'tool' && message.tool_call.id === 'edit-1',
-      ),
-    ).toBe(false)
+      )?.content,
+    ).toBe('[Result pruned from context]')
     expect(
       requestMessages.some(
         (message) =>
@@ -1241,7 +1240,7 @@ describe('RequestContextBuilder generateRequestMessages', () => {
             (toolCall) => toolCall.id === 'edit-1',
           ),
       ),
-    ).toBe(false)
+    ).toBe(true)
     expect(
       requestMessages.some(
         (message) =>
@@ -1924,7 +1923,7 @@ describe('RequestContextBuilder project instructions injection', () => {
   })
 })
 
-describe('RequestContextBuilder generateRequestMessages currentFile merging', () => {
+describe('RequestContextBuilder generateRequestMessages stamped context', () => {
   const baseSettings = {
     systemPrompt: '',
     currentAssistantId: undefined,
@@ -1953,10 +1952,19 @@ describe('RequestContextBuilder generateRequestMessages currentFile merging', ()
     }
   }
 
-  it('merges currentFileMessage into last user message content parts when last history message is user', async () => {
-    const app = makeApp()
-    const builder = new RequestContextBuilder(app as never, baseSettings)
-    const currentFile = createMockFile('notes/focus.md')
+  const stampedContext = [
+    { type: 'text' as const, text: '# Current Context\nFile: notes/focus.md' },
+  ]
+  const textOf = (content: unknown): string =>
+    Array.isArray(content)
+      ? (content as Array<{ type: string; text?: string }>)
+          .filter((p) => p.type === 'text')
+          .map((p) => p.text)
+          .join('')
+      : String(content)
+
+  it('sends the context stamped on a user message after its content', async () => {
+    const builder = new RequestContextBuilder(makeApp() as never, baseSettings)
 
     const requestMessages = await builder.generateRequestMessages({
       systemPromptSnapshotMode: 'create',
@@ -1967,6 +1975,7 @@ describe('RequestContextBuilder generateRequestMessages currentFile merging', ()
           content: null,
           promptContent: 'hello',
           mentionables: [],
+          injectedContext: stampedContext,
         },
       ],
       model: {
@@ -1975,31 +1984,21 @@ describe('RequestContextBuilder generateRequestMessages currentFile merging', ()
         name: 'gpt-test',
       } as never,
       conversationId: 'conv-1',
-      contextualInjections: [
-        { type: 'current-file-pointer', file: currentFile },
-      ],
     })
 
-    // Should have system + 1 user (not system + 2 user)
     const userMessages = requestMessages.filter((m) => m.role === 'user')
     expect(userMessages).toHaveLength(1)
-
-    // The single user message content must be an array (merged ContentPart[])
-    const lastUser = userMessages[0]
-    expect(Array.isArray(lastUser.content)).toBe(true)
-    const parts = lastUser.content as Array<{ type: string; text?: string }>
-    const textParts = parts.filter((p) => p.type === 'text')
-    // Original promptContent text
-    expect(textParts.some((p) => p.text?.includes('hello'))).toBe(true)
-    // Current-file pointer text
-    expect(textParts.some((p) => p.text?.includes('notes/focus.md'))).toBe(true)
+    expect(userMessages[0].content).toEqual([
+      { type: 'text', text: 'hello' },
+      ...stampedContext,
+    ])
   })
 
-  it('appends currentFileMessage as independent user message when last history message is not user (agent loop continuation)', async () => {
-    const app = makeApp()
+  // Mid tool loop the request must end with the tool result, not a context
+  // message that the next request would drop.
+  it('keeps stamped context on its own message during a tool loop', async () => {
     const emptyArgs = createCompleteToolCallArguments({ value: {} })
-    const builder = new RequestContextBuilder(app as never, baseSettings)
-    const currentFile = createMockFile('notes/focus.md')
+    const builder = new RequestContextBuilder(makeApp() as never, baseSettings)
 
     const requestMessages = await builder.generateRequestMessages({
       systemPromptSnapshotMode: 'create',
@@ -2010,6 +2009,7 @@ describe('RequestContextBuilder generateRequestMessages currentFile merging', ()
           content: null,
           promptContent: 'do something',
           mentionables: [],
+          injectedContext: stampedContext,
         },
         {
           role: 'assistant',
@@ -2048,29 +2048,149 @@ describe('RequestContextBuilder generateRequestMessages currentFile merging', ()
         name: 'gpt-test',
       } as never,
       conversationId: 'conv-2',
-      contextualInjections: [
-        { type: 'current-file-pointer', file: currentFile },
-      ],
     })
 
-    // Last message should be an independent user message containing the current-file pointer
-    const lastMsg = requestMessages.at(-1)
-    expect(lastMsg?.role).toBe('user')
-    const content = lastMsg?.content
-    const text =
-      typeof content === 'string'
-        ? content
-        : Array.isArray(content)
-          ? (content as Array<{ type: string; text?: string }>)
-              .filter((p) => p.type === 'text')
-              .map((p) => p.text)
-              .join('')
-          : ''
-    expect(text).toContain('notes/focus.md')
-
-    // The original user message should still exist separately
+    expect(requestMessages.at(-1)?.role).toBe('tool')
     const userMessages = requestMessages.filter((m) => m.role === 'user')
-    expect(userMessages.length).toBeGreaterThanOrEqual(2)
+    expect(userMessages).toHaveLength(1)
+    expect(textOf(userMessages[0].content)).toContain('notes/focus.md')
+  })
+
+  it('sends a notice kept on a tool message right after its results', async () => {
+    const emptyArgs = createCompleteToolCallArguments({ value: {} })
+    const builder = new RequestContextBuilder(makeApp() as never, baseSettings)
+
+    const requestMessages = await builder.generateRequestMessages({
+      systemPromptSnapshotMode: 'create',
+      messages: [
+        {
+          role: 'user',
+          id: 'user-1',
+          content: null,
+          promptContent: 'do something',
+          mentionables: [],
+        },
+        {
+          role: 'assistant',
+          id: 'assistant-1',
+          content: '',
+          toolCallRequests: [
+            {
+              id: 'tool-call-1',
+              name: 'yolo_local__fs_read',
+              arguments: emptyArgs,
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          id: 'tool-1',
+          notice: '<auto_context_compaction_notice>',
+          toolCalls: [
+            {
+              request: {
+                id: 'tool-call-1',
+                name: 'yolo_local__fs_read',
+                arguments: emptyArgs,
+              },
+              response: {
+                status: ToolCallResponseStatus.Success,
+                data: { type: 'text', text: 'file content' },
+              },
+            },
+          ],
+        },
+      ],
+      hasTools: true,
+      model: {
+        provider: 'openai',
+        model: 'gpt-test',
+        name: 'gpt-test',
+      } as never,
+      conversationId: 'conv-3',
+    })
+
+    expect(requestMessages.slice(-2).map((m) => m.role)).toEqual([
+      'tool',
+      'user',
+    ])
+    expect(requestMessages.at(-1)?.content).toEqual([
+      { type: 'text', text: '<auto_context_compaction_notice>' },
+    ])
+  })
+})
+
+describe('RequestContextBuilder native reply replay', () => {
+  const nativeParts = { gemini: { parts: [{ text: 'native' }] } }
+  const build = (requestModelId: string) =>
+    new RequestContextBuilder(
+      {
+        metadataCache: { getFileCache: jest.fn(() => null) },
+        vault: {
+          adapter: {
+            exists: jest.fn().mockResolvedValue(false),
+            mkdir: jest.fn().mockResolvedValue(undefined),
+            read: jest.fn().mockResolvedValue(''),
+            write: jest.fn().mockResolvedValue(undefined),
+          },
+          cachedRead: jest.fn(async () => ''),
+          getFileByPath: jest.fn(() => null),
+          getFolderByPath: jest.fn(() => null),
+        },
+      } as never,
+      {
+        systemPrompt: '',
+        assistants: [],
+        chatOptions: {},
+        skills: {},
+      } as unknown as YoloSettings,
+    ).generateRequestMessages({
+      systemPromptSnapshotMode: 'create',
+      messages: [
+        {
+          role: 'user',
+          id: 'user-1',
+          content: null,
+          promptContent: 'hi',
+          mentionables: [],
+        },
+        {
+          role: 'assistant',
+          id: 'assistant-1',
+          content: 'hello',
+          metadata: {
+            model: { id: 'gemini-a' } as never,
+            providerMetadata: nativeParts as never,
+          },
+        },
+        {
+          role: 'user',
+          id: 'user-2',
+          content: null,
+          promptContent: 'again',
+          mentionables: [],
+        },
+      ],
+      model: { id: requestModelId, model: requestModelId } as never,
+      conversationId: 'conv-replay',
+    })
+
+  const assistantOf = (messages: RequestMessage[]) =>
+    messages.find((m) => m.role === 'assistant') as Extract<
+      RequestMessage,
+      { role: 'assistant' }
+    >
+
+  it('hands the native reply back to the model that wrote it', async () => {
+    expect(assistantOf(await build('gemini-a')).providerMetadata).toEqual(
+      nativeParts,
+    )
+  })
+
+  it('rebuilds the reply for a different model', async () => {
+    const assistant = assistantOf(await build('gemini-b'))
+    expect(assistant.providerMetadata).toBeUndefined()
+    expect(assistant.content).toBe('hello')
   })
 })
 
@@ -2394,6 +2514,33 @@ describe('parseToolMessage document hoisting', () => {
     )
   })
 
+  it('tells the model about a history image whose cache:// ref did not resolve', async () => {
+    const unresolvedPart: ContentPart = {
+      type: 'image_url',
+      image_url: { url: 'cache://abc123', cacheKey: 'abc123' },
+    }
+
+    const messages = await buildMessagesWithToolResponse(
+      'yolo_local__fs_read',
+      [unresolvedPart],
+    )
+
+    const sentParts = messages
+      .filter((m) => m.role === 'user' && Array.isArray(m.content))
+      .flatMap((m) => m.content as ContentPart[])
+    expect(
+      sentParts.some(
+        (p) => p.type === 'image_url' && p.image_url.url.startsWith('cache://'),
+      ),
+    ).toBe(false)
+    expect(sentParts).toContainEqual({
+      type: 'text',
+      text: expect.stringContaining('Image unavailable'),
+    })
+    // The conversation keeps the ref for devices that can still resolve it.
+    expect(unresolvedPart.image_url.url).toBe('cache://abc123')
+  })
+
   it('mixed image + document → header is "Attachments from tool call"', async () => {
     const imagePart: ContentPart = {
       type: 'image_url',
@@ -2488,7 +2635,7 @@ describe('RequestContextBuilder system prompt freezing', () => {
     })
 
     const systemContent = getSystemContent(messages)
-    expect(systemContent).toContain('You have access to tools')
+    expect(systemContent).toContain('shows the user every tool call')
     expect(systemContent).toContain(
       'Before calling file-reading tools, use relevant content already present in the conversation, especially <user_selected_content> and prior tool results.',
     )
@@ -3216,7 +3363,7 @@ describe('RequestContextBuilder ChatContextPolicy (module chat modes)', () => {
   })
 })
 
-describe('RequestContextBuilder module chat mode skill scope (D6)', () => {
+describe('RequestContextBuilder module chat mode skill scope', () => {
   function makeApp() {
     return {
       metadataCache: { getFileCache: jest.fn(() => null) },

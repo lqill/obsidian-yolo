@@ -1,11 +1,11 @@
 // Camera state (pan/zoom) and its glide animation for the `.yoloboard`
-// canvas (docs/plans/08-25-yolo-whiteboard/p1-design.md §3). Split out of
-// `../canvas.ts` structurally (no behavior change): that file remains the
-// single state owner (board data, selection, interaction) and stays the one
-// place gesture dispatch (onPointerDown/Move/Up) lives; this class owns only
-// the camera's own state (`view`, the in-flight glide) and the DOM writes
-// that follow from it, reached through the narrow
-// `CameraControllerCallbacks` it is constructed with.
+// canvas. Split out of `../canvas.ts` structurally (no behavior change):
+// that file remains the single state owner (board data, selection,
+// interaction) and stays the one place gesture dispatch
+// (onPointerDown/Move/Up) lives; this class owns only the camera's own state
+// (`view`, the in-flight glide) and the DOM writes that follow from it,
+// reached through the narrow `CameraControllerCallbacks` it is constructed
+// with.
 //
 // `WhiteboardCanvas` is the only importer; this module must never import it
 // back (single-direction dependency between the canvas and its
@@ -15,6 +15,7 @@ import {
   approachScale,
   approachView,
   cameraFromView,
+  clampScale,
   dragPan,
   fitViewToBounds,
   gridStepForScale,
@@ -43,10 +44,19 @@ import {
   GRID_WORLD_STEP_PX,
   INTERACTING_TIMEOUT_MS,
   MIN_SCALE_FIT_MARGIN,
+  PAN_FLING_TAU_MS,
   SCALE_BOUNDS,
   WHEEL_DELTA_PER_ZOOM_DOUBLING,
   WHEEL_PAN_GLIDE_TAU_MS,
 } from '../constants'
+
+/** `WheelEvent.DOM_DELTA_LINE` / `DOM_DELTA_PAGE`, spelled out: the
+ * constructor they hang from belongs to one window, and this view can live in
+ * a popout. */
+const WHEEL_DELTA_LINE = 1
+const WHEEL_DELTA_PAGE = 2
+/** What one wheel "line" is worth in pixels — Chromium's own conversion. */
+const WHEEL_LINE_PX = 40
 
 /**
  * The narrow surface `WhiteboardCanvas` injects so the camera can trigger
@@ -67,9 +77,6 @@ export type CameraControllerCallbacks = Readonly<{
     deltaX: number,
     deltaY: number,
   ) => boolean
-  /** The screen-space chrome is anchored to world positions, so it has to be
-   * re-projected whenever the camera moves. */
-  positionToolbar: () => void
   setInteracting: (interacting: boolean) => void
   getSelectedNodes: () => readonly BoardNode[]
   /** Every node on the board — what the zoom-out floor is derived from (see
@@ -122,6 +129,10 @@ export class CameraController {
     | Readonly<{ kind: 'view'; target: CanvasView; tauMs: number }>
     | null = null
   private lastGlideTime: number | null = null
+  /** A two-finger pinch is in progress: like a glide, it changes the scale
+   * every frame, and like a glide it holds the counter-scale until it ends
+   * (see `applyZoomScale`). */
+  private pinching = false
 
   private interactingTimer: number | null = null
   private settleTimer: number | null = null
@@ -145,7 +156,7 @@ export class CameraController {
    * position has no other way to learn it has to re-project itself. The
    * toolbar is re-positioned directly (`CameraControllerCallbacks`) because
    * the canvas always has one; this is for the things that come and go — a
-   * host Quick Ask panel anchored to an open card editor (master.md §6.3) —
+   * host Quick Ask panel anchored to an open card editor —
    * which subscribe while they exist and unsubscribe when they don't.
    */
   private readonly viewChangeListeners = new Set<() => void>()
@@ -205,12 +216,30 @@ export class CameraController {
 
   readonly onWheel = (e: WheelEvent): void => {
     if (this.callbacks.isParseFailed()) return
+    // Every delta below is tuned in pixels, which is what a trackpad and most
+    // wheels report. A wheel that reports lines (Firefox-style, and some
+    // Windows mice) or pages would otherwise move the board a fortieth of what
+    // the same notch moves any other scroller.
+    const unit =
+      e.deltaMode === WHEEL_DELTA_LINE
+        ? WHEEL_LINE_PX
+        : e.deltaMode === WHEEL_DELTA_PAGE
+          ? this.viewportEl.clientHeight
+          : 1
+    const rawX = e.deltaX * unit
+    const rawY = e.deltaY * unit
+    // Shift turns a vertical wheel sideways. macOS does that before the event
+    // is raised (it arrives as deltaX); Windows leaves it to whoever scrolls,
+    // and scrolling here is ours.
+    const sideways = e.shiftKey && rawX === 0
+    const deltaX = sideways ? rawY : rawX
+    const deltaY = sideways ? 0 : rawY
     // Zoom stays a canvas gesture wherever the pointer is, including over an
     // open editor — it is about the board, not about what is under the
     // cursor. (Obsidian Canvas zooms over a focused node too.)
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
-      this.zoomBy(e.deltaY, this.viewportPointFromEvent(e))
+      this.zoomBy(rawY, this.viewportPointFromEvent(e))
       return
     }
     // Plain wheel inside the card being edited belongs to that card: its text
@@ -231,16 +260,16 @@ export class CameraController {
     // to the board.
     //
     // Handled here rather than by letting the event through: a card's content
-    // is unhittable by design (style.css's content mask, D7), and lifting that
+    // is unhittable by design (style.css's content mask), and lifting that
     // to get the browser's scrolling would also hand back every link, checkbox
     // and callout fold the mask exists to cover. This scrolls the element
     // directly and leaves the mask absolute.
-    if (this.callbacks.scrollFocusedCardBy(e.target, e.deltaX, e.deltaY)) {
+    if (this.callbacks.scrollFocusedCardBy(e.target, deltaX, deltaY)) {
       e.preventDefault()
       return
     }
     e.preventDefault()
-    this.panByWheel(e.deltaX, e.deltaY)
+    this.panByWheel(deltaX, deltaY)
   }
 
   /**
@@ -420,11 +449,7 @@ export class CameraController {
     this.applyGrid()
     // Not mid-glide: see `applyZoomScale`. The glide's last frame writes it
     // through `finishGlideFrame`.
-    if (!this.cameraGlide) this.applyZoomScale()
-    // The screen-space chrome is anchored to world positions, so it has to be
-    // re-projected whenever the camera moves. Both are no-ops when nothing is
-    // selected and nothing is being typed, which is the common case.
-    this.callbacks.positionToolbar()
+    if (!this.cameraGlide && !this.pinching) this.applyZoomScale()
     for (const listener of this.viewChangeListeners) listener()
   }
 
@@ -586,8 +611,8 @@ export class CameraController {
   // -----------------------------------------------------------------------
   // Pan gesture (middle-drag anywhere, or Alt+left-drag from empty canvas).
   // The gesture's own state machine (which `Interaction` is active, whether a
-  // press has crossed the drag threshold) stays in canvas.ts alongside the
-  // other pointer gestures it dispatches; only the camera math and the DOM
+  // press has crossed the drag threshold) stays in ./interactionController.ts
+  // alongside the other pointer gestures it dispatches; only the camera math and the DOM
   // writes that follow from it live here.
   // -----------------------------------------------------------------------
 
@@ -632,6 +657,83 @@ export class CameraController {
   }
 
   finishPan(): void {
+    this.commitCameraNow()
+  }
+
+  /**
+   * Lets the board coast after a pointer pan, at the velocity (screen px/ms)
+   * the hand released it at.
+   *
+   * A view glide like any other: exponential decay of velocity is exponential
+   * approach of position, so aiming the existing glide at release point plus
+   * velocity × tau, with tau as its time constant, *is* the fling — and it is
+   * interrupted, re-aimed and persisted by exactly the rules every other glide
+   * already follows (a press cancels it in `beginPan`, a wheel notch re-aims
+   * it, the settle persists its target).
+   */
+  fling(velocityX: number, velocityY: number): void {
+    if (this.prefersReducedMotion()) return
+    const from = this.viewValue
+    this.cameraGlide = {
+      kind: 'view',
+      target: {
+        tx: from.tx + velocityX * PAN_FLING_TAU_MS,
+        ty: from.ty + velocityY * PAN_FLING_TAU_MS,
+        scale: from.scale,
+      },
+      tauMs: PAN_FLING_TAU_MS,
+    }
+    this.lastGlideTime = null
+    this.commitCameraNow()
+  }
+
+  /**
+   * Moves the board by a screen distance, now — what a drag held against the
+   * viewport's edge does every frame. Direct, like a pointer pan: the gesture
+   * reads the camera it has just moved to on the same frame, so a glide still
+   * easing underneath would put the card and the pointer out of step.
+   */
+  panBy(dx: number, dy: number): void {
+    this.cameraGlide = null
+    this.lastGlideTime = null
+    const { tx, ty, scale } = this.viewValue
+    this.viewValue = { tx: tx + dx, ty: ty + dy, scale }
+    this.applyTransform()
+    this.markInteracting()
+    this.scheduleCameraSettle()
+  }
+
+  /**
+   * One frame of a two-finger pinch: the world point that was under the
+   * fingers' midpoint when they landed stays under the midpoint wherever it
+   * has moved to, at the scale the change in their spread asks for. Pan and
+   * zoom in one law, computed from the gesture's start every frame like a
+   * pointer pan, so it cannot drift. Points are viewport-local.
+   */
+  updatePinch(
+    origin: CanvasView,
+    startMid: ScreenPoint,
+    startDistance: number,
+    mid: ScreenPoint,
+    distance: number,
+  ): void {
+    if (startDistance <= 0) return
+    this.pinching = true
+    const scale = clampScale(
+      origin.scale * (distance / startDistance),
+      this.zoomScaleBounds(),
+    )
+    this.viewValue = viewAnchoredAt(mid, screenToWorld(origin, startMid), scale)
+    this.applyTransform()
+    this.markInteracting()
+    this.scheduleCameraSettle()
+  }
+
+  /** A pinch lifted: the counter-scaled chrome catches up with the zoom it
+   * ended at (it is never rewritten mid-gesture), and the camera is kept. */
+  finishPinch(): void {
+    this.pinching = false
+    this.applyZoomScale()
     this.commitCameraNow()
   }
 
@@ -713,6 +815,72 @@ export class CameraController {
     // Persisted from the target either way, so a board closed mid-glide
     // reopens where the move was going rather than wherever it had got to.
     this.commitCameraNow()
+  }
+
+  /**
+   * Brings one node to the middle of the viewport at `minScale`-or-closer:
+   * 1:1 unless the node is bigger than the viewport, in which case whatever
+   * fits it, but never further out than `minScale`. What "go and open this"
+   * from far away needs — close enough to read, not a fit that blows a small
+   * card up to fill the screen.
+   */
+  focusNode(node: BoardNode, minScale: number): void {
+    const fit = this.fitViewFor([node])
+    const scale = clampScale(
+      Math.max(minScale, Math.min(1, fit?.scale ?? 1)),
+      SCALE_BOUNDS,
+    )
+    const rect = this.viewportEl.getBoundingClientRect()
+    this.moveCameraTo(
+      viewAnchoredAt(
+        { x: rect.width / 2, y: rect.height / 2 },
+        { x: node.x + node.w / 2, y: node.y + node.h / 2 },
+        scale,
+      ),
+    )
+  }
+
+  /**
+   * The controls' zoom in / zoom out: one step of √2 about the middle of the
+   * viewport, Obsidian Canvas's step (measured: its `zoom` is log2 of the
+   * scale and each button moves it by 0.5). Steps taken while a previous one
+   * is still gliding build on where that one is going, so a quick double
+   * click is two steps.
+   */
+  zoomStep(direction: 1 | -1): void {
+    const glide = this.cameraGlide
+    const scale =
+      glide?.kind === 'view'
+        ? glide.target.scale
+        : glide?.kind === 'anchored'
+          ? glide.targetScale
+          : this.viewValue.scale
+    this.zoomAboutCentre(scale * Math.SQRT2 ** direction)
+  }
+
+  /**
+   * Back to 1:1 without moving: the middle of the viewport stays the middle.
+   * Obsidian Canvas's "reset zoom" control, and deliberately not
+   * `resetCamera` (Shift+0, "back to the origin"), which also goes home.
+   */
+  resetZoom(): void {
+    this.zoomAboutCentre(1)
+  }
+
+  private zoomAboutCentre(scale: number): void {
+    const glide = this.cameraGlide
+    // The view a glide is heading for, when one is running: its centre is
+    // the centre the user is about to be looking at.
+    const from = glide?.kind === 'view' ? glide.target : this.viewValue
+    const rect = this.viewportEl.getBoundingClientRect()
+    const centre = { x: rect.width / 2, y: rect.height / 2 }
+    this.moveCameraTo(
+      viewAnchoredAt(
+        centre,
+        screenToWorld(from, centre),
+        clampScale(scale, this.zoomScaleBounds()),
+      ),
+    )
   }
 
   /**

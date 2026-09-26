@@ -14,6 +14,8 @@ export type EmbeddingWorkerSpec = Readonly<{
   dtype?: 'q8' | 'fp16'
 }>
 
+export type EmbeddingWorkerDevice = 'wasm' | 'webgpu'
+
 export type EmbeddingWorkerInitRequest = Readonly<{
   type: 'init'
   requestId: number
@@ -23,15 +25,11 @@ export type EmbeddingWorkerInitRequest = Readonly<{
   modelFiles: Readonly<Record<string, ArrayBuffer>>
   spec: EmbeddingWorkerSpec
   /**
-   * Only `'wasm'` is supported in this release — the JSEP/WebGPU wasm
-   * variant is not shipped as a declared asset (see `WASM_ASSET_NAMES`
-   * below), so there is nothing for a `'webgpu'` request to load. `entry.ts`
-   * rejects a `'webgpu'` `createSession` request before a worker is ever
-   * spun up. `dtype` (see `EmbeddingDtype` below) is independent of device —
-   * WebGPU support is what's planned to return in a future release, at which
-   * point this widens back to `'wasm' | 'webgpu'`.
+   * Both devices load the same wasm asset pair (see `WASM_ASSET_NAMES`
+   * below). Which one to use is the host's decision; the worker never
+   * silently substitutes one for the other.
    */
-  device: 'wasm'
+  device: EmbeddingWorkerDevice
   numThreads: number
 }>
 
@@ -72,7 +70,7 @@ export type EmbeddingWorkerErrorInfo = Readonly<{
   message: string
   stack?: string
   stage: EmbeddingWorkerErrorStage
-  device?: 'wasm'
+  device?: EmbeddingWorkerDevice
 }>
 
 export type EmbeddingWorkerResponse =
@@ -80,7 +78,7 @@ export type EmbeddingWorkerResponse =
       type: 'init-result'
       requestId: number
       ok: true
-      device: 'wasm'
+      device: EmbeddingWorkerDevice
     }>
   | Readonly<{
       type: 'init-result'
@@ -111,7 +109,7 @@ export type EmbeddingWorkerResponse =
 
 /**
  * The fixed file set a "standard" Transformers.js text-embedding ONNX export
- * carries (HF repos following the Xenova/onnx-community convention). P2's
+ * carries (HF repos following the Xenova/onnx-community convention). The
  * catalog (`src/core/rag/local-embedding/catalog.ts`) must publish exactly
  * these names in each entry's `files` list for `loadModelFile` to satisfy
  * them. `config.json` / `tokenizer.json` are always required; the ONNX
@@ -139,26 +137,31 @@ export type EmbeddingDtype = 'q8' | 'fp16'
  * transformers.js 按 dtype 请求的 ONNX 权重文件名后缀不同
  * （见 @huggingface/transformers 的 DEFAULT_DTYPE_SUFFIX_MAPPING）。
  * catalog 条目必须按自己声明的 dtype 在 files 里带上对应文件。
+ *
+ * 这里只列主权重文件。外部数据文件（如 `model_fp16.onnx_data`）是否需要
+ * 由模型 config.json 的 `transformers.js_config.use_external_data_format`
+ * 决定，按模型而非按 dtype，由对应 catalog 条目自行声明。
  */
 export const DTYPE_WEIGHT_FILES: Readonly<
   Record<EmbeddingDtype, readonly string[]>
 > = {
   q8: ['onnx/model_quantized.onnx'],
-  fp16: ['onnx/model_fp16.onnx', 'onnx/model_fp16.onnx_data'],
+  fp16: ['onnx/model_fp16.onnx'],
 }
 
 /**
  * Matches `component.config.json`'s declared `assets` names. onnxruntime-web
- * dynamically `import()`s the `.mjs` loader alongside its `.wasm` binary
- * (see `ju()`/`instantiateWasm` in `ort.min.mjs`) — both must be present for
- * the plain-wasm backend to initialize.
+ * dynamically `import()`s the `.mjs` loader alongside its `.wasm` binary —
+ * both must be present for the backend to initialize.
  *
- * The JSEP/WebGPU variant (`ort-wasm-simd-threaded.jsep.{wasm,mjs}`, ~21MB)
- * is deliberately not declared here in this release — `device` is `'wasm'`
- * only (see `EmbeddingWorkerInitRequest`), so shipping it would just be
- * unused weight. It returns as a declared asset alongside WebGPU support.
+ * The variant must pair with the ORT JS entry the worker bundle actually
+ * resolves: Transformers.js imports `onnxruntime-web/webgpu`, whose 1.30
+ * build loads the asyncify pair (it serves both the WebGPU EP and plain
+ * wasm). Swapping the wasm without the entry, or vice versa, can still run
+ * and even produce plausible numbers — change all three together: this
+ * list, `component.config.json`, and `installWasmPaths` in `worker.ts`.
  */
 export const WASM_ASSET_NAMES: readonly string[] = [
-  'ort-wasm-simd-threaded.wasm',
-  'ort-wasm-simd-threaded.mjs',
+  'ort-wasm-simd-threaded.asyncify.wasm',
+  'ort-wasm-simd-threaded.asyncify.mjs',
 ]

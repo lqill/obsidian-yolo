@@ -17,8 +17,26 @@ import {
   CLAUDE_ASK_USER_QUESTION_TOOL,
   mapClaudeAskUserQuestionInput,
 } from './askUserQuestion'
+import {
+  applyClaudeFileChangeResult,
+  claudeToolMessageId,
+  isClaudeFileChangeTool,
+} from './fileChange'
 
 export const CLAUDE_BASH_TOOL = 'Bash'
+
+/**
+ * The capability a Claude tool has from its name alone. `AskUserQuestion`'s
+ * `user_question` is not here: it also needs its input to map cleanly.
+ */
+export const getClaudeToolCapability = (
+  toolName: string,
+): 'command_execution' | 'file_change' | undefined =>
+  toolName === CLAUDE_BASH_TOOL
+    ? 'command_execution'
+    : isClaudeFileChangeTool(toolName)
+      ? 'file_change'
+      : undefined
 
 type ContentBlock = Record<string, unknown> & { type?: unknown }
 
@@ -161,9 +179,7 @@ export const toToolCallRequest = (toolUse: ClaudeToolUse): ToolCallRequest => {
   const capability =
     toolUse.name === CLAUDE_ASK_USER_QUESTION_TOOL && presentationArguments
       ? ('user_question' as const)
-      : toolUse.name === CLAUDE_BASH_TOOL
-        ? ('command_execution' as const)
-        : undefined
+      : getClaudeToolCapability(toolUse.name)
   return createCliToolCallRequest({
     id: toolUse.id,
     input: toolUse.input,
@@ -222,38 +238,43 @@ const createToolMessage = ({
   requests,
   results,
   structuredResult,
+  vaultPath,
 }: {
   id: string
   requests: Map<string, ToolCallRequest>
   results: ClaudeToolResult[]
   structuredResult?: unknown
+  vaultPath: string
 }): ChatToolMessage => ({
   role: 'tool',
   id,
-  toolCalls: results.map((result) => ({
-    request:
-      requests.get(result.id) ??
-      ({ id: result.id, name: 'unknown' } satisfies ToolCallRequest),
-    response: result.isError
-      ? {
-          status: ToolCallResponseStatus.Error,
-          error: result.content,
-        }
-      : {
-          status: ToolCallResponseStatus.Success,
-          data: {
-            type: 'text',
-            text: result.content,
-            ...((result.structuredResult ?? structuredResult) !== undefined
-              ? {
-                  metadata: {
-                    cliToolResult: result.structuredResult ?? structuredResult,
-                  },
-                }
-              : {}),
+  toolCalls: results.map((result) =>
+    applyClaudeFileChangeResult(vaultPath, {
+      request:
+        requests.get(result.id) ??
+        ({ id: result.id, name: 'unknown' } satisfies ToolCallRequest),
+      response: result.isError
+        ? {
+            status: ToolCallResponseStatus.Error,
+            error: result.content,
+          }
+        : {
+            status: ToolCallResponseStatus.Success,
+            data: {
+              type: 'text',
+              text: result.content,
+              ...((result.structuredResult ?? structuredResult) !== undefined
+                ? {
+                    metadata: {
+                      cliToolResult:
+                        result.structuredResult ?? structuredResult,
+                    },
+                  }
+                : {}),
+            },
           },
-        },
-  })),
+    }),
+  ),
 })
 
 const updateHydratedTaskNotification = (
@@ -363,6 +384,7 @@ const readClaudeCompactionBoundary = (
 
 export const hydrateClaudeSessionTranscript = (
   messages: SessionMessage[],
+  vaultPath: string,
 ): ClaudeSessionTranscript => {
   const hydrated: ChatMessage[] = []
   const compactionBoundaries: CliCompactionBoundary[] = []
@@ -417,6 +439,7 @@ export const hydrateClaudeSessionTranscript = (
           id: message.uuid,
           requests,
           results: toolResults,
+          vaultPath,
           ...(structuredResult !== undefined ? { structuredResult } : {}),
         }),
       )
@@ -438,7 +461,7 @@ export const hydrateClaudeSessionTranscript = (
     if (completedTools.has(toolUseId)) continue
     hydrated.push({
       role: 'tool',
-      id: `claude-tool-${toolUseId}`,
+      id: claudeToolMessageId(toolUseId),
       toolCalls: [
         {
           request,
@@ -453,7 +476,8 @@ export const hydrateClaudeSessionTranscript = (
 
 export const hydrateClaudeSessionMessages = (
   messages: SessionMessage[],
-): ChatMessage[] => hydrateClaudeSessionTranscript(messages).messages
+  vaultPath: string,
+): ChatMessage[] => hydrateClaudeSessionTranscript(messages, vaultPath).messages
 
 export const reconcileFinalText = (
   streamed: string,

@@ -1,4 +1,4 @@
-// The vault half of a card's context (master.md §4): read what the pure
+// The vault half of a card's context: read what the pure
 // assembly in `domain/cardContext.ts` needs, then build it.
 //
 // The async boundary sits exactly here. Reading files is the only thing about
@@ -6,7 +6,7 @@
 // thing that awaits — everything downstream of `resolveCardContextNotes` is
 // synchronous and can be re-run against a board that has since changed
 // without touching the vault again. That is what a synchronous consumer
-// (Quick Ask's `getContext`, W4) is meant to hold: the notes, resolved once,
+// (Quick Ask's `getContext`) is meant to hold: the notes, resolved once,
 // and `buildCardContext` called on demand.
 //
 // Two reads per note in the worst case (a clipped preview for the summary,
@@ -20,7 +20,9 @@ import {
   buildCardContext,
   cardBlock,
   cardSourceNotePaths,
+  cardSourcePdfPages,
   cardsInsideGroup,
+  pdfPageTextKey,
 } from '../domain/cardContext'
 import type { Board, BoardNode, NodeId } from '../domain/fileFormat'
 import { fileNodeKind } from '../domain/naming'
@@ -41,11 +43,39 @@ export async function resolveCardContextNotes(
     const body = await readNoteBody(host, notePath)
     if (body !== null) texts.set(notePath, body)
   }
+  for (const { file, page } of cardSourcePdfPages(board, nodeId)) {
+    const text = await readPdfPageText(host, file, page)
+    if (text !== null) texts.set(pdfPageTextKey(file, page), text)
+  }
   return texts
 }
 
+/** A PDF page's text, lines kept as the page breaks them; null when the PDF
+ * cannot be read. A page wired into a card is what the card is about, the
+ * same as a note, so its text is given rather than its name. */
+async function readPdfPageText(
+  host: YoloModuleHostApiV1,
+  file: string,
+  page: number,
+): Promise<string | null> {
+  let handle: YoloModuleHostPdfDocumentV1 | null = null
+  try {
+    handle = await host.pdf.open(file)
+    if (page > handle.pageCount) return null
+    const items = await (await handle.getPage(page)).getTextItems()
+    return items
+      .map((item) => (item.endsLine ? `${item.text}\n` : item.text))
+      .join('')
+      .trim()
+  } catch {
+    return null
+  } finally {
+    handle?.release()
+  }
+}
+
 /**
- * One card in full, as `read_card` returns it (master.md §5): the card's own
+ * One card in full, as `read_card` returns it: the card's own
  * text, a note card's whole note, and a group's members one after another —
  * asking for a group is asking for what is in it.
  *

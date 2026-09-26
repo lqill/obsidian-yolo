@@ -1,0 +1,587 @@
+// A PDF card spread out as pages (fileFormat.ts's `PdfSpread`) — how the one
+// node a file holds becomes the several things the board moves, and back.
+//
+// The file keeps a PDF as one node: its rectangle is the reader card's, and
+// an open spread is a field on it. The board cannot work with that. Every
+// piece of it that reasons about space — virtualization, hit-testing, snapping,
+// group membership, edges, placement, tidying — asks a node for one rectangle,
+// and a spread is a title plus a sheet per page, each placed on its own.
+//
+// So the board is given a different, equivalent shape (`expandBoard`): while a
+// spread is open its node *is its title* — same id, the title's rectangle —
+// and every page is a `pdf-page` node of its own. Whatever the board already
+// does for a card it now does for a sheet, and what it does for the node it
+// does for the document as a whole: a group holds the PDF when it holds the
+// title, an edge to the node reaches the whole PDF, deleting the node deletes
+// all of it. The few rules that are about the document rather than a rectangle
+// — a sheet moves with its title, a sheet alone cannot be deleted — are the
+// helpers at the bottom of this file.
+//
+// `collapseBoard` is the inverse, and is what is written. Both are total and
+// pure, and `collapseBoard(expandBoard(b))` is `b`.
+//
+// Zero dependencies beyond the file format (Module Boundaries, CLAUDE.md).
+
+import type {
+  Board,
+  BoardNode,
+  Edge,
+  FileNode,
+  NodeId,
+  PdfPageNode,
+  PdfSpread,
+  SpreadPage,
+  SpreadRect,
+} from './fileFormat'
+
+/**
+ * How a spread is first laid out, in world units — whole cells of the board's
+ * 13-unit grid (ui/constants.ts's GRID_WORLD_STEP_PX), so a laid-out spread
+ * sits on the lattice a dragged card snaps to.
+ *
+ * `pageWidth` is a new PDF card's width (NEW_EMBED_CARD_SIZE), and only the
+ * default: a spread is laid out at its own card's width, since a document is
+ * one width whether it is read in a card or spread out.
+ */
+export type SpreadMetrics = Readonly<{
+  pageWidth: number
+  gap: number
+  titleHeight: number
+  titleGap: number
+}>
+
+export const SPREAD_METRICS: SpreadMetrics = Object.freeze({
+  pageWidth: 390,
+  /** Between two sheets, across and down: enough to read them as separate
+   * pieces of paper rather than one long page. */
+  gap: 26,
+  /** The title's height; it is one sheet wide (`layoutSpreadGrid`). */
+  titleHeight: 39,
+  /** Between the title and the first row of sheets: enough that a
+   * selected title's ring clears the paper, no more. */
+  titleGap: 6,
+})
+
+/** A page's own proportions — its width and height in any one unit. */
+export type PageSize = Readonly<{ width: number; height: number }>
+
+export type SpreadLayout = Readonly<{
+  title: SpreadRect
+  pages: readonly SpreadPage[]
+}>
+
+/** The id a spread's page has on the board: derived from its PDF's, so it is
+ * the same every time the board is read. `/` never appears in a minted id
+ * (domain/ids.ts), so it cannot be taken by a node of the file's own. */
+export function pdfPageNodeId(parent: NodeId, page: number): NodeId {
+  return `${parent}/p${page}`
+}
+
+/** Whether a node is the title of an open spread — a PDF node standing for
+ * its pages while they are out. */
+export function isSpreadTitle(
+  node: BoardNode | undefined,
+): node is FileNode & Readonly<{ readerRect: SpreadRect }> {
+  return node?.type === 'file' && node.readerRect !== undefined
+}
+
+// ---------------------------------------------------------------------------
+// File <-> board
+// ---------------------------------------------------------------------------
+
+/**
+ * The board's shape of a board read from a file: every open spread opened
+ * (`openSpread`). A board without one is returned as it is.
+ */
+export function expandBoard(board: Board): Board {
+  let next = board
+  for (const node of board.nodes) {
+    if (node.type === 'file' && node.spread?.open === true) {
+      next = openSpread(next, node.id)
+    }
+  }
+  return next
+}
+
+/**
+ * The file's shape of the board: every open spread folded back into its node,
+ * marked open, with the layout its title and sheets have now. Sheets whose PDF
+ * is gone or no longer spread out are dropped, with their edges — there is
+ * nothing in the file they could be written as.
+ */
+export function collapseBoard(board: Board): Board {
+  let next = board
+  for (const node of board.nodes) {
+    if (isSpreadTitle(node)) next = foldSpread(next, node.id, true)
+  }
+  return dropOrphanPages(next)
+}
+
+// ---------------------------------------------------------------------------
+// Opening and putting away
+// ---------------------------------------------------------------------------
+
+/**
+ * Brings a PDF node's pages out: the node becomes its title, and a sheet per
+ * page joins the board just after it (paint order is board order, so the
+ * sheets sit above whatever the node sat above). Edges that name one of its
+ * pages move onto that sheet.
+ *
+ * `layout` is used when given — a first spread, or one laid out afresh —
+ * and otherwise the one the node remembers. A node that is already open, is
+ * not a file node, or has no layout to use is returned unchanged.
+ */
+export function openSpread(
+  board: Board,
+  id: NodeId,
+  layout?: SpreadLayout,
+): Board {
+  const index = board.nodes.findIndex((node) => node.id === id)
+  if (index === -1) return board
+  const node = board.nodes[index]
+  if (node.type !== 'file' || isSpreadTitle(node)) return board
+  const remembered = layout ?? node.spread
+  if (!remembered || remembered.pages.length === 0) return board
+  // A document is as wide as its card, spread out or not. A card resized
+  // while its pages were away has its sheets laid out again at the new
+  // width, as many across as they were.
+  const use =
+    layout || remembered.pages[0].w === node.w
+      ? remembered
+      : layoutSpreadGrid(
+          remembered.pages.map((rect) => ({ width: rect.w, height: rect.h })),
+          spreadTitleOrigin(node, remembered.title.h),
+          currentSpreadColumns(remembered.pages),
+          { ...SPREAD_METRICS, pageWidth: node.w },
+        )
+
+  // The card's top-left is the first row's, and the title stands over it:
+  // the title and the first page stay where they are whether the document is
+  // read in a card or spread out (`foldedCardOrigin`). A remembered layout
+  // goes wherever the card has been moved since (a first layout is already
+  // drawn from over the card, and moves nowhere).
+  const origin = spreadTitleOrigin(node, use.title.h)
+  const dx = origin.x - use.title.x
+  const dy = origin.y - use.title.y
+  const { spread: _spread, ...rest } = node
+  const title: FileNode = {
+    ...rest,
+    x: origin.x,
+    y: origin.y,
+    // One sheet wide, whatever was saved: the title is a heading over the
+    // first column, not a box around its text (see `layoutSpreadGrid`).
+    w: use.pages[0].w,
+    h: use.title.h,
+    readerRect: { x: node.x, y: node.y, w: node.w, h: node.h },
+  }
+  const pages: PdfPageNode[] = use.pages.map((rect, pageIndex) => {
+    // A page's colour is its own, whatever layout it is placed by.
+    const color = remembered.pages[pageIndex]?.color
+    return {
+      id: pdfPageNodeId(id, pageIndex + 1),
+      type: 'pdf-page',
+      parent: id,
+      file: node.file,
+      page: pageIndex + 1,
+      x: rect.x + dx,
+      y: rect.y + dy,
+      w: rect.w,
+      h: rect.h,
+      ...(color === undefined ? {} : { color }),
+      extra: {},
+    }
+  })
+  const nodes = [
+    ...board.nodes.slice(0, index),
+    title,
+    ...pages,
+    ...board.nodes.slice(index + 1),
+  ]
+
+  const pageCount = pages.length
+  const onSheet = (nodeId: NodeId, page: number | undefined) =>
+    nodeId === id && page !== undefined && page <= pageCount
+  let edgesChanged = false
+  const edges = board.edges.map((edge) => {
+    const from = onSheet(edge.fromNode, edge.fromPage)
+    const to = onSheet(edge.toNode, edge.toPage)
+    if (!from && !to) return edge
+    edgesChanged = true
+    const { fromPage, toPage, ...base } = edge
+    return {
+      ...base,
+      ...(from
+        ? { fromNode: pdfPageNodeId(id, fromPage as number) }
+        : fromPage === undefined
+          ? {}
+          : { fromPage }),
+      ...(to
+        ? { toNode: pdfPageNodeId(id, toPage as number) }
+        : toPage === undefined
+          ? {}
+          : { toPage }),
+    } satisfies Edge
+  })
+  return { ...board, nodes, edges: edgesChanged ? edges : board.edges }
+}
+
+/**
+ * Puts a spread's pages away: the node is a reader card again, at the size it
+ * had, with its top-left where the first row's is (`foldedCardOrigin`), and
+ * remembers where its title and every sheet were for the next time. Edges on a sheet stay attached to that page, and reach the card
+ * until the pages are out again.
+ */
+export function closeSpread(board: Board, id: NodeId): Board {
+  if (!isSpreadTitle(board.nodes.find((node) => node.id === id))) return board
+  return dropOrphanPages(foldSpread(board, id, false))
+}
+
+/**
+ * `closeSpread`'s fold, for the file (`open`: the spread was out when it was
+ * written) or for good. Sheets are left in place; `dropOrphanPages` takes
+ * them off once nothing is spread out behind them.
+ */
+function foldSpread(board: Board, id: NodeId, open: boolean): Board {
+  const index = board.nodes.findIndex((node) => node.id === id)
+  const node = board.nodes[index]
+  if (!isSpreadTitle(node)) return board
+  const sheets = board.nodes
+    .filter(
+      (candidate): candidate is PdfPageNode =>
+        candidate.type === 'pdf-page' && candidate.parent === id,
+    )
+    .sort((a, b) => a.page - b.page)
+  const { readerRect, ...rest } = node
+  const spread: PdfSpread = {
+    open,
+    title: { x: node.x, y: node.y, w: node.w, h: node.h },
+    pages: sheets.map((sheet) => ({
+      x: sheet.x,
+      y: sheet.y,
+      w: sheet.w,
+      h: sheet.h,
+      ...(sheet.color === undefined ? {} : { color: sheet.color }),
+    })),
+  }
+  // Back to a card under the title and at the sheets' width (the title's),
+  // as tall as the reader was — see `openSpread`.
+  const folded: FileNode = {
+    ...rest,
+    ...foldedCardOrigin(node),
+    w: node.w,
+    h: readerRect.h,
+    ...(sheets.length > 0 ? { spread } : {}),
+  }
+  const nodes = board.nodes.slice()
+  nodes[index] = folded
+
+  const pageOf = new Map(sheets.map((sheet) => [sheet.id, sheet.page]))
+  let edgesChanged = false
+  const edges = board.edges.map((edge) => {
+    const fromPage = pageOf.get(edge.fromNode)
+    const toPage = pageOf.get(edge.toNode)
+    if (fromPage === undefined && toPage === undefined) return edge
+    edgesChanged = true
+    return {
+      ...edge,
+      ...(fromPage === undefined ? {} : { fromNode: id, fromPage }),
+      ...(toPage === undefined ? {} : { toNode: id, toPage }),
+    }
+  })
+  return { ...board, nodes, edges: edgesChanged ? edges : board.edges }
+}
+
+/**
+ * Where a spread's card goes when it is folded: under its title, at the top
+ * of the first row of sheets — where the first page is. The card's own title
+ * is drawn in the same place as the spread's, so neither the title nor the
+ * first page moves when the document is spread out or put away.
+ */
+export function foldedCardOrigin(
+  title: Readonly<{ x: number; y: number; h: number }>,
+  metrics = SPREAD_METRICS,
+): Readonly<{ x: number; y: number }> {
+  return { x: title.x, y: title.y + title.h + metrics.titleGap }
+}
+
+/** A folded PDF card with the title that stands over it (`foldedCardOrigin`):
+ * what of the board the document takes up, from the same top edge as its
+ * spread's title. */
+export function withTitleAbove(
+  card: Readonly<{ x: number; y: number; w: number; h: number }>,
+  metrics = SPREAD_METRICS,
+): Readonly<{ x: number; y: number; w: number; h: number }> {
+  const lead = metrics.titleHeight + metrics.titleGap
+  return { x: card.x, y: card.y - lead, w: card.w, h: card.h + lead }
+}
+
+/** `foldedCardOrigin` backwards: where the title of a card's spread stands. */
+function spreadTitleOrigin(
+  card: Readonly<{ x: number; y: number }>,
+  titleHeight: number,
+  metrics = SPREAD_METRICS,
+): Readonly<{ x: number; y: number }> {
+  return { x: card.x, y: card.y - titleHeight - metrics.titleGap }
+}
+
+/** Takes off every sheet whose PDF is not spread out on this board, with the
+ * edges attached to them. */
+function dropOrphanPages(board: Board): Board {
+  const titles = new Set(
+    board.nodes.filter(isSpreadTitle).map((node) => node.id),
+  )
+  const orphans = new Set(
+    board.nodes
+      .filter((node) => node.type === 'pdf-page' && !titles.has(node.parent))
+      .map((node) => node.id),
+  )
+  if (orphans.size === 0) return board
+  return {
+    ...board,
+    nodes: board.nodes.filter((node) => !orphans.has(node.id)),
+    edges: board.edges.filter(
+      (edge) => !orphans.has(edge.fromNode) && !orphans.has(edge.toNode),
+    ),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The document as a whole
+// ---------------------------------------------------------------------------
+
+/** The sheets of an open spread, in page order. */
+export function spreadPages(
+  board: Board,
+  titleId: NodeId,
+): readonly PdfPageNode[] {
+  return board.nodes
+    .filter(
+      (node): node is PdfPageNode =>
+        node.type === 'pdf-page' && node.parent === titleId,
+    )
+    .sort((a, b) => a.page - b.page)
+}
+
+/**
+ * The nodes that go when `ids` are deleted: a spread's title takes every one
+ * of its sheets with it, and a sheet on its own goes nowhere — a page is part
+ * of its PDF, and is removed only with the whole of it.
+ */
+export function nodesToDelete(
+  nodes: readonly BoardNode[],
+  ids: Iterable<NodeId>,
+): NodeId[] {
+  const asked = new Set(ids)
+  const out: NodeId[] = []
+  for (const node of nodes) {
+    if (node.type === 'pdf-page') {
+      if (asked.has(node.parent)) out.push(node.id)
+      continue
+    }
+    if (asked.has(node.id)) out.push(node.id)
+  }
+  return out
+}
+
+/**
+ * Adds to `ids` the sheets of every spread title among them: moving a title
+ * moves the document, each sheet keeping its place relative to the others.
+ */
+export function withSpreadPages(
+  nodes: readonly BoardNode[],
+  ids: ReadonlySet<NodeId>,
+): Set<NodeId> {
+  const out = new Set(ids)
+  for (const node of nodes) {
+    if (node.type === 'pdf-page' && ids.has(node.parent)) out.add(node.id)
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Laying a spread out
+// ---------------------------------------------------------------------------
+
+/**
+ * How many sheets across a first spread puts in a row: about as many as it
+ * takes for the whole spread to come out square, which is the shape that
+ * shows most of a document at once on a screen. Fifteen letter pages come
+ * out five across, three down.
+ */
+export function defaultSpreadColumns(
+  pages: readonly PageSize[],
+  metrics = SPREAD_METRICS,
+): number {
+  const count = pages.length
+  if (count <= 1) return 1
+  const heights = pages.map((page) => sheetHeight(page, metrics.pageWidth))
+  const averageHeight = heights.reduce((sum, h) => sum + h, 0) / count
+  const cellW = metrics.pageWidth + metrics.gap
+  const cellH = averageHeight + metrics.gap
+  // cols * cellW = rows * cellH with rows = count / cols.
+  const columns = Math.round(Math.sqrt((count * cellH) / cellW))
+  return Math.min(count, Math.max(1, columns))
+}
+
+/** How many sheets across fit in `width`: whole columns only, at least one. */
+export function spreadColumnsForWidth(
+  width: number,
+  metrics = SPREAD_METRICS,
+): number {
+  return Math.max(
+    1,
+    Math.floor((width + metrics.gap) / (metrics.pageWidth + metrics.gap)),
+  )
+}
+
+/** The width `columns` sheets take across, gaps included. */
+export function spreadWidthForColumns(
+  columns: number,
+  metrics = SPREAD_METRICS,
+): number {
+  return columns * metrics.pageWidth + (columns - 1) * metrics.gap
+}
+
+/**
+ * Lays a spread out as a grid under its title: `columns` sheets to a row,
+ * each row as tall as its tallest sheet, the title's top-left at `origin`.
+ * Every sheet is `pageWidth` wide and as tall as its page's proportions make
+ * it.
+ *
+ * The title is one sheet wide, over the first column, whatever its name:
+ * a width that follows the text could only be known once the text was laid
+ * out, and the board hit-tests, selects and draws the title by its node's
+ * size at every zoom, including the ones where nothing is laid out. A name
+ * too long for it is cut short on screen (spread.css).
+ */
+export function layoutSpreadGrid(
+  pages: readonly PageSize[],
+  origin: Readonly<{ x: number; y: number }>,
+  columns: number,
+  metrics = SPREAD_METRICS,
+): SpreadLayout {
+  const perRow = Math.max(1, Math.min(columns, pages.length))
+  const title: SpreadRect = {
+    x: origin.x,
+    y: origin.y,
+    w: metrics.pageWidth,
+    h: metrics.titleHeight,
+  }
+  const rects: SpreadRect[] = []
+  let rowTop = origin.y + metrics.titleHeight + metrics.titleGap
+  for (let start = 0; start < pages.length; start += perRow) {
+    const row = pages.slice(start, start + perRow)
+    let rowHeight = 0
+    row.forEach((page, column) => {
+      const h = sheetHeight(page, metrics.pageWidth)
+      rowHeight = Math.max(rowHeight, h)
+      rects.push({
+        x: origin.x + column * (metrics.pageWidth + metrics.gap),
+        y: rowTop,
+        w: metrics.pageWidth,
+        h,
+      })
+    })
+    rowTop += rowHeight + metrics.gap
+  }
+  return { title, pages: rects }
+}
+
+/**
+ * Lays an open spread's sheets out afresh at `columns` across, under its title
+ * where it stands — the pages keep their sizes and take new places. What the
+ * spread's resize handle does, and why it takes back every sheet, including
+ * ones moved away on their own: the grid is a way of arranging the whole
+ * document, not a place some sheets belong to.
+ */
+export function reflowSpread(
+  board: Board,
+  titleId: NodeId,
+  columns: number,
+  metrics = SPREAD_METRICS,
+): Board {
+  const title = board.nodes.find((node) => node.id === titleId)
+  if (!isSpreadTitle(title)) return board
+  const sheets = spreadPages(board, titleId)
+  if (sheets.length === 0) return board
+  const layout = layoutSpreadGrid(
+    sheets.map((sheet) => ({ width: sheet.w, height: sheet.h })),
+    { x: title.x, y: title.y },
+    columns,
+    { ...metrics, pageWidth: sheets[0].w },
+  )
+  const rectById = new Map(
+    sheets.map((sheet, index) => [sheet.id, layout.pages[index]]),
+  )
+  let changed = false
+  const nodes = board.nodes.map((node) => {
+    const rect = rectById.get(node.id)
+    if (!rect || (rect.x === node.x && rect.y === node.y)) return node
+    changed = true
+    return { ...node, x: rect.x, y: rect.y }
+  })
+  return changed ? { ...board, nodes } : board
+}
+
+/**
+ * Makes an open spread's sheets `pageWidth` wide, scaling the whole document
+ * about the title's corner: every sheet grows or shrinks in proportion, and
+ * so does the room between them, so an arrangement — a grid, or sheets moved
+ * about by hand — keeps its shape at the new size. The title is one sheet
+ * wide, so it follows; the reader card will, when the pages are put away.
+ * What the corner of a selected spread's frame does.
+ */
+export function scaleSpread(
+  board: Board,
+  titleId: NodeId,
+  pageWidth: number,
+  metrics = SPREAD_METRICS,
+): Board {
+  const title = board.nodes.find((node) => node.id === titleId)
+  if (!isSpreadTitle(title)) return board
+  const sheets = spreadPages(board, titleId)
+  if (sheets.length === 0 || sheets[0].w === pageWidth) return board
+  const factor = pageWidth / sheets[0].w
+  // Horizontally about the title's left edge; vertically about the top of
+  // the first row, so the title keeps its gap above the paper.
+  const left = title.x
+  const top = title.y + title.h + metrics.titleGap
+  const scaled = new Map(
+    sheets.map((sheet) => [
+      sheet.id,
+      {
+        x: Math.round(left + (sheet.x - left) * factor),
+        y: Math.round(top + (sheet.y - top) * factor),
+        w: pageWidth,
+        h: Math.round(sheet.h * factor),
+      },
+    ]),
+  )
+  const nodes = board.nodes.map((node) => {
+    if (node.id === titleId) return { ...node, w: pageWidth }
+    const rect = scaled.get(node.id)
+    return rect ? { ...node, ...rect } : node
+  })
+  return { ...board, nodes }
+}
+
+/** How many columns an open spread's sheets are in right now, read off the
+ * first row — what the resize handle starts from. */
+export function currentSpreadColumns(
+  sheets: readonly Readonly<{ y: number }>[],
+  metrics = SPREAD_METRICS,
+): number {
+  if (sheets.length === 0) return 1
+  const top = sheets[0].y
+  let count = 0
+  for (const sheet of sheets) {
+    if (Math.abs(sheet.y - top) > metrics.gap) break
+    count += 1
+  }
+  return Math.max(1, count)
+}
+
+function sheetHeight(page: PageSize, width: number): number {
+  if (!(page.width > 0) || !(page.height > 0)) return Math.round(width * 1.294)
+  return Math.round((width * page.height) / page.width)
+}

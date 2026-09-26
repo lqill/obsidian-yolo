@@ -1,9 +1,8 @@
-// The floating selection toolbar for the `.yoloboard` canvas
-// (docs/plans/08-25-yolo-whiteboard/p1-design.md §3, P3 batch 3 surfaces
-// ①/②). Split out of `../canvas.ts` structurally (no behavior change): that
-// file remains the single state owner (board data, selection, degrade/lock
-// state) and keeps to itself every command whose whole body is one board
-// change plus one DOM call (`applyColorToNodes`, `applyColorToEdge`,
+// The floating selection toolbar for the `.yoloboard` canvas. Split out of
+// `../canvas.ts` structurally (no behavior change): that file remains the
+// single state owner (board data, selection, degrade/lock state) and keeps
+// to itself every command whose whole body is one board change plus one DOM
+// call (`applyColorToNodes`, `applyColorToEdge`,
 // `setEdgeEnds` — see those methods' own doc comments); this class owns the
 // `SelectionToolbar` instance itself, decides *what* it shows and *where* it
 // sits, and reaches every board-mutating command it offers through the narrow
@@ -25,15 +24,18 @@ import {
   type ArrowDirection,
   arrowDirection,
 } from '../../domain/edges'
-import type {
-  Board,
-  BoardNode,
-  Edge,
-  EdgeId,
-  NodeColor,
-  NodeId,
+import {
+  type Board,
+  type BoardNode,
+  type Edge,
+  type EdgeId,
+  type NodeColor,
+  type NodeId,
+  isPlainText,
 } from '../../domain/fileFormat'
 import { arrangeTargets } from '../../domain/groups'
+import type { CardRect } from '../../domain/resize'
+import { isSpreadTitle, withTitleAbove } from '../../domain/spread'
 import { type ToolbarBounds, toolbarScreenPosition } from '../../domain/toolbar'
 import type { CanvasView } from '../../domain/virtualization'
 import { TOOLBAR_GAP_PX, TOOLBAR_MARGIN_PX } from '../constants'
@@ -102,12 +104,24 @@ export const DISTRIBUTE_MENU: Readonly<
 export type ToolbarControllerCallbacks = Readonly<{
   isParseFailed: () => boolean
   canEdit: () => boolean
-  isOverview: () => boolean
   getBoard: () => Board
+  getNode: (id: NodeId) => BoardNode | undefined
+  /** Where a drag or resize has the cards it carries right now, before the
+   * board is told (canvas.ts's `liveNodeRects`). */
+  getLiveRects: () => ReadonlyMap<NodeId, CardRect> | null
+  /** Where a PDF's title line is drawn when that is not its node's
+   * rectangle — the overview tier grows it to stay readable. */
+  getDrawnTitleRect: (id: NodeId) => CardRect | null
   getSelectedIds: () => ReadonlySet<NodeId>
   getSelectedEdgeIds: () => ReadonlySet<EdgeId>
   getEdge: (id: EdgeId) => Edge | undefined
-  isEditableNode: (node: BoardNode) => boolean
+  /** A file card showing a PDF — what "open in the reading panel" applies
+   * to. */
+  isPdfNode: (node: BoardNode) => boolean
+  openReader: (id: NodeId) => void
+  /** Spreads a PDF's pages out on the board, or puts them away
+   * (the canvas's `toggleSpread`). */
+  toggleSpread: (id: NodeId) => void
   /** World point an edge's toolbar anchors to — canvas.ts's own
    * `edgeAnchorPoint`, which needs the edge layer's live geometry this class
    * does not own. */
@@ -118,9 +132,13 @@ export type ToolbarControllerCallbacks = Readonly<{
 
   deleteNodes: (ids: readonly NodeId[]) => void
   deleteEdges: (ids: readonly EdgeId[]) => void
-  zoomToSelection: () => void
+  /** Frames these nodes — what the toolbar's focus button does for whatever
+   * the toolbar is about (a selection, or the card being edited). */
+  zoomToNodes: (nodes: readonly BoardNode[]) => void
+  /** The card whose editor is open, or null. The toolbar stays with a card
+   * while it is typed into, although a card being edited is not selected. */
+  getEditingNodeId: () => NodeId | null
   createGroupFromSelection: () => void
-  editCard: (id: NodeId) => void
   beginRename: (
     target:
       | Readonly<{ kind: 'group'; id: NodeId }>
@@ -149,9 +167,14 @@ export type ToolbarControllerCallbacks = Readonly<{
  * Two responsibilities, kept apart because they run at very different rates:
  * `refreshToolbar` decides *what* the toolbar contains and runs on discrete
  * events (selection, degrade state, an edge appearing or going away);
- * `positionToolbar` decides *where* it is and runs on every camera frame.
- * Rebuilding the DOM at camera rate would be absurd, and re-placing it only
- * on selection change would leave it stranded mid-pan.
+ * `syncPosition` decides *where* it is and runs on every frame of the board.
+ *
+ * Where is read, not told: every frame, from what is on screen — the camera,
+ * the viewport, and the cards as drawn, a drag's live places included. So
+ * nothing that moves a card, the camera or the viewport has to remember to
+ * re-place the toolbar, and none can leave it behind. It costs a projection
+ * a frame; the toolbar is measured once per model and written only when its
+ * place changes (`SelectionToolbar`).
  *
  * Everything the buttons do goes through the same board operations the rest
  * of the canvas uses, so a colour picked here is one history step like any
@@ -200,16 +223,19 @@ export class ToolbarController {
     if (this.suppressed === suppressed) return
     this.suppressed = suppressed
     this.toolbar.setSuppressed(suppressed)
-    if (!suppressed) this.positionToolbar()
+    // Placed as it shows, not a frame later: it would arrive where it was.
+    if (!suppressed) this.syncPosition()
   }
 
   refreshToolbar(): void {
     this.toolbar.setModel(this.buildToolbarModel())
     this.toolbar.setSuppressed(this.suppressed)
-    this.positionToolbar()
+    this.syncPosition()
   }
 
-  positionToolbar(): void {
+  /** Puts the toolbar over what it is about, as that is on screen now.
+   * Called by the board once a frame, and as the toolbar shows. */
+  syncPosition(): void {
     if (this.suppressed) return
     const bounds = this.toolbarBounds()
     if (!bounds) return
@@ -229,6 +255,10 @@ export class ToolbarController {
    * World rectangle the toolbar is anchored to: the union of the selected
    * nodes, or — for an edge — a zero-size rect at the point its label hangs
    * from, which is the only place on a curve that reads as "the edge itself".
+   * A folded PDF card counts its title with it, so the toolbar stands over
+   * the title, where it stands over an open spread's. A card a gesture is
+   * carrying counts where it is drawn, and so does a title the overview tier
+   * draws larger than its node.
    */
   private toolbarBounds(): ToolbarBounds | null {
     const selectedEdgeIds = this.callbacks.getSelectedEdgeIds()
@@ -238,14 +268,24 @@ export class ToolbarController {
       )
       return point ? { x: point.x, y: point.y, w: 0, h: 0 } : null
     }
-    const selectedIds = this.callbacks.getSelectedIds()
-    if (selectedIds.size === 0) return null
-    return unionRect(
-      this.callbacks
-        .getBoard()
-        .nodes.filter((node) => selectedIds.has(node.id))
-        .map((node) => ({ x: node.x, y: node.y, w: node.w, h: node.h })),
-    )
+    const targetIds = this.targetIds()
+    if (targetIds.size === 0) return null
+    const live = this.callbacks.getLiveRects()
+    const rects: CardRect[] = []
+    for (const id of targetIds) {
+      const node = this.callbacks.getNode(id)
+      if (!node) continue
+      const rect = live?.get(id) ?? node
+      const bounds = { x: rect.x, y: rect.y, w: rect.w, h: rect.h }
+      rects.push(
+        this.callbacks.isPdfNode(node) && !isSpreadTitle(node)
+          ? withTitleAbove(bounds)
+          : bounds,
+      )
+      const drawn = this.callbacks.getDrawnTitleRect(id)
+      if (drawn) rects.push(drawn)
+    }
+    return rects.length > 0 ? unionRect(rects) : null
   }
 
   private buildToolbarModel(): ToolbarModel | null {
@@ -253,34 +293,55 @@ export class ToolbarController {
     if (this.callbacks.getSelectedEdgeIds().size > 0) {
       return this.buildEdgeToolbarModel()
     }
-    if (this.callbacks.getSelectedIds().size > 0) {
-      return this.buildNodeToolbarModel()
-    }
+    if (this.targetIds().size > 0) return this.buildNodeToolbarModel()
     return null
   }
 
-  private buildNodeToolbarModel(): ToolbarModel | null {
+  /**
+   * The nodes the toolbar is about: the selection, or — with nothing selected
+   * — the card being edited. Editing clears the selection so that Backspace
+   * and Escape belong to the editor (EditingController's `enterEditMode`),
+   * but what the card can have done to it does not change because it is
+   * being typed into; losing delete, colour and focus at the moment the user
+   * is working on the card was the wrong way round.
+   */
+  private targetIds(): ReadonlySet<NodeId> {
     const selectedIds = this.callbacks.getSelectedIds()
+    if (selectedIds.size > 0) return selectedIds
+    const editing = this.callbacks.getEditingNodeId()
+    return editing === null ? selectedIds : new Set([editing])
+  }
+
+  private buildNodeToolbarModel(): ToolbarModel | null {
+    const targetIds = this.targetIds()
     const nodes = this.callbacks
       .getBoard()
-      .nodes.filter((node) => selectedIds.has(node.id))
+      .nodes.filter((node) => targetIds.has(node.id))
     if (nodes.length === 0) return null
     const single = nodes.length === 1 ? nodes[0] : null
     const ids = nodes.map((node) => node.id)
     const canEdit = this.callbacks.canEdit()
+    // Pages of a spread and nothing else: pieces of a document that is
+    // deleted, grouped and put away as a whole, from its title. What is a
+    // page's own is its colour, and where the camera looks.
+    const onlySheets = nodes.every((node) => node.type === 'pdf-page')
 
     // The row is Obsidian Canvas's, in its order: delete, colour, focus,
-    // group, align — then the one button that is ours, editing what is
-    // selected. Nothing is behind an overflow button, because everything a
-    // selection can do either fits on the row or belongs to the right-click
-    // menu; see canvas.ts's `selectionMenuItems`.
+    // group, align. No edit button: a second click on the selected card opens
+    // it (DragGestures' `finishNode`), as do a double-click and Enter, and a
+    // button that only repeated them was one more icon on every selection.
+    // Nothing is behind an overflow button, because everything a selection
+    // can do either fits on the row or belongs to the right-click menu; see
+    // canvas.ts's `selectionMenuItems`.
     const items: ToolbarItem[] = []
     if (canEdit) {
-      items.push({
-        label: this.callbacks.t('menu.deleteCard'),
-        icon: 'trash',
-        onSelect: () => this.callbacks.deleteNodes(ids),
-      })
+      if (!onlySheets) {
+        items.push({
+          label: this.callbacks.t('menu.deleteCard'),
+          icon: 'trash',
+          onSelect: () => this.callbacks.deleteNodes(ids),
+        })
+      }
       items.push(
         this.colorControl(
           commonColor(nodes.map((node) => node.color)),
@@ -289,15 +350,16 @@ export class ToolbarController {
       )
     }
     // Framing the selection is a camera move, not an edit — Obsidian Canvas's
-    // third button too.
-    items.push({
-      label: this.callbacks.t('menu.zoomToSelection'),
-      icon: 'scan-search',
-      onSelect: () => {
-        this.callbacks.zoomToSelection()
-      },
-    })
-    if (canEdit && nodes.length > 1) {
+    // third button too. Not for a lone bare text: it is already read where it
+    // is, and its row is kept to what a line of text has.
+    if (!isPlainText(single ?? undefined)) {
+      items.push({
+        label: this.callbacks.t('menu.zoomToSelection'),
+        icon: 'scan-search',
+        onSelect: () => this.callbacks.zoomToNodes(nodes),
+      })
+    }
+    if (canEdit && nodes.length > 1 && !onlySheets) {
       items.push({
         label: this.callbacks.t('menu.createGroup'),
         icon: 'group',
@@ -306,24 +368,33 @@ export class ToolbarController {
     }
     const tidy = this.tidyControl()
     if (tidy) items.push(tidy)
-    // Editing is the one action a card in the overview tier cannot take —
-    // it has no element to put an editor in — so the button goes away rather
-    // than being offered and declining.
-    if (
-      single &&
-      this.callbacks.isEditableNode(single) &&
-      !this.callbacks.isOverview() &&
-      canEdit
-    ) {
+    // A PDF card's own button: read it in the panel beside the board. Offered
+    // in the overview tier too — the panel needs no card element.
+    if (single && this.callbacks.isPdfNode(single)) {
       items.push({
-        label: this.callbacks.t('toolbar.edit'),
-        icon: 'pencil',
-        onSelect: () => this.callbacks.editCard(single.id),
+        label: this.callbacks.t('toolbar.openReader'),
+        icon: 'book-open',
+        onSelect: () => this.callbacks.openReader(single.id),
       })
     }
-    // A group has no content to edit, so the pencil in its place renames it —
-    // the same command its label's double-click carries, which is otherwise
-    // the only way to find it.
+    // Spread a PDF's pages out, or put a spread away — from the card or the
+    // title, not from a page, where it would put away more than was pointed
+    // at (the page's right-click menu still has it). In the overview tier
+    // too: the board changes and the canvas draws it, and the cards are
+    // built when the zoom comes back.
+    if (canEdit && single && this.callbacks.isPdfNode(single)) {
+      const open = isSpreadTitle(single)
+      items.push({
+        label: this.callbacks.t(
+          open ? 'toolbar.closeSpread' : 'toolbar.openSpread',
+        ),
+        icon: open ? 'minimize-2' : 'maximize-2',
+        onSelect: () => this.callbacks.toggleSpread(single.id),
+      })
+    }
+    // A group has no content to type into, so its pencil renames it — the
+    // same command its label's double-click carries, which is otherwise the
+    // only way to find it.
     if (single?.type === 'group' && canEdit) {
       items.push({
         label: this.callbacks.t('menu.renameGroup'),

@@ -1,36 +1,36 @@
 {
   "schemaVersion": 1,
-  "revision": 33,
+  "revision": 41,
   "keyId": "yolo-distribution-2026-01",
   "core": {
-    "version": "1.6.9.1",
+    "version": "1.6.9.7",
     "minAppVersion": "1.8.7",
-    "releaseUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/tag/1.6.9.1",
+    "releaseUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/tag/1.6.9.7",
     "releaseNotes": {
-      "en": "## 1.6.9.1 Max Mode Polish ✨\n\n### Agent & tools\n\n- Filled in vector retrieval for vault search in Max, and unified the search tools across the Ask/Agent/Max chat modes.\n- Fixed edits being lost when Max mode ran parallel edit_file calls on the same file. (#594)\n- Optimized the architecture design, unifying the programmatic entry point for calling the Agent.\n\n### Prompts\n\n- Global/Agent system prompts now support the ![[note]] syntax to embed constraints from other documents.\n- Improved the prompt design for the model proactively suggesting a switch between Ask/Agent/Max capabilities.\n\n### Chat & interface\n\n- Right-click the YOLO ribbon icon to choose whether to open Chat in the sidebar, a tab, a split, or a separate window.\n- Added Max mode to the mode list in the @ menu.\n- Improved the styling and animation design of collapsed tool groups.",
-      "zh": "## 1.6.9.1 Max 模式打磨 ✨\n\n### Agent 与工具\n\n- 补全 Max 的 vault search 向量检索的能力，并统一 Ask/Agent/Max 三种对话模式的检索工具。\n- 修复 Max 模式并行 edit_file 同一文件丢失编辑的问题。（#594）\n- 优化架构设计，统一 Agent 程序化调用入口。\n\n### 提示词\n\n- 系统全局/Agent提示词支持 ![[笔记]] 语法来嵌入其他文档的约束。\n- 优化模型主动建议 Ask/Agent/Max 能力切换的提示词设计。\n\n### 对话与界面\n\n- 右键侧边栏 YOLO 图标可选择在侧边栏、标签页、分屏或独立窗口打开 Chat。\n- 为 @ 菜单的模式列表补齐 Max 模式。\n- 优化工具折叠组的样式与动画设计。"
+      "en": "## 1.6.9.7 Smoother Updates 🔄\n\n- Improved the Core and module update mechanism to reduce redundant, repeated prompts.\n- Improved the chat navigation ticks on mobile.\n- Fixed message navigation ticks covering the text when the chat panel is narrow in the main editor area or a pop-out window. (#610)",
+      "zh": "## 1.6.9.7 更新体验优化 🔄\n\n- 优化 core 和模块的升级机制，减少无效重复打扰。\n- 优化手机端聊天导航刻度的使用体验。\n- 修复主编辑区或弹出窗口中聊天面板较窄时，消息导航刻度遮挡正文的问题。（#610）"
     },
     "assets": {
       "mainJs": {
         "name": "main.js",
-        "mirrorPath": "core/1.6.9.1/main.js",
-        "canonicalUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/download/1.6.9.1/main.js",
-        "byteSize": 9528687,
-        "sha256": "ae1f94c8a661ddb3fc00c4628922939b3582e926746649ffbb284d242d3538a3"
+        "mirrorPath": "core/1.6.9.7/main.js",
+        "canonicalUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/download/1.6.9.7/main.js",
+        "byteSize": 5769386,
+        "sha256": "e7acb19151e0daa8f8105c7a4b5dc1d0e140371368bd1442fb5ec57e7a124785"
       },
       "manifestJson": {
         "name": "manifest.json",
-        "mirrorPath": "core/1.6.9.1/manifest.json",
-        "canonicalUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/download/1.6.9.1/manifest.json",
+        "mirrorPath": "core/1.6.9.7/manifest.json",
+        "canonicalUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/download/1.6.9.7/manifest.json",
         "byteSize": 413,
-        "sha256": "2f6f9c05ed15b78d8ca7976af82120dec789a13987c14d7945c53fd0c651c618"
+        "sha256": "51359083a792406c33cf1104c4420e7f7b5a3576e614e1848d01f481cb378f20"
       },
       "stylesCss": {
         "name": "styles.css",
-        "mirrorPath": "core/1.6.9.1/styles.css",
-        "canonicalUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/download/1.6.9.1/styles.css",
-        "byteSize": 682484,
-        "sha256": "003dcafb12086f90a7ac0f1884ebe8b77b7a4043ecb6db4b4afefe2be2d04a71"
+        "mirrorPath": "core/1.6.9.7/styles.css",
+        "canonicalUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/download/1.6.9.7/styles.css",
+        "byteSize": 496805,
+        "sha256": "998d6591ba0cc3a4e797794b18f32373e896f14d9e6f3348a656e3965e409137"
       }
     }
   },
@@ -86,7 +86,7 @@
     },
     {
       "id": "whiteboard",
-      "icon": "layout-grid",
+      "icon": "waypoints",
       "localizations": {
         "en": {
           "name": "YOLO Whiteboard",
@@ -101,8 +101,8 @@
           "description": "Una tela infinita per il pensiero spaziale: disponi schede di note, testo e PDF, collegale tra loro e leggi/annota i PDF accanto alle tue note."
         }
       },
-      "version": "0.0.2",
-      "hostApi": "^1.8.0",
+      "version": "0.0.4",
+      "hostApi": "^1.10.0",
       "platforms": [
         "desktop",
         "mobile"
@@ -114,23 +114,23 @@
           "write": 1
         }
       },
-      "releaseUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/tag/whiteboard/v0.0.2",
+      "releaseUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/tag/whiteboard/v0.0.4",
       "releaseNotes": {
-        "en": "## 0.0.2 YOLO Whiteboard 🧩\n\n- For now, think of it as an Obsidian Canvas several to dozens of times faster. More features that push the boundaries of AI and human thinking are on the way.\n- Requires YOLO Core 1.6.8 or later.",
-        "zh": "## 0.0.2 YOLO 白板 🧩\n\n- 你目前可以把它当成一个性能好上几倍到几十倍的 Obsidian Canvas。未来会添加更多可以充分拓展 AI 与人类思考疆界的新功能。\n- 需要 YOLO Core 1.6.8 及以上版本。"
+        "en": "## 0.0.4 PDF Reading 📄\n\n- The whiteboard now supports PDF reading: read directly in cards and the reading panel, highlight and annotate, excerpt into cards, and export PDFs with your annotations.\n- PDFs can now be spread out page by page.\n- Greatly improved PDF reading performance.\n- Improved the smoothness of whiteboard interactions for a better experience.\n- Added copy, cut, and paste for cards.\n- Fixed card preset colors not showing in some themes.\n- Requires YOLO Core 1.6.9.6 or later.",
+        "zh": "## 0.0.4 PDF 阅读 📄\n\n- 白板支持 PDF 阅读：在卡片和阅读面板中直接阅读、高亮批注、摘录成卡片，并可导出带注释的 PDF。\n- PDF 阅读支持逐页平铺。\n- 大幅优化 PDF 的阅读性能。\n- 优化白板交互流畅度，改善用户体验。\n- 支持复制、剪切、粘贴卡片。\n- 修复部分主题下卡片预设颜色不显示的问题。\n- 需要 YOLO Core 1.6.9.6 及以上版本。"
       },
       "releaseNote": {
         "name": "release-note.md",
-        "canonicalUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/download/whiteboard%2Fv0.0.2/release-note.md",
-        "byteSize": 472,
-        "sha256": "fe46c77fd83c23908b60c21fae1d29519e6a23e22e3065c32aa6dc58f50ad702"
+        "canonicalUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/download/whiteboard%2Fv0.0.4/release-note.md",
+        "byteSize": 942,
+        "sha256": "55621fa5e1601a605a094d30cadc4cf2ddffd3abb713b4c14142bb90d30ab89a"
       },
       "manifest": {
         "name": "module.json",
-        "mirrorPath": "modules/whiteboard/0.0.2/module.json",
-        "canonicalUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/download/whiteboard%2Fv0.0.2/module.json",
-        "byteSize": 1866,
-        "sha256": "58fee4ae4085e8159c155f0ae2597886482013328feccdce8c5952e5375eb663"
+        "mirrorPath": "modules/whiteboard/0.0.4/module.json",
+        "canonicalUrl": "https://github.com/Lapis0x0/obsidian-yolo/releases/download/whiteboard%2Fv0.0.4/module.json",
+        "byteSize": 1867,
+        "sha256": "49b4b4be4258019238a30cc2518720ba5d0dd49219c43eca69e934f404b72dc1"
       }
     }
   ]

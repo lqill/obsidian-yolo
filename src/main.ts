@@ -92,6 +92,7 @@ import {
   ModuleFileTextRendererRegistry,
   ModuleIntentStore,
   ModuleLoader,
+  ModulePdfCapabilityProvider,
   ModulePrivateStorageCapabilityProvider,
   ModuleRuntime,
   ModuleRuntimeReservation,
@@ -182,6 +183,10 @@ import {
   checkInstallationIntegrityLayer1And2,
 } from './core/update/installationIntegrity'
 import {
+  readLastLaunchedCoreVersion,
+  writeLastLaunchedCoreVersion,
+} from './core/update/lastLaunchedCoreVersion'
+import {
   ModuleUpdateController,
   type ModuleUpdateOffer,
 } from './core/update/moduleUpdateController'
@@ -205,8 +210,7 @@ import {
 } from './core/update/updateChecker'
 import type { DatabaseManager } from './database/DatabaseManager'
 import { ChatManager } from './database/json/chat/ChatManager'
-import { pruneImageCache } from './database/json/chat/imageCacheStore'
-import { prunePdfTextCache } from './database/json/chat/pdfTextCacheStore'
+import { importLegacyImageCache } from './database/local-cache/legacyImageCacheImport'
 import type {
   ReconcileResult,
   VectorManager,
@@ -264,9 +268,12 @@ import type {
 } from './types/mentionable'
 import { MentionableFile, MentionableFolder } from './types/mentionable'
 import { isUntitledConversationTitle } from './utils/chat/conversationTitle'
+import { captureReactDocumentListeners } from './utils/dom/react-document-listeners'
 import { stableStringify } from './utils/json/stableStringify'
 import { applyKnownMaxContextTokensToChatModels } from './utils/llm/model-capability-registry'
 import { getMentionableBlockData } from './utils/obsidian'
+import { addPdfAnnotations } from './utils/pdf/addPdfAnnotations'
+import { PdfDocumentCache } from './utils/pdf/pdfDocumentCache'
 import { ensureBufferByteLengthCompat } from './utils/runtime/ensureBufferByteLengthCompat'
 import { YOLO_ICON_ID, YOLO_ICON_SVG } from './yoloIcon'
 
@@ -309,6 +316,7 @@ export default class YoloPlugin extends Plugin {
   pluginUpdateState: PluginUpdateState = { status: 'idle' }
   private pluginUpdateListeners: (() => void)[] = []
   private pluginUpdateDownloadPromise: Promise<void> | null = null
+  private disposeReactDocumentListeners: (() => void) | null = null
   private updateToastCleanup: (() => void) | null = null
   private actionToastController: ActionToastController | null = null
   private readonly moduleSettingsContributions =
@@ -348,6 +356,7 @@ export default class YoloPlugin extends Plugin {
   private mcpCoordinator: McpCoordinator | null = null
   private moduleService: ModuleService | null = null
   private runtimeComponentService: RuntimeComponentService | null = null
+  private pdfDocumentCache: PdfDocumentCache | null = null
   private localEmbeddingModelManager: LocalEmbeddingModelManager | null = null
   private distributionFeedClient: DistributionFeedClient | null = null
   private moduleUpdateController: ModuleUpdateController | null = null
@@ -803,11 +812,11 @@ export default class YoloPlugin extends Plugin {
           this.showQuickAskWithOptions(editor, view, options),
         showQuickAskWithAutoSend: (editor, view, options) =>
           this.showQuickAskWithAutoSend(editor, view, options),
-        showQuickAskFromPdf: (args) =>
-          this.getQuickAskController().showFromPdf(args),
-        pruneOrphanedQuickAskPdfInstance: (activePdfLeaves) =>
-          this.getQuickAskController().pruneOrphanedPdfInstance(
-            activePdfLeaves,
+        showQuickAskFromReadOnlySelection: (args) =>
+          this.getQuickAskController().showFromReadOnlySelection(args),
+        pruneOrphanedReadOnlyQuickAsk: (openLeaves) =>
+          this.getQuickAskController().pruneOrphanedReadOnlyInstance(
+            openLeaves,
           ),
         openChatWithSelectionAndPrefill: async (
           selectedBlock,
@@ -2186,6 +2195,8 @@ export default class YoloPlugin extends Plugin {
     this.isUnloaded = false
     this.cliRuntimeCapabilityError = null
     bindClaudeSdkHost(this.app)
+    // Must precede the first React root (the action toast below).
+    this.disposeReactDocumentListeners = captureReactDocumentListeners(document)
     this.actionToastController = mountActionToast()
     this.initializeModuleSystem()
     this.initializeRuntimeComponentSystem()
@@ -2247,6 +2258,8 @@ export default class YoloPlugin extends Plugin {
     } catch (error) {
       console.error('[YOLO] User data root migration failed', error)
     }
+    // Before any view is registered: cache reads wait for this to settle.
+    void importLegacyImageCache(this.app, this.settings)
     this.warnIfInstallationIncomplete()
     this.activateModules()
     this.syncOAuthRuntimesFromSettings()
@@ -2254,9 +2267,6 @@ export default class YoloPlugin extends Plugin {
       console.error('[YOLO] Failed to initialize local MCP server', error)
     })
 
-    // Prune stale image cache entries (>30 days) on startup
-    void pruneImageCache(this.app, 30, this.settings)
-    void prunePdfTextCache(this.app, 30, this.settings)
     await this.getRagIndexService().initialize()
     // One-time, idempotent migration of legacy skill frontmatter. Skill files
     // themselves remain at their user-chosen paths.
@@ -2788,6 +2798,8 @@ export default class YoloPlugin extends Plugin {
     this.ragCoordinator?.cleanup()
     this.ragCoordinator = null
 
+    void this.pdfDocumentCache?.closeAll()
+    this.pdfDocumentCache = null
     setRuntimeComponentService(null)
     this.runtimeComponentService?.stop()
     this.runtimeComponentService = null
@@ -2826,6 +2838,9 @@ export default class YoloPlugin extends Plugin {
     this.selectionRewriteController?.destroy()
     this.selectionRewriteController = null
     this.continuationController = null
+    selectionHighlightController.destroy()
+    this.disposeReactDocumentListeners?.()
+    this.disposeReactDocumentListeners = null
 
     // clear all timers
     this.timeoutIds.forEach((id) => {
@@ -3948,10 +3963,43 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
         // Catalog refresh always runs — it feeds the module list in settings.
         // Only the toast-facing offers (and their auto-download) are gated.
         await this.moduleService?.checkForUpdates()
+        // Not gated by the notice setting: turning prompts off means "don't
+        // interrupt me", not "leave my modules behind the core".
+        await this.followCoreUpdate()
         if (!this.settings.pluginUpdateNoticeEnabled) return
         await this.moduleUpdateController?.refresh()
       })(),
     ])
+  }
+
+  /**
+   * Brings modules up to date after the core itself changed version — through
+   * the update toast or by hand in community plugins alike. A coordinated
+   * release is one click on the core update; the modules it ships alongside,
+   * including any that need the new Host API, follow here on the next start.
+   * An unknown previous version (first start with this rule) counts as a
+   * change: only pending updates of enabled modules are installed, so a
+   * fresh install has nothing to do.
+   */
+  private async followCoreUpdate(): Promise<void> {
+    const controller = this.moduleUpdateController
+    if (!controller) return
+    const currentVersion = this.manifest.version
+    if (readLastLaunchedCoreVersion(this.app) === currentVersion) return
+    const installed = await controller.installAll()
+    writeLastLaunchedCoreVersion(this.app, currentVersion)
+    if (installed.length === 0) return
+    new Notice(
+      this.t(
+        'update.modulesFollowedCore',
+        '{modules} updated along with YOLO',
+      ).replace(
+        '{modules}',
+        installed
+          .map((module) => `${module.name} ${module.version}`)
+          .join(', '),
+      ),
+    )
   }
 
   async openChatView(options?: {
@@ -4126,6 +4174,10 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
     await this.moduleUpdateController?.update(key)
   }
 
+  async applyAllModuleUpdates(): Promise<void> {
+    await this.moduleUpdateController?.updateAll()
+  }
+
   getModuleSettingsContributionRegistry(): ModuleSettingsContributionRegistry {
     return this.moduleSettingsContributions
   }
@@ -4196,6 +4248,21 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
           sink: this.moduleChatModeRegistry,
           toolSetSink: this.moduleToolSetRegistry,
           fileTextRendererSink: this.moduleFileTextRendererRegistry,
+          addSelection: async ({ path, text, page }) => {
+            const file = this.app.vault.getAbstractFileByPath(path)
+            if (!(file instanceof TFile)) {
+              throw new Error(`Not a file in the vault: ${path}`)
+            }
+            // Line numbers mean nothing for a PDF (the host's own PDF
+            // selections carry 0 too); the page is what locates it.
+            await this.getChatViewNavigator().addSelectionBlockToChat({
+              content: text,
+              file,
+              startLine: 0,
+              endLine: 0,
+              ...(page === undefined ? {} : { pageNumber: page }),
+            })
+          },
         }),
         config: new ModuleConfigCapabilityProvider({
           createBackend: (moduleId) => {
@@ -4285,6 +4352,10 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
           },
         }),
         vault: new ObsidianModuleVaultCapabilityProvider(this.app),
+        pdf: new ModulePdfCapabilityProvider(
+          () => this.getPdfDocumentCache(),
+          addPdfAnnotations,
+        ),
       }),
     )
     const runtimeReservation = new ModuleRuntimeReservation({ runtime })
@@ -4582,6 +4653,42 @@ ${validationResult.error.issues.map((v) => v.message).join('\n')}`)
     })
     this.runtimeComponentService = service
     setRuntimeComponentService(service)
+
+    const pdfDocuments = new PdfDocumentCache({
+      readFile: async (path) => {
+        const file = this.app.vault.getFileByPath(path)
+        if (!file) throw new Error(`PDF file not found: ${path}`)
+        return new Uint8Array(await this.app.vault.readBinary(file))
+      },
+      acquireEngine: () => service.acquire('pdf-engine'),
+      reportError: (error) => {
+        console.error('[YOLO] PDF document cache error', error)
+      },
+    })
+    this.pdfDocumentCache = pdfDocuments
+    // Open documents hold engine leases; turning the engine off must close
+    // them rather than wait for every reader to let go.
+    service.registerQuiesceParticipant('pdf-engine', () =>
+      pdfDocuments.closeAll(),
+    )
+    this.registerEvent(
+      this.app.vault.on('modify', (file) => pdfDocuments.invalidate(file.path)),
+    )
+    this.registerEvent(
+      this.app.vault.on('delete', (file) => pdfDocuments.invalidate(file.path)),
+    )
+    this.registerEvent(
+      this.app.vault.on('rename', (_file, oldPath) =>
+        pdfDocuments.invalidate(oldPath),
+      ),
+    )
+  }
+
+  getPdfDocumentCache(): PdfDocumentCache {
+    if (!this.pdfDocumentCache) {
+      throw new Error('[YOLO] PDF documents are unavailable')
+    }
+    return this.pdfDocumentCache
   }
 
   private initializeLocalEmbedding(): void {

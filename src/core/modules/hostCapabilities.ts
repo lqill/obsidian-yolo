@@ -33,6 +33,10 @@ import {
   type ModulePathsCapabilityProviderV1,
   UNAVAILABLE_MODULE_PATHS_CAPABILITY_PROVIDER,
 } from './modulePaths'
+import {
+  type ModulePdfCapabilityProviderV1,
+  UNAVAILABLE_MODULE_PDF_CAPABILITY_PROVIDER,
+} from './modulePdf'
 import type {
   ModulePrivateStorageCapabilityProviderV1,
   ModulePrivateStorageScopeV1,
@@ -62,6 +66,7 @@ import type {
   YoloModuleBackgroundV1,
   YoloModuleCapabilitiesV1,
   YoloModuleChatModeV1,
+  YoloModuleChatSelectionV1,
   YoloModuleChatV1,
   YoloModuleFileTextRendererV1,
   YoloModuleToolSetV1,
@@ -179,6 +184,7 @@ type CoreModuleHostCapabilityProviderOptions = {
   config?: ModuleConfigCapabilityProviderV1
   i18n?: ModuleI18nCapabilityProviderV1
   paths?: ModulePathsCapabilityProviderV1
+  pdf?: ModulePdfCapabilityProviderV1
   privateStorage?: ModulePrivateStorageCapabilityProviderV1
   settings?: ModuleSettingsCapabilityProviderV1
   ui?: ModuleUiCapabilityProviderV1
@@ -199,6 +205,7 @@ export class CoreModuleHostCapabilityProvider
   private readonly now: () => number
   private readonly i18n: ModuleI18nCapabilityProviderV1
   private readonly paths: ModulePathsCapabilityProviderV1
+  private readonly pdf: ModulePdfCapabilityProviderV1
   private readonly privateStorage: ModulePrivateStorageCapabilityProviderV1
   private readonly settings: ModuleSettingsCapabilityProviderV1
   private readonly ui: ModuleUiCapabilityProviderV1
@@ -217,6 +224,7 @@ export class CoreModuleHostCapabilityProvider
     config = UNAVAILABLE_MODULE_CONFIG_CAPABILITY_PROVIDER,
     i18n = new ModuleI18nCapabilityProvider(),
     paths = UNAVAILABLE_MODULE_PATHS_CAPABILITY_PROVIDER,
+    pdf = UNAVAILABLE_MODULE_PDF_CAPABILITY_PROVIDER,
     privateStorage = UNAVAILABLE_MODULE_PRIVATE_STORAGE_CAPABILITY_PROVIDER,
     settings = UNAVAILABLE_MODULE_SETTINGS_CAPABILITY_PROVIDER,
     ui = UNAVAILABLE_MODULE_UI_CAPABILITY_PROVIDER,
@@ -237,6 +245,7 @@ export class CoreModuleHostCapabilityProvider
     this.config = config
     this.i18n = i18n
     this.paths = paths
+    this.pdf = pdf
     this.privateStorage = privateStorage
     this.settings = settings
     this.ui = ui
@@ -263,6 +272,7 @@ export class CoreModuleHostCapabilityProvider
     const config = this.config.create(moduleId, lifecycle)
     const i18n = this.i18n.create(moduleId, lifecycle)
     const paths = this.paths.create(moduleId, lifecycle)
+    const pdf = this.pdf.create(moduleId, lifecycle)
     const privateStorage = this.privateStorage.create(moduleId, lifecycle)
     const settings = this.settings.create(moduleId, lifecycle)
     const ui = this.ui.create(moduleId, lifecycle)
@@ -277,6 +287,7 @@ export class CoreModuleHostCapabilityProvider
         config: config.api,
         i18n: i18n.api,
         paths: paths.api,
+        pdf: pdf.api,
         privateStorage: privateStorage.api,
         settings: settings.api,
         ui: ui.api,
@@ -295,6 +306,7 @@ export class CoreModuleHostCapabilityProvider
         background.activate()
         chat.activate()
         paths.activate()
+        pdf.activate()
         privateStorage.activate()
         settings.activate()
         ui.activate()
@@ -320,6 +332,8 @@ export type ModuleChatCapabilityProviderOptions = Readonly<{
   sink: ModuleChatModeContributionSinkV1
   toolSetSink: ModuleToolSetContributionSinkV1
   fileTextRendererSink: ModuleFileTextRendererContributionSinkV1
+  /** Puts a validated selection into the chat (`YoloModuleChatV1.addSelection`). */
+  addSelection: (selection: YoloModuleChatSelectionV1) => Promise<void>
 }>
 
 export class CoreModuleChatCapabilityProvider
@@ -334,6 +348,7 @@ export class CoreModuleChatCapabilityProvider
       sink: this.options.sink,
       toolSetSink: this.options.toolSetSink,
       fileTextRendererSink: this.options.fileTextRendererSink,
+      addSelection: this.options.addSelection,
     })
   }
 }
@@ -351,6 +366,8 @@ export const UNAVAILABLE_MODULE_CHAT_CAPABILITY_PROVIDER: ModuleChatCapabilityPr
         registerFileTextRenderer: () => {
           throw new Error('Module chat capability is unavailable')
         },
+        addSelection: () =>
+          Promise.reject(new Error('Module chat capability is unavailable')),
       }),
       commit: () => undefined,
       activate: () => undefined,
@@ -370,12 +387,14 @@ function createModuleChatCapability({
   sink,
   toolSetSink,
   fileTextRendererSink,
+  addSelection,
 }: {
   moduleId: string
   lifecycle: ModuleLifecycleScope
   sink: ModuleChatModeContributionSinkV1
   toolSetSink: ModuleToolSetContributionSinkV1
   fileTextRendererSink: ModuleFileTextRendererContributionSinkV1
+  addSelection: (selection: YoloModuleChatSelectionV1) => Promise<void>
 }): {
   api: YoloModuleChatV1
   commit(): void
@@ -455,6 +474,10 @@ function createModuleChatCapability({
         fileTextRendererSink.remove(moduleId, snapshot)
       }
     },
+    addSelection: async (selection) => {
+      assertActive()
+      await addSelection(snapshotChatSelection(selection))
+    },
   })
   return {
     api,
@@ -486,6 +509,24 @@ function createModuleChatCapability({
       activationComplete = true
     },
   }
+}
+
+function snapshotChatSelection(
+  selection: YoloModuleChatSelectionV1,
+): YoloModuleChatSelectionV1 {
+  const { path, text, page } = selection
+  if (typeof path !== 'string' || path.length === 0) {
+    throw new TypeError('Module chat selection path must be a string')
+  }
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    throw new TypeError('Module chat selection text must not be empty')
+  }
+  if (page !== undefined && !(Number.isInteger(page) && page >= 1)) {
+    throw new TypeError('Module chat selection page must be a positive integer')
+  }
+  return Object.freeze(
+    page === undefined ? { path, text } : { path, text, page },
+  )
 }
 
 function createModuleBackgroundCapability({

@@ -1,6 +1,5 @@
 // What a board looks like to a model — the text `fs_read` returns for a
-// `.yoloboard` and the text an @mention injects, in place of the file itself
-// (docs/plans/09-03-whiteboard-agent-tools/master.md D3, Q12).
+// `.yoloboard` and the text an @mention injects, in place of the file itself.
 //
 // The raw file is a JSON Canvas superset: `extra` bags, `fromEnd`/`toEnd`,
 // `version`, `camera`, and one object per node. A 300-card board is hundreds
@@ -125,6 +124,8 @@ export function readBoardCard(board: Board, cardId: NodeId): string | null {
       const label = card.label ? ` "${card.label}"` : ''
       return `Group${label} containing ${members.length} card(s): ${members.join(' ')}`
     }
+    case 'pdf-page':
+      return `This card is page ${card.page} of ${card.file} — read that file for its content.`
   }
 }
 
@@ -144,7 +145,7 @@ function position(node: BoardNode): string {
 
 /**
  * The kind a model should reason about, which is finer than the file format's
- * four node types: a `file` node is a note, an image, or a media file
+ * four node types: a `file` node is a note, a PDF, an image, or a media file
  * depending on its extension, and those behave differently enough (a note has
  * text to read and edit; an image does not) that flattening them to "file"
  * would hide the distinction that matters.
@@ -159,6 +160,8 @@ function cardKind(card: BoardNode): string {
       switch (fileNodeKind(card.file)) {
         case 'markdown':
           return 'note'
+        case 'pdf':
+          return 'pdf'
         case 'image':
           return 'image'
         case 'audio':
@@ -172,6 +175,8 @@ function cardKind(card: BoardNode): string {
       }
     case 'group':
       return 'group'
+    case 'pdf-page':
+      return 'pdf page'
   }
 }
 
@@ -180,6 +185,8 @@ function cardHeadline(card: BoardNode): string {
   switch (card.type) {
     case 'file':
       return `${head}  ${card.file}`
+    case 'pdf-page':
+      return `${head}  ${card.file} p.${card.page}`
     case 'link':
       return `${head}  ${card.url}`
     default:

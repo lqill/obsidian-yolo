@@ -1,9 +1,9 @@
 // Pure path reading and filename generation: what a vault path *means* to the
 // board (is it a note, is it a canvas, which kind of card does it render as —
 // `fileNodeKind`), and the names the whiteboard gives what it creates in the
-// vault: the `.yoloboard` files themselves (command + folder context menu,
-// docs/plans/08-25-yolo-whiteboard/p1-design.md §5) and the notes a text
-// card is converted into (§1.2, which puts them in `<board name> Cards/`).
+// vault: the `.yoloboard` files themselves (command + folder context menu)
+// and the notes a text card is converted into (which go in
+// `<board name> Cards/`).
 // Both kinds share one conflict rule, defined here once, so the call sites
 // can never drift on what "already taken" means.
 
@@ -17,7 +17,7 @@ const ILLEGAL_FILE_NAME_CHARS = /[\\/:*?"<>|#^[\]]/g
 
 /**
  * Whether a file node's path points at a note. The board's one markdown
- * rendering path (p3-canvas-parity D2/D11) is reached through this test, and
+ * rendering path is reached through this test, and
  * so is "can this card be edited" — a JSON Canvas `file` node holds any
  * vault file, and only the markdown ones have text a card can show or edit.
  */
@@ -38,8 +38,9 @@ export function isCanvasPath(path: string): boolean {
  * The three media lists are exactly the extensions Obsidian itself registers
  * image/audio/video views for (read off `app.viewRegistry.typeByExtension` in
  * a running 1.13 instance) — behaviour alignment starts with agreeing on what
- * counts as an image (p3-canvas-parity D1). `unsupported` covers everything
- * left, PDF included (its card is M2).
+ * counts as an image. `pdf` is Obsidian's single PDF extension, and a card of
+ * its own: a reader over the file (ui/pdf/pdfReader.ts). `unsupported` covers
+ * everything left.
  *
  * `html` is ours rather than Obsidian's: Obsidian registers no view for it at
  * all, so a `.html` file in a vault is inert. On a board it is a page, shown
@@ -50,6 +51,7 @@ export function isCanvasPath(path: string): boolean {
  */
 export type FileNodeKind =
   | 'markdown'
+  | 'pdf'
   | 'image'
   | 'audio'
   | 'video'
@@ -84,14 +86,15 @@ const AUDIO_EXTENSIONS = [
  */
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogv', 'mov', 'mkv'] as const
 const HTML_EXTENSIONS = ['html', 'htm'] as const
+const PDF_EXTENSION = 'pdf'
 
 /** The extension a dropped HTML document is saved under. `.htm` is read but
  * never written: one spelling in, one spelling out. */
-export const HTML_EXTENSION = '.html'
 
 export function fileNodeKind(path: string): FileNodeKind {
   if (isMarkdownPath(path)) return 'markdown'
   const extension = extensionOf(path)
+  if (extension === PDF_EXTENSION) return 'pdf'
   if ((IMAGE_EXTENSIONS as readonly string[]).includes(extension))
     return 'image'
   if ((AUDIO_EXTENSIONS as readonly string[]).includes(extension))
@@ -145,6 +148,24 @@ export function generateBoardFileName(
 }
 
 /**
+ * File name for the copy of a PDF its annotations are exported into, beside
+ * the original: `Paper (annotated).pdf`, then `Paper (annotated) 1.pdf`… —
+ * never the original's name, and never one already taken. The suffix is not
+ * translated: a file name outlives the locale it was made in, and ASCII
+ * travels through every sync service and file system intact.
+ */
+export function generateAnnotatedPdfFileName(
+  pdfBaseName: string,
+  existingNames: ReadonlySet<string>,
+): string {
+  return generateUniqueFileName(
+    `${pdfBaseName} (annotated)`,
+    '.pdf',
+    existingNames,
+  )
+}
+
+/**
  * File name for the note a text card becomes. `baseName` comes from
  * `cardNoteContent` below; the same numeric-suffix conflict rule as
  * whiteboards applies.
@@ -157,24 +178,21 @@ export function generateCardNoteFileName(
 }
 
 /**
- * File name for an HTML document dropped onto the board from outside the
- * vault. `fileName` is what the operating system called it, extension and
- * all; `fallbackBaseName` names the file when nothing legal survives
- * sanitizing (a document called `<>.html` is still a document).
- *
- * The extension is normalized rather than kept: `.htm` reads the same as
- * `.html` (`fileNodeKind`) and there is no reason for the vault to grow two
- * spellings of one thing. The same numeric-suffix conflict rule as whiteboards
- * and card notes applies.
+ * The name a file brought in from outside the vault is filed under
+ * (ui/canvas/externalFiles.ts). `fileName` is what the operating system
+ * called it, which may hold characters a vault name cannot (a macOS name can
+ * hold `?` and `:`); `fallbackBaseName` names it when nothing legal survives
+ * sanitizing. Its extension — the kind of card it makes (`fileNodeKind`) —
+ * is kept. A free name is the attachment path's to find, not this.
  */
-export function generateDroppedHtmlFileName(
+export function importedFileName(
   fileName: string,
   fallbackBaseName: string,
-  existingNames: ReadonlySet<string>,
 ): string {
   const baseName =
     sanitizeFileName(basenameWithoutExtension(fileName)) || fallbackBaseName
-  return generateUniqueFileName(baseName, HTML_EXTENSION, existingNames)
+  const extension = extensionOf(fileName)
+  return extension ? `${baseName}.${extension}` : baseName
 }
 
 /** What a text card becomes when it is converted into a note: the file's
@@ -214,7 +232,10 @@ export function cardNoteContent(
   return { baseName: sanitized, body: rest.replace(/^(\r?\n)+/, '') }
 }
 
-function sanitizeFileName(value: string): string {
+/** A typed name made safe to be a file's base name: characters no vault file
+ * may carry (or that would break a `[[link]]` to it) become spaces. Empty
+ * when nothing legal is left. */
+export function sanitizeFileName(value: string): string {
   return (
     value
       .replace(ILLEGAL_FILE_NAME_CHARS, ' ')

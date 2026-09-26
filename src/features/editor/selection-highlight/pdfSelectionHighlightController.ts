@@ -22,10 +22,9 @@
  *   3. clearById(id) / reconcileActiveIds(ids) / clearAll() — remove ranges
  *      and unsubscribe from eventBus.
  *
- * PDF multi-quote annotation (docs/plans/2026-08-16-pdf-annotation-quotes.md)
- * layers a numbered "批注N" bubble + comment editor on top of a 'pinned'
- * entry via `enableAnnotation`. This is command-line/DOM-imperative, not a
- * React portal (architecture decision — see the plan's item 7): the bubble
+ * PDF multi-quote annotation layers a numbered "批注N" bubble + comment
+ * editor on top of a 'pinned' entry via `enableAnnotation`. This is
+ * command-line/DOM-imperative, not a React portal: the bubble
  * is mounted as a plain child of the same `.page` element the highlight's
  * ranges live in, positioned with the exact same
  * `lastRange.getClientRects()` math `AssistantSelectionQuoteButton.
@@ -36,11 +35,11 @@
  * hook point that also repositions it.
  *
  * The bubble's only communication channel back to chat state is the
- * `PdfAnnotationCallbacks` passed into `enableAnnotation` — architecture
- * decision B: one `onCommentChange` / `onDelete` pair, no polling.
+ * `PdfAnnotationCallbacks` passed into `enableAnnotation`: one
+ * `onCommentChange` / `onDelete` pair, no polling.
  *
- * Anchor / paint / bubble are three independent layers (2026-08-16 addendum
- * to the plan, "锚点与涂色必须解耦"): `addHighlight` ALWAYS computes offsets,
+ * Anchor / paint / bubble are three independent layers ("锚点与涂色必须解耦"):
+ * `addHighlight` ALWAYS computes offsets,
  * builds ranges, and subscribes to `textlayerrendered` — an entry exists
  * whenever the anchor-layer geometry could be resolved, full stop. Painting
  * the range into the CSS Custom Highlight registry is a separate, optional
@@ -59,6 +58,13 @@ import {
   type HighlightOwner,
   shouldCreateSelectionHighlight,
 } from './selectionHighlightPolicy'
+import {
+  buildTextRanges,
+  collectTextNodes,
+  computeTextOffsets,
+  paintHighlightRanges,
+  unpaintHighlightRanges,
+} from './textHighlightRanges'
 
 const HIGHLIGHT_NAME = 'yolo-pdf-selection'
 
@@ -130,115 +136,17 @@ type PdfHighlightEntry = {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CSS Custom Highlight registry
-// ──────────────────────────────────────────────────────────────────────────────
-
-type AnyHighlight = any
-
-/**
- * Lazily get-or-create the singleton Highlight registered under HIGHLIGHT_NAME.
- *
- * Returns null when the runtime does not support the CSS Custom Highlight API
- * (e.g. older mobile webviews).
- */
-function getOrCreateHighlight(): AnyHighlight {
-  const w = window as any
-  if (typeof w.Highlight !== 'function' || !w.CSS || !w.CSS.highlights) {
-    return null
-  }
-  let highlight = w.CSS.highlights.get(HIGHLIGHT_NAME)
-  if (!highlight) {
-    highlight = new w.Highlight()
-    w.CSS.highlights.set(HIGHLIGHT_NAME, highlight)
-  }
-  return highlight
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * Walk all text nodes inside the `.textLayer` element of `pageEl` in DOM order
- * via TreeWalker and return them as an ordered array.
+ * Text nodes of the page's `.textLayer`, in DOM order. Offsets share this
+ * basis: `Range.toString()` concatenates only text, and the `<br>` /
+ * `.endOfContent` nodes PDF.js puts in the text layer contribute none.
  */
 function getTextNodes(pageEl: Element): Text[] {
   const textLayer = pageEl.querySelector('.textLayer')
-  if (!textLayer) return []
-  const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT)
-  const nodes: Text[] = []
-  let node = walker.nextNode()
-  while (node) {
-    nodes.push(node as Text)
-    node = walker.nextNode()
-  }
-  return nodes
-}
-
-/**
- * Character offsets of `range` into the page's concatenated text-node content.
- *
- * Measured with a second Range rather than by matching `range.startContainer` /
- * `endContainer` against individual text nodes: a selection boundary does not
- * have to land *inside* a text node. Dragging to the end of a line — e.g. just
- * past a trailing period — routinely leaves the boundary on the `<span>` or on
- * `.textLayer` itself, with the offset counting child nodes instead of
- * characters. Identity matching finds no text node there and yields nothing,
- * which killed the whole entry (no highlight, and with it no annotation bubble
- * or comment editor). `Range.setEnd` accepts element boundaries natively, so
- * measuring the prefix sidesteps the problem entirely.
- *
- * `toString()` concatenates only text, and the `<br>` / `.endOfContent` nodes
- * PDF.js puts in the text layer contribute none — so these offsets share the
- * exact basis `getTextNodes` walks and `buildRanges` rebuilds against.
- */
-function computeOffsets(
-  textLayer: Element,
-  range: Range,
-): { startOffset: number; endOffset: number } | null {
-  const prefixRange = textLayer.ownerDocument.createRange()
-  prefixRange.selectNodeContents(textLayer)
-  try {
-    prefixRange.setEnd(range.startContainer, range.startOffset)
-  } catch {
-    // Boundary outside this text layer (e.g. a cross-page selection).
-    return null
-  }
-
-  const startOffset = prefixRange.toString().length
-  const endOffset = startOffset + range.toString().length
-  if (startOffset >= endOffset) return null
-  return { startOffset, endOffset }
-}
-
-/**
- * Build per-text-node sub-Ranges covering exactly [startOffset, endOffset)
- * of the page's concatenated text content.
- */
-function buildRanges(
-  textNodes: Text[],
-  startOffset: number,
-  endOffset: number,
-): Range[] {
-  const ranges: Range[] = []
-  let cursor = 0
-  for (const node of textNodes) {
-    const nodeStart = cursor
-    const nodeEnd = cursor + node.length
-
-    if (nodeEnd > startOffset && nodeStart < endOffset) {
-      const localStart = Math.max(0, startOffset - nodeStart)
-      const localEnd = Math.min(node.length, endOffset - nodeStart)
-      const r = document.createRange()
-      r.setStart(node, localStart)
-      r.setEnd(node, localEnd)
-      ranges.push(r)
-    }
-
-    cursor = nodeEnd
-    if (cursor >= endOffset) break
-  }
-  return ranges
+  return textLayer ? collectTextNodes([textLayer]) : []
 }
 
 /**
@@ -393,22 +301,19 @@ export class PdfSelectionHighlightController {
     if (!textLayer) return
 
     const textNodes = getTextNodes(pageEl)
-    const offsets = computeOffsets(textLayer, location.range)
+    const offsets = computeTextOffsets(textLayer, location.range)
     if (!offsets) return
 
     const eventBus = resolveEventBus(leaf)
     if (!eventBus) return
 
     const { startOffset, endOffset } = offsets
-    const ranges = buildRanges(textNodes, startOffset, endOffset)
+    const ranges = buildTextRanges(textNodes, startOffset, endOffset)
 
     const paint =
       (options?.paint ?? true) && shouldCreateSelectionHighlight(owner)
     if (paint) {
-      const highlight = getOrCreateHighlight()
-      if (highlight) {
-        for (const r of ranges) highlight.add(r)
-      }
+      paintHighlightRanges(HIGHLIGHT_NAME, ranges)
     }
 
     const entry: PdfHighlightEntry = {
@@ -430,14 +335,9 @@ export class PdfSelectionHighlightController {
       const el = resolvePageEl(leaf, location.pageNumber)
       if (!el) return
 
-      const hl = entry.paint ? getOrCreateHighlight() : null
-      if (hl) {
-        for (const r of entry.ranges) hl.delete(r)
-      }
-      entry.ranges = buildRanges(getTextNodes(el), startOffset, endOffset)
-      if (hl) {
-        for (const r of entry.ranges) hl.add(r)
-      }
+      if (entry.paint) unpaintHighlightRanges(HIGHLIGHT_NAME, entry.ranges)
+      entry.ranges = buildTextRanges(getTextNodes(el), startOffset, endOffset)
+      if (entry.paint) paintHighlightRanges(HIGHLIGHT_NAME, entry.ranges)
 
       // PDF.js re-rendered this page (scale change, or the page's DOM was
       // recreated) — the annotation bubble, if any, must follow along
@@ -462,7 +362,7 @@ export class PdfSelectionHighlightController {
 
   /**
    * Layer a numbered "批注N" bubble + comment editor onto an existing
-   * 'pinned' entry (docs/plans/2026-08-16-pdf-annotation-quotes.md item 4).
+   * 'pinned' entry.
    * `id` must already have been registered via `addHighlight` — a no-op when
    * it hasn't. Since anchor and paint are decoupled (see the file header
    * comment), this is unaffected by whether the entry is actually painted:
@@ -805,10 +705,7 @@ export class PdfSelectionHighlightController {
     entry.eventBus.off('textlayerrendered', entry.onTextLayerRendered)
     this.teardownAnnotation(entry)
 
-    const highlight = getOrCreateHighlight()
-    if (highlight) {
-      for (const r of entry.ranges) highlight.delete(r)
-    }
+    unpaintHighlightRanges(HIGHLIGHT_NAME, entry.ranges)
 
     this.entries.delete(id)
   }

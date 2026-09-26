@@ -16,6 +16,14 @@ jest.mock('../browser/activeWebviewProbe', () => ({
   findWebviewHandleByPageId: jest.fn(),
 }))
 
+// Only the vault read + encode + cache step is stubbed: the real cache store
+// needs the YOLO data root on a real adapter, and none of that is what the
+// fs_read image branch decides.
+jest.mock('../../utils/llm/image', () => ({
+  ...jest.requireActual('../../utils/llm/image'),
+  tFileToImageDataUrl: jest.fn(),
+}))
+
 jest.mock('../browser/activeWebviewReader', () => ({
   BrowserReadFailure: class BrowserReadFailure extends Error {
     code: string
@@ -36,6 +44,7 @@ import {
   createCompleteToolCallArguments,
 } from '../../types/tool-call.types'
 import { editUndoSnapshotStore } from '../../utils/chat/editUndoSnapshotStore'
+import { tFileToImageDataUrl } from '../../utils/llm/image'
 import {
   getPendingDangerousBashApproval,
   resolveDangerousBashApproval,
@@ -70,7 +79,7 @@ import {
 
 /**
  * The old `callLocalFileTool` switch was deleted once every built-in tool
- * lived in the registry (docs/plans/2026-08-15-tool-registry, D12). These
+ * lived in the registry. These
  * suites are the original behavioural coverage for those tools, so they
  * stay — re-pointed at the one remaining execution path. The adapter keeps
  * their call shape unchanged so the re-point is visibly a boundary swap and
@@ -1838,10 +1847,9 @@ describe('local fs tool action helpers', () => {
     }
   })
 
-  // D4 of docs/plans/09-03-whiteboard-agent-tools/master.md (Q11): fs_edit /
-  // fs_write refuse `.yoloboard` unconditionally — no `resolveModuleFileTextRenderer`
-  // is even passed here, proving the block does not depend on the whiteboard
-  // module being installed or active.
+  // fs_edit / fs_write refuse `.yoloboard` unconditionally — no
+  // `resolveModuleFileTextRenderer` is even passed here, proving the block
+  // does not depend on the whiteboard module being installed or active.
   it('rejects fs_write against a .yoloboard path, pointing at the whiteboard edit tool', async () => {
     const create = jest.fn()
     const modify = jest.fn()
@@ -2611,12 +2619,11 @@ describe('fs_read wikilink resolution', () => {
   })
 })
 
-// D3 of docs/plans/09-03-whiteboard-agent-tools/master.md: fs_read dispatches
-// a claimed extension to the module's renderer instead of returning raw
-// bytes. `resolveModuleFileTextRenderer` is threaded straight through
+// fs_read dispatches a claimed extension to the module's renderer instead of
+// returning raw bytes. `resolveModuleFileTextRenderer` is threaded straight through
 // `ToolContext`, so these tests pass it as a plain function the way
 // `mcpManager.ts` would populate it from `ModuleFileTextRendererRegistry`.
-describe('fs_read module file text renderer dispatch (D3)', () => {
+describe('fs_read module file text renderer dispatch', () => {
   const makeFile = (path: string, extension: string, size = 100): TFile =>
     Object.assign(new TFile(), {
       path,
@@ -2779,8 +2786,8 @@ describe('fs_read module file text renderer dispatch (D3)', () => {
   it('rejects an oversized raw file before ever calling the renderer', async () => {
     // MODULE_RENDERED_FILE_SOURCE_MAX_BYTES (20 MiB) is far above the
     // MAX_FILE_SIZE_BYTES (2 MiB) an unclaimed text file would be capped at —
-    // this is the "size ordering is reversed for a claimed extension" case
-    // from master.md D3: a huge raw board must still be readable so it can
+    // this is the "size ordering is reversed for a claimed extension" case:
+    // a huge raw board must still be readable so it can
     // be rendered down to a small summary.
     const oversized = 21 * 1024 * 1024
     const file = makeFile('Board.yoloboard', 'yoloboard', oversized)
@@ -2804,6 +2811,161 @@ describe('fs_read module file text renderer dispatch (D3)', () => {
     const results = parseResults(result)
     expect(results).toEqual([
       expect.objectContaining({ path: 'Board.yoloboard', ok: false }),
+    ])
+  })
+})
+
+// Issue #595: an image file used to fall through to the text branch and come
+// back as UTF-8-decoded bytes. It now reaches a vision model as an attached
+// image, and is refused (never decoded) when the model or settings can't take
+// it.
+describe('fs_read image and binary files', () => {
+  const imageFile = Object.assign(new TFile(), {
+    path: 'assets/pixel.png',
+    name: 'pixel.png',
+    extension: 'png',
+    stat: { size: 100, mtime: 1000 },
+  })
+  const binaryFile = Object.assign(new TFile(), {
+    path: 'audio/clip.mp3',
+    name: 'clip.mp3',
+    extension: 'mp3',
+    stat: { size: 100, mtime: 1000 },
+  })
+
+  const readText = jest.fn().mockResolvedValue('ID3\u0000\u0000\u0004garbage')
+  const app = {
+    vault: {
+      getFileByPath: jest
+        .fn()
+        .mockImplementation(
+          (path: string) =>
+            ({ [imageFile.path]: imageFile, [binaryFile.path]: binaryFile })[
+              path
+            ] ?? null,
+        ),
+      read: readText,
+    },
+    metadataCache: {
+      getFirstLinkpathDest: jest.fn().mockReturnValue(null),
+      getFileCache: jest.fn().mockReturnValue(null),
+    },
+  } as unknown as App
+
+  const buildSettings = (options: {
+    modalities: string[]
+    imageReadingEnabled?: boolean
+  }) =>
+    ({
+      yolo: { baseDir: 'YOLO' },
+      chatModels: [
+        {
+          id: 'model',
+          providerId: 'provider',
+          model: 'model',
+          modalities: options.modalities,
+        },
+      ],
+      chatOptions: { imageReadingEnabled: options.imageReadingEnabled },
+    }) as unknown as YoloSettings
+
+  const readImage = (settings: YoloSettings) =>
+    callLocalFileTool({
+      app,
+      settings,
+      chatModelId: 'model',
+      toolName: 'fs_read',
+      args: { paths: [imageFile.path] },
+    })
+
+  const parseResults = (result: LocalToolCallResult) =>
+    (
+      JSON.parse((result as { text: string }).text) as {
+        results: Array<Record<string, unknown>>
+      }
+    ).results
+
+  beforeEach(() => {
+    jest
+      .mocked(tFileToImageDataUrl)
+      .mockReset()
+      .mockResolvedValue('data:image/png;base64,AAAA')
+    readText.mockClear()
+  })
+
+  it('attaches the image for a vision-capable model instead of decoding it as text', async () => {
+    const result = await readImage(
+      buildSettings({ modalities: ['text', 'vision'] }),
+    )
+
+    expect(result.status).toBe(ToolCallResponseStatus.Success)
+    expect(readText).not.toHaveBeenCalled()
+    expect(parseResults(result)).toEqual([
+      expect.objectContaining({
+        path: imageFile.path,
+        ok: true,
+        effectiveModality: 'image',
+      }),
+    ])
+    expect((result as { contentParts?: unknown[] }).contentParts).toEqual([
+      {
+        type: 'image_url',
+        image_url: {
+          url: 'data:image/png;base64,AAAA',
+          cacheKey: expect.any(String),
+        },
+      },
+    ])
+  })
+
+  it('refuses the image when the active model cannot accept image input', async () => {
+    const result = await readImage(buildSettings({ modalities: ['text'] }))
+
+    expect(tFileToImageDataUrl).not.toHaveBeenCalled()
+    expect(readText).not.toHaveBeenCalled()
+    expect(parseResults(result)).toEqual([
+      expect.objectContaining({
+        path: imageFile.path,
+        ok: false,
+        error: expect.stringContaining('cannot accept image input'),
+      }),
+    ])
+    expect(
+      (result as { contentParts?: unknown[] }).contentParts,
+    ).toBeUndefined()
+  })
+
+  it('refuses the image when image reading is turned off in settings', async () => {
+    const result = await readImage(
+      buildSettings({
+        modalities: ['text', 'vision'],
+        imageReadingEnabled: false,
+      }),
+    )
+
+    expect(tFileToImageDataUrl).not.toHaveBeenCalled()
+    expect(parseResults(result)).toEqual([
+      expect.objectContaining({
+        path: imageFile.path,
+        ok: false,
+        error: expect.stringContaining('image reading is turned off'),
+      }),
+    ])
+  })
+
+  it('refuses a binary file instead of returning decoded noise', async () => {
+    const result = await callLocalFileTool({
+      app,
+      toolName: 'fs_read',
+      args: { paths: [binaryFile.path] },
+    })
+
+    expect(parseResults(result)).toEqual([
+      expect.objectContaining({
+        path: binaryFile.path,
+        ok: false,
+        error: expect.stringContaining('binary file'),
+      }),
     ])
   })
 })

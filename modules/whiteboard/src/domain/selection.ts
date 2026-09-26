@@ -1,14 +1,13 @@
 // Pure marquee-selection math: normalizing a drag gesture's two corner
 // points into a world-space rectangle, and hit-testing board nodes against
-// it (docs/plans/08-25-yolo-whiteboard/p1-design.md §3's "框选"). The canvas
-// UI (src/ui/canvas.ts) owns the actual overlay div and the screen->world
-// conversion (via ./camera's `screenToWorld`) — this module only ever sees
-// plain world-space points/rects, keeping it DOM-free like every other
-// domain/ module.
+// it ("框选"). The canvas UI (src/ui/canvas.ts) owns the actual overlay div
+// and the screen->world conversion (via ./camera's `screenToWorld`) — this
+// module only ever sees plain world-space points/rects, keeping it DOM-free
+// like every other domain/ module.
 //
 // Selection itself (which ids are currently selected) is UI state, not board
-// data (p1-design §7#3 doesn't mention it, and it has no `.yoloboard`
-// representation) — this module never touches `Board`, only plain rects.
+// data (it has no `.yoloboard` representation) — this module never touches
+// `Board`, only plain rects.
 
 import type { ScreenPoint } from './camera'
 import type { VirtualCardRect, WorldRect } from './virtualization'
@@ -64,7 +63,8 @@ export function nodesInMarquee(
  * Answering this from geometry rather than from an event's target is not a
  * preference: a gesture that captured the pointer retargets every mouse event
  * after it to the capturing element, so `click`/`dblclick` on a card arrive
- * naming the viewport (see canvas.ts's onDoubleClick).
+ * naming the viewport (see ui/canvas/interactionController.ts's
+ * onDoubleClick).
  */
 export function nodeAtPoint(
   nodes: readonly VirtualCardRect[],
@@ -82,4 +82,29 @@ export function nodeAtPoint(
     }
   }
   return null
+}
+
+/**
+ * The smallest of `frames` that contains `point`, or null — which group a
+ * pointer is inside when groups nest. The innermost is the one a press there
+ * would be about (a card dropped there joins it, a label nearest the pointer
+ * names it), so it is the one to point out.
+ */
+export function innermostFrameAt(
+  frames: readonly VirtualCardRect[],
+  point: ScreenPoint,
+): string | null {
+  let best: VirtualCardRect | null = null
+  for (const frame of frames) {
+    if (
+      point.x < frame.x ||
+      point.x > frame.x + frame.w ||
+      point.y < frame.y ||
+      point.y > frame.y + frame.h
+    ) {
+      continue
+    }
+    if (best === null || frame.w * frame.h < best.w * best.h) best = frame
+  }
+  return best?.id ?? null
 }

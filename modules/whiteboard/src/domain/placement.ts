@@ -1,5 +1,5 @@
 // Where a card goes when nobody said where — the other half of `edit_board`'s
-// optional coordinates (docs/plans/09-03-whiteboard-agent-tools Q4, Q9).
+// optional coordinates.
 //
 // This is the *only* thing a caller cannot express with coordinates, which is
 // why it is the only placement behaviour that exists. There is no anchor, no
@@ -14,8 +14,8 @@
 // it fits.
 //
 // The prohibition: **never move a node that is already there.** Pushing
-// neighbours aside to make room is a re-layout nobody asked for, and Q2
-// opened re-layout only to an explicit request (`arrange`). So placement
+// neighbours aside to make room is a re-layout nobody asked for, and
+// re-layout is open only to an explicit request (`arrange`). So placement
 // searches for space; it never makes space. The worst it can do is put a card
 // further away than the prettiest spot.
 //
@@ -68,6 +68,42 @@ export function placeCard(
     ? { x: from.x + from.w + PLACEMENT_GAP, y: from.y }
     : { x: 0, y: 0 }
   return findFreeSpot(seed, size, obstacles)
+}
+
+/**
+ * A card that belongs to one particular card — an excerpt beside the PDF it
+ * was taken from: in the column just right of `source`, top-aligned with it,
+ * in the first free slot going down.
+ *
+ * `placeCard`'s search turned a quarter: it walks right because a batch
+ * reads left to right, and this walks down because what is kept beside a
+ * source reads like notes in its margin — the second excerpt under the
+ * first, not further away from the page it came from. Still one axis and
+ * still no moving of anything already there; a slot is skipped by jumping
+ * past whatever filled it, so the column packs.
+ */
+export function placeBeside(
+  obstacles: readonly Rect[],
+  size: Size,
+  source: Rect,
+): Point {
+  let candidate: Rect = {
+    x: source.x + source.w + PLACEMENT_GAP,
+    y: source.y,
+    w: size.w,
+    h: size.h,
+  }
+  for (let step = 0; step < MAX_PLACEMENT_STEPS; step += 1) {
+    const blocking = obstacles.filter((obstacle) =>
+      overlaps(obstacle, candidate),
+    )
+    if (blocking.length === 0) break
+    const below = Math.max(
+      ...blocking.map((obstacle) => obstacle.y + obstacle.h),
+    )
+    candidate = { ...candidate, y: below + PLACEMENT_GAP }
+  }
+  return { x: candidate.x, y: candidate.y }
 }
 
 /**

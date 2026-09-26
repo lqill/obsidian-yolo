@@ -32,7 +32,6 @@ describe('CLI runtime registry', () => {
     for (const descriptor of CLI_RUNTIME_DESCRIPTORS) {
       expect(descriptor.labelKey.length).toBeGreaterThan(0)
       expect(descriptor.defaultLabel.length).toBeGreaterThan(0)
-      expect(descriptor.descriptionKey.length).toBeGreaterThan(0)
       expect(descriptor.icon.src.length).toBeGreaterThan(0)
       expect(descriptor.icon.provider.length).toBeGreaterThan(0)
     }
@@ -65,6 +64,7 @@ describe('CLI runtime registry', () => {
       ['hermes', []],
       ['pi', ['omp']],
       ['grok', []],
+      ['codebuddy', []],
     ])
   })
 

@@ -1,0 +1,281 @@
+/* --- PDF spreads -----------------------------------------------------------
+ * A PDF card spread out on the board (domain/spread.ts): a title that stands
+ * for the whole document, and a sheet per page placed on its own. Both are
+ * cards to the board — selected, dragged, snapped and connected like any —
+ * so what is here is only what makes them read as a name and as paper. */
+
+/* The title: one line over the first sheet saying what the document is —
+ * its type, its name, how many pages it has — so a spread reads as a
+ * document, where a group's label reads as the name of a region. No box of
+ * its own at rest: the badge is what marks it.
+ *
+ * The node is one sheet wide (domain/spread.ts's `layoutSpreadGrid`), but
+ * the name is never cut: the line is at least the node's width and as much
+ * wider as the name needs, spilling past it. So the line, not the node, is
+ * what wears the selection ring — a card's, since it is the whole document
+ * being selected — and the border a pointed-at card gets. */
+.yolo-whiteboard-card.yolo-whiteboard-spread-title,
+.yolo-whiteboard-card.yolo-whiteboard-spread-title.yolo-whiteboard-card-hovered,
+.yolo-whiteboard-card.yolo-whiteboard-spread-title.yolo-whiteboard-card-selected {
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* A card's hover border (card.css) is written with its selection and
+ * editing exclusions, which outweigh the rule above: repeated at that
+ * weight, for the title and a themed one. The line below carries the hover
+ * instead. */
+.yolo-whiteboard-card.yolo-whiteboard-spread-title.yolo-whiteboard-card-hovered:not(
+    .yolo-whiteboard-card-selected
+  ):not(.yolo-whiteboard-card-editing),
+.yolo-whiteboard-card.yolo-whiteboard-spread-title.yolo-whiteboard-themed.yolo-whiteboard-card-hovered:not(
+    .yolo-whiteboard-card-selected
+  ):not(.yolo-whiteboard-card-editing) {
+  border-color: transparent;
+}
+
+.yolo-whiteboard-card.yolo-whiteboard-spread-title::before,
+.yolo-whiteboard-card.yolo-whiteboard-spread-title::after {
+  content: none;
+}
+
+.yolo-whiteboard-spread-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+  height: 100%;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: inherit;
+}
+
+/* A folded PDF card wears its title on the same line (drag.css's
+ * `.yolo-whiteboard-card-title-pdf`), and so the same borders: the title
+ * does not change as the pages come out or go back. */
+.yolo-whiteboard-card-hovered > .yolo-whiteboard-spread-title-line,
+.yolo-whiteboard-card-hovered
+  > .yolo-whiteboard-card-title-pdf
+  > .yolo-whiteboard-spread-title-line {
+  border-color: var(--background-modifier-border-focus);
+}
+
+.yolo-whiteboard-card-selected > .yolo-whiteboard-spread-title-line,
+.yolo-whiteboard-card-selected
+  > .yolo-whiteboard-card-title-pdf
+  > .yolo-whiteboard-spread-title-line {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.yolo-whiteboard-spread-title-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: 0.02em;
+  color: var(--color-red);
+  background-color: rgba(var(--color-red-rgb), 0.12);
+}
+
+.yolo-whiteboard-spread-title-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-normal);
+  white-space: nowrap;
+}
+
+/* The sheets of the document whose title is under the pointer (the canvas's
+ * `syncSpreadHover`): which pieces of paper are one paper. The border a
+ * pointed-at card gets, not a selection's accent: pointing selects nothing. */
+.yolo-whiteboard-card.yolo-whiteboard-spread-sheet.yolo-whiteboard-spread-sibling:not(
+    .yolo-whiteboard-card-selected
+  ) {
+  border-color: var(--background-modifier-border-focus);
+}
+
+/* Every sheet of the spread whose title is selected (canvas.ts's
+ * `setSelection`): a faint wash of the accent, so the document the selection
+ * names can be found on the board — fainter than a selected card's ring,
+ * since the sheets are not what is selected. */
+.yolo-whiteboard-card.yolo-whiteboard-spread-sheet.yolo-whiteboard-spread-sheet-of-selected:not(
+    .yolo-whiteboard-card-selected
+  ) {
+  border-color: color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+}
+
+/* A sheet is a page of paper: square corners, no frame of its own beyond the
+ * one every card has, and the page drawn edge to edge. */
+.yolo-whiteboard-card.yolo-whiteboard-spread-sheet {
+  border-radius: 0;
+}
+
+.yolo-whiteboard-spread-sheet .yolo-whiteboard-card-body,
+.yolo-whiteboard-spread-sheet .yolo-whiteboard-card-title-block {
+  border-radius: 0;
+}
+
+.yolo-whiteboard-spread-sheet .yolo-whiteboard-pdf-reader {
+  background: transparent;
+}
+
+.yolo-whiteboard-spread-sheet .yolo-whiteboard-pdf-page {
+  box-shadow: none;
+}
+
+/* The page number, in the sheet's lower right corner: small, and in world
+ * units, so it is on the paper rather than on the screen. */
+.yolo-whiteboard-spread-sheet-number {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  padding: 0 5px;
+  border-radius: var(--radius-s, 4px);
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  box-shadow: 0 0 0 1px var(--background-modifier-border);
+  pointer-events: none;
+}
+
+/* Parked on a title or a sheet, the handle layer keeps only its connection
+ * points: neither is resized by hand (interactionController's
+ * `isFixedSize`), and a press on a side handle falls through to the card to
+ * drag it. */
+.yolo-whiteboard-interaction-layer-fixed .yolo-whiteboard-resizer {
+  pointer-events: none;
+  cursor: default;
+}
+
+.yolo-whiteboard-interaction-layer-fixed
+  .yolo-whiteboard-resizer:is(
+    [data-resize='topleft'],
+    [data-resize='topright'],
+    [data-resize='bottomleft'],
+    [data-resize='bottomright']
+  ) {
+  display: none;
+}
+
+.yolo-whiteboard-interaction-layer-fixed .yolo-whiteboard-connection-point {
+  pointer-events: auto;
+}
+
+/* The frame around a selected spread (ui/canvas/spreadFrame.ts): the space
+ * "the whole document" covers, drawn as one thing only — a faint line down
+ * its right side, as bare text is marked (text.css), because that side is
+ * the one that does something. Dragged sideways, it lays every sheet out
+ * again a whole column at a time. Chrome in world coordinates, weighted by
+ * the zoom multiplier the camera writes on this element, like the resize
+ * handles. */
+.yolo-whiteboard-spread-frame {
+  --yolo-whiteboard-spread-frame-line: calc(
+    2px * var(--yolo-whiteboard-zoom-multiplier, 1)
+  );
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.yolo-whiteboard-spread-frame.yolo-whiteboard-spread-frame-hidden {
+  display: none;
+}
+
+/* A strip centred on the right side, wider than the line so it can be
+ * found; the line turns the accent under the pointer, and stays so for the
+ * length of a drag. */
+.yolo-whiteboard-spread-frame-edge {
+  --yolo-whiteboard-spread-edge: calc(
+    12px * var(--yolo-whiteboard-zoom-multiplier, 1)
+  );
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--yolo-whiteboard-spread-edge) * -0.5);
+  width: var(--yolo-whiteboard-spread-edge);
+  cursor: ew-resize;
+  pointer-events: auto;
+}
+
+.yolo-whiteboard-spread-frame-edge::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - var(--yolo-whiteboard-spread-frame-line) * 0.5);
+  width: var(--yolo-whiteboard-spread-frame-line);
+  border-radius: var(--yolo-whiteboard-spread-frame-line);
+  background-color: var(--text-faint);
+  opacity: 0.5;
+}
+
+.yolo-whiteboard-spread-frame-edge:hover::before,
+.yolo-whiteboard-spread-frame-dragging-edge
+  .yolo-whiteboard-spread-frame-edge::before {
+  background-color: var(--interactive-accent);
+  opacity: 1;
+}
+
+/* The bottom-right corner: what sizes the pages (the whole document scales
+ * with them). Marked by a short stroke along the bottom that turns the right
+ * edge's line into a corner, in the same faint ink; the grip is a square
+ * over the corner, above the edge's strip so the corner wins where they
+ * meet. */
+.yolo-whiteboard-spread-frame-corner {
+  --yolo-whiteboard-spread-corner: calc(
+    16px * var(--yolo-whiteboard-zoom-multiplier, 1)
+  );
+  position: absolute;
+  z-index: 1;
+  right: calc(var(--yolo-whiteboard-spread-corner) * -0.5);
+  bottom: calc(var(--yolo-whiteboard-spread-corner) * -0.5);
+  width: var(--yolo-whiteboard-spread-corner);
+  height: var(--yolo-whiteboard-spread-corner);
+  cursor: nwse-resize;
+  pointer-events: auto;
+}
+
+.yolo-whiteboard-spread-frame-corner::before,
+.yolo-whiteboard-spread-frame-corner::after {
+  content: '';
+  position: absolute;
+  border-radius: var(--yolo-whiteboard-spread-frame-line);
+  background-color: var(--text-faint);
+  opacity: 0.5;
+}
+
+/* Along the bottom, from the corner leftwards. */
+.yolo-whiteboard-spread-frame-corner::before {
+  right: calc(50% - var(--yolo-whiteboard-spread-frame-line) * 0.5);
+  top: calc(50% - var(--yolo-whiteboard-spread-frame-line) * 0.5);
+  width: calc(var(--yolo-whiteboard-spread-corner) * 1.25);
+  height: var(--yolo-whiteboard-spread-frame-line);
+}
+
+/* Up the right side, over the edge's own line, so the corner lights as one
+ * piece. */
+.yolo-whiteboard-spread-frame-corner::after {
+  left: calc(50% - var(--yolo-whiteboard-spread-frame-line) * 0.5);
+  bottom: calc(50% - var(--yolo-whiteboard-spread-frame-line) * 0.5);
+  width: var(--yolo-whiteboard-spread-frame-line);
+  height: calc(var(--yolo-whiteboard-spread-corner) * 1.25);
+}
+
+.yolo-whiteboard-spread-frame-corner:hover::before,
+.yolo-whiteboard-spread-frame-corner:hover::after,
+.yolo-whiteboard-spread-frame-dragging-corner
+  .yolo-whiteboard-spread-frame-corner::before,
+.yolo-whiteboard-spread-frame-dragging-corner
+  .yolo-whiteboard-spread-frame-corner::after {
+  background-color: var(--interactive-accent);
+  opacity: 1;
+}

@@ -1,6 +1,9 @@
 import { Platform } from 'obsidian'
 
-import { buildPdfPageImageCacheKey } from '../../../database/json/chat/imageCacheStore'
+import {
+  buildImageCacheKey,
+  buildPdfPageImageCacheKey,
+} from '../../../database/local-cache/localCacheStore'
 import type { ContentPart } from '../../../types/llm/request'
 import type { McpTool } from '../../../types/mcp.types'
 import {
@@ -11,6 +14,11 @@ import { uint8ArrayToBase64 } from '../../../utils/base64'
 import { collectWikilinkPaths } from '../../../utils/llm/annotate-wikilinks'
 import { extractMarkdownImages } from '../../../utils/llm/extract-markdown-images'
 import {
+  IMAGE_READ_MAX_BYTES,
+  isImageTFile,
+  tFileToImageDataUrl,
+} from '../../../utils/llm/image'
+import {
   chatModelSupportsPdf,
   chatModelSupportsVision,
 } from '../../../utils/llm/model-modalities'
@@ -20,8 +28,8 @@ import {
 } from '../../../utils/llm/resolve-wikilink-target'
 import { parseOfficeDocument } from '../../../utils/office'
 import {
-  PDF_INDEX_MAX_BYTES,
-  PDF_INDEX_MAX_PAGES,
+  PDF_READ_MAX_BYTES,
+  PDF_READ_MAX_PAGES,
   extractPdfText,
 } from '../../../utils/pdf/extractPdfText'
 import { renderPdfPagesToImages } from '../../../utils/pdf/renderPdfPagesToImages'
@@ -68,12 +76,12 @@ import {
 // `modality` field — that one is dynamic (see `getMcpTool` below).
 //
 // Built lazily inside a function, NOT as a module-level `const`. This
-// originally guarded against a real bug: an earlier version of the D6
+// originally guarded against a real bug: an earlier version of the
 // delegation bridge created a cycle back through `localFileTools.ts`, and a
 // module-level `const` referencing `MAX_BATCH_READ_FILES` at import time
 // could observe that binding before its defining module had finished
 // initializing, silently baking `undefined` into the schema text. That
-// specific cycle no longer exists (D6a fix — `MAX_BATCH_READ_FILES` now
+// specific cycle no longer exists (`MAX_BATCH_READ_FILES` now
 // comes from the sibling `./schema-helpers` module, not `localFileTools.ts`),
 // but deferring the read to call time has no downside and guards against the
 // same class of module-init-order hazard should another cycle appear later,
@@ -124,7 +132,7 @@ const FS_READ_DESCRIPTION = [
   '- open page: browser://<page_id> from <browser_context>',
   '- wikilink: [[Note#Heading]] or bare Note#^blockId (nested headings ok; .md optional). Exact vault path wins first.',
   '',
-  'Omit range fields for a full read. Targeted read: startLine and optionally endLine or maxLines (1-based; PDF pages). Office files (.docx/.pptx/.xlsx) parse to markdown.',
+  'Omit range fields for a full read. Targeted read: startLine and optionally endLine or maxLines (1-based; PDF pages). Office files (.docx/.pptx/.xlsx) parse to markdown. Image files (.png/.jpg/.jpeg/.gif/.webp) are attached for the model to look at; range fields do not apply.',
   '',
   'browser://:',
   '- copy page_id from <browser_context>; never invent browser://https://... or browser://domain/path',
@@ -140,7 +148,7 @@ export const fsReadDefinition = defineTool({
   // entirely for text-only models, `['text', 'pdf']` for PDF-capable models,
   // `['text', 'image']` for vision-capable (non-PDF) models. This is the
   // reason `BuiltinToolDefinition.getMcpTool` is typed as `(ctx) => ...`
-  // rather than a constant (master.md §3.3).
+  // rather than a constant.
   getMcpTool: (ctx) => {
     const modalitySchema = buildFsReadModalitySchema(ctx.chatModelModalities)
     return {
@@ -164,11 +172,11 @@ export const fsReadDefinition = defineTool({
   // (`src/core/mcp/localFileTools.ts`, pre-migration), minus the abort check
   // / workspace-scope / YOLO-data-root guards on the *top-level path
   // parameter* and the outer try/catch — those are dispatcher
-  // responsibilities (master.md §3.4). The rest of this function's own
+  // responsibilities. The rest of this function's own
   // per-resolved-path checks (YOLO-data-root re-check after wikilink
   // resolution, workspace-scope re-check after wikilink resolution) are
-  // deliberately NOT dispatcher responsibilities and stay here — see
-  // master.md §5's "解析级检查" carve-out: wikilink targets are not literal
+  // deliberately NOT dispatcher responsibilities and stay here (the
+  // "解析级检查" carve-out): wikilink targets are not literal
   // path strings until resolved inside this function, so
   // `enforceBuiltinToolSecurityBoundary`'s raw-argument scan structurally
   // cannot see them. Duplicating those two checks here is not "the tool
@@ -441,7 +449,7 @@ export const fsReadDefinition = defineTool({
       // rather than relying solely on the dispatcher's top-level raw-string
       // scan (`enforceBuiltinToolSecurityBoundary`): a wikilink target's
       // resolved `file.path` may never have appeared as a literal string in
-      // `args` (master.md §5's "解析级检查"), so this is the only place that
+      // `args` ("解析级检查"), so this is the only place that
       // scan can happen. Applies uniformly to exact-match and
       // wikilink-resolved entries; files inside an allowed skill package
       // keep the same exemption they had under `findPathOutsideScope`'s
@@ -482,7 +490,7 @@ export const fsReadDefinition = defineTool({
 
       const isPdf = file.extension?.toLowerCase() === 'pdf'
       if (isPdf) {
-        if (file.stat.size > PDF_INDEX_MAX_BYTES) {
+        if (file.stat.size > PDF_READ_MAX_BYTES) {
           results.push({
             path,
             ok: false,
@@ -636,9 +644,9 @@ export const fsReadDefinition = defineTool({
           try {
             const extracted = await extractPdfText(app, file, {
               signal,
-              maxBinaryBytes: PDF_INDEX_MAX_BYTES,
-              maxPages: PDF_INDEX_MAX_PAGES,
-              settings,
+              maxBinaryBytes: PDF_READ_MAX_BYTES,
+              maxPages: PDF_READ_MAX_PAGES,
+              useCache: true,
             })
             pdfSliceFallbackPages = extracted.pages
           } catch (extractErr) {
@@ -726,7 +734,6 @@ export const fsReadDefinition = defineTool({
               file,
               reqStart,
               reqEnd,
-              settings,
             )
           } catch (error) {
             results.push({
@@ -790,9 +797,9 @@ export const fsReadDefinition = defineTool({
         try {
           const extracted = await extractPdfText(app, file, {
             signal,
-            maxBinaryBytes: PDF_INDEX_MAX_BYTES,
-            maxPages: PDF_INDEX_MAX_PAGES,
-            settings,
+            maxBinaryBytes: PDF_READ_MAX_BYTES,
+            maxPages: PDF_READ_MAX_PAGES,
+            useCache: true,
           })
           pages = extracted.pages
         } catch (error) {
@@ -923,6 +930,88 @@ export const fsReadDefinition = defineTool({
         continue
       }
 
+      // An image has no text form: it reaches the model as an image or not at
+      // all. So the two gates the markdown-embed path below applies (a
+      // text-only endpoint 400s on the payload, issue #255; the user's
+      // image-reading switch) refuse the entry here instead of silently
+      // degrading, and the encoding shares that path's compression and cache
+      // so an image costs the same whether it was embedded or read directly.
+      if (isImageTFile(file)) {
+        if (!chatModelAcceptsImages) {
+          results.push({
+            path,
+            ok: false,
+            error:
+              'This file is an image and the active chat model cannot accept image input.',
+          })
+          continue
+        }
+        if (!(settings?.chatOptions?.imageReadingEnabled ?? true)) {
+          results.push({
+            path,
+            ok: false,
+            error:
+              'This file is an image, but image reading is turned off in settings.',
+          })
+          continue
+        }
+        if (file.stat.size > IMAGE_READ_MAX_BYTES) {
+          results.push({
+            path,
+            ok: false,
+            error: `Image too large (${file.stat.size} bytes). Max allowed is ${IMAGE_READ_MAX_BYTES}.`,
+          })
+          continue
+        }
+
+        try {
+          const dataUrl = await tFileToImageDataUrl(app, file, {
+            cache: true,
+            compression: {
+              enabled: settings?.chatOptions?.imageCompressionEnabled ?? true,
+              quality: settings?.chatOptions?.imageCompressionQuality ?? 85,
+            },
+          })
+          perFileAttachmentParts.push({
+            path,
+            parts: [
+              {
+                type: 'image_url',
+                image_url: {
+                  url: dataUrl,
+                  cacheKey: buildImageCacheKey(
+                    file.path,
+                    file.stat.mtime,
+                    file.stat.size,
+                  ),
+                },
+              },
+            ],
+          })
+        } catch (error) {
+          results.push({
+            path,
+            ok: false,
+            error: `Failed to read image: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          })
+          continue
+        }
+
+        results.push({
+          path,
+          ok: true,
+          totalLines: 0,
+          hasMoreBelow: false,
+          nextStartLine: null,
+          content: 'The image is attached after this tool result.',
+          effectiveModality: 'image',
+          ...wikilinkResultFields,
+        })
+        continue
+      }
+
       const officeKind = getOfficeDocumentKindFromExtension(file.extension)
       if (officeKind) {
         if (file.stat.size > OFFICE_READ_MAX_BYTES) {
@@ -973,8 +1062,7 @@ export const fsReadDefinition = defineTool({
         continue
       }
 
-      // Module-owned formats (D3 of docs/plans/09-03-whiteboard-agent-tools/
-      // master.md): a module can claim an extension and supply the text form
+      // Module-owned formats: a module can claim an extension and supply the text form
       // a model should see for it — e.g. `.yoloboard` renders to a board
       // summary instead of raw coordinate JSON. `null` means nothing claimed
       // this extension (module not installed/active, or no module ever
@@ -1083,6 +1171,19 @@ export const fsReadDefinition = defineTool({
           : operation
 
       const rawContent = await app.vault.read(file)
+      // No text file contains a NUL character (the same heuristic `grep` and
+      // `git` use). Without this, an unrecognized binary format decodes into
+      // replacement-character noise that costs tokens and tells the model
+      // nothing.
+      if (rawContent.includes('\u0000')) {
+        results.push({
+          path,
+          ok: false,
+          error:
+            'This file looks like a binary file (contains NUL bytes), not text, and has no readable form.',
+        })
+        continue
+      }
       const content = rawContent
       const lines = content.length === 0 ? [] : content.split('\n')
       const sliced = sliceLinesForFsReadOperation(lines, effectiveOperation)
@@ -1130,7 +1231,7 @@ export const fsReadDefinition = defineTool({
               enabled: settings?.chatOptions?.imageCompressionEnabled ?? true,
               quality: settings?.chatOptions?.imageCompressionQuality ?? 85,
             },
-            cache: { enabled: true, settings },
+            cache: true,
             externalUrl: {
               enabled:
                 settings?.chatOptions?.externalImageFetchEnabled ?? false,

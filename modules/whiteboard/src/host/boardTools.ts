@@ -1,5 +1,4 @@
-// The whiteboard's tools, as the agent sees them
-// (docs/plans/09-03-whiteboard-agent-tools/master.md D2, D3).
+// The whiteboard's tools, as the agent sees them.
 //
 // Two tools and one renderer, and the split between them is the whole design:
 //
@@ -7,11 +6,10 @@
 //     with `fs_read`. What the registered renderer changes is only *what it
 //     gets back* — a summary instead of several hundred KB of JSON. A
 //     `read_board` beside `fs_read` would make the model choose between two
-//     ways to read the same thing and leave two outputs to keep in step
-//     (Q23).
+//     ways to read the same thing and leave two outputs to keep in step.
 //   - **Writing is a tool**, because `fs_edit`'s string replacement over
 //     JSON is not editing a board, it is corrupting one on a bad day. So
-//     `.yoloboard` is blocked there (D4) and `edit_board` is what exists
+//     `.yoloboard` is blocked there and `edit_board` is what exists
 //     instead: operations over cards and connections, never over text.
 //
 // Both tools are deferred by default, like every module tool set: a user who
@@ -29,6 +27,7 @@ import {
   GRID_WORLD_STEP_PX,
   NEW_CARD_SIZE,
   NEW_EMBED_CARD_SIZE,
+  fileCardSizes,
 } from '../ui/constants'
 
 import { boardToolSchemas } from './boardToolSchemas'
@@ -115,11 +114,30 @@ async function editBoard(
   const path = readPath(input)
   if (typeof path !== 'string') return path
   const edit = input as Parameters<typeof applyBoardEdit>[1]
+  const creates = Array.isArray(edit.create) ? edit.create : []
+  // A card for a file that is not there is a broken card reported as a
+  // success; rejected here like any other invalid operation, so the model
+  // corrects the path instead of the user finding the card later.
+  for (const [index, op] of creates.entries()) {
+    if (typeof op?.file !== 'string' || op.file.trim() === '') continue
+    if (!isVaultFile(host, op.file)) {
+      return toolError(
+        `create[${index}].file: no file at "${op.file}" in the vault.`,
+      )
+    }
+  }
+  // Measured before the edit, which is applied synchronously: a PDF's card
+  // is sized from its first page (`fileCardSize`).
+  const fileSizes = await fileCardSizes(
+    host.pdf,
+    creates.flatMap((op) => (typeof op?.file === 'string' ? [op.file] : [])),
+  )
   const context = {
     newNodeId: mintNodeId,
     newEdgeId: mintEdgeId,
     gridStep: GRID_WORLD_STEP_PX,
     textCardSize: NEW_CARD_SIZE,
+    fileCardSize: (file: string) => fileSizes.get(file) ?? NEW_EMBED_CARD_SIZE,
     embedCardSize: NEW_EMBED_CARD_SIZE,
   }
 
@@ -210,6 +228,15 @@ async function createBoard(
   }
   return {
     content: `Created ${path}. It is empty; add cards with edit_board.`,
+  }
+}
+
+function isVaultFile(host: YoloModuleHostApiV1, path: string): boolean {
+  try {
+    return host.vault.getEntry(path)?.kind === 'file'
+  } catch {
+    // A path the vault refuses outright (absolute, dot segments) is not one.
+    return false
   }
 }
 

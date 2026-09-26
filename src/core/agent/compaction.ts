@@ -246,13 +246,13 @@ export const shouldTriggerAutoContextCompaction = ({
   )
 }
 
-export const buildAutoContextCompactionNoticeMessage = ({
+export const buildAutoContextCompactionNotice = ({
   trigger,
   chatOptions,
 }: {
   trigger: AutoContextCompactionPromptTrigger
   chatOptions: AutoContextCompactionChatOptions
-}): RequestMessage => {
+}): string => {
   const ratioPercent =
     trigger.ratio === null ? null : Math.round(trigger.ratio * 1000) / 10
   const thresholdDescription =
@@ -264,9 +264,7 @@ export const buildAutoContextCompactionNoticeMessage = ({
       ? `${trigger.promptTokens} prompt tokens`
       : `${trigger.promptTokens} prompt tokens (${ratioPercent}% of ${trigger.maxContextTokens} max context tokens)`
 
-  return {
-    role: 'user',
-    content: `<auto_context_compaction_notice>
+  return `<auto_context_compaction_notice>
 This is an internal runtime notice, not a user-authored message and not part of the task content.
 
 The previous assistant turn reported ${currentUsageDescription}, which has reached the user's automatic context compaction threshold (${thresholdDescription}).
@@ -276,8 +274,7 @@ Please call \`${CONTEXT_COMPACT_TOOL_NAME}\` at the next appropriate point:
 - If completing the current task will still take more tool work or a longer continuation, briefly report the current progress to the user first, then call \`${CONTEXT_COMPACT_TOOL_NAME}\` before continuing.
 
 Do not ask the user for permission to compact. Do not mention this internal notice unless it is directly relevant.
-</auto_context_compaction_notice>`,
-  }
+</auto_context_compaction_notice>`
 }
 
 const parseCompactOperationResult = (
@@ -510,12 +507,9 @@ const buildCompactionInstructionMessage = (
     : ''
   return {
     role: 'user',
-    content: `CRITICAL: You are now in COMPACTION MODE. The task above is paused.
-- Do NOT continue the task. Do NOT call any tools — tool calls are rejected.
-- Respond with PLAIN TEXT ONLY: a <summary> block with the fixed sections below.
-- Write in the same language the conversation is currently using.
-- Summarize only the CONVERSATION facts needed to resume. Ignore the system
-  prompt, tool schemas, and tool-disclosure boilerplate — do not summarize them.
+    content: `The task above is paused for context compaction. Instead of continuing it, reply with a <summary> block in the sections below; tool calls are ignored this turn.
+- Write in the language the conversation is currently using.
+- Summarize only the conversation facts needed to resume, not the system prompt, tool schemas, or tool-disclosure text.
 
 Produce a high-signal summary that loses nothing needed to resume. Sections:
 

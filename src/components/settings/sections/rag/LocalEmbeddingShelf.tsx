@@ -1,4 +1,11 @@
-import { Check, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Cpu,
+  ExternalLink,
+  Zap,
+} from 'lucide-react'
 import { Notice, Platform } from 'obsidian'
 import {
   useEffect,
@@ -13,6 +20,7 @@ import { useSettings } from '../../../../contexts/settings-context'
 import {
   LOCAL_EMBEDDING_CATALOG,
   LocalEmbeddingCatalogEntry,
+  LocalEmbeddingDevice,
   getLocalEmbeddingCatalogEntry,
 } from '../../../../core/rag/local-embedding/catalog'
 import {
@@ -21,6 +29,7 @@ import {
   LOCAL_EMBEDDING_PROVIDER_ID,
 } from '../../../../core/rag/local-embedding/constants'
 import type { LocalEmbeddingModelState } from '../../../../core/rag/local-embedding/manager'
+import { isLocalEmbeddingGpuSupported } from '../../../../core/rag/local-embedding/webgpu'
 import type YoloPlugin from '../../../../main'
 import { EmbeddingModel } from '../../../../types/embedding-model.types'
 import {
@@ -104,9 +113,8 @@ function localEmbeddingTranslator(t: Translate) {
  * "model ready, `embedding-engine` component enabled, component status in
  * {ready, active, loading}" — anything else is a `LocalEmbeddingEngineIssue`
  * for `RAGSection`'s status bar to take over its one status line with
- * (instead of adding a second), per
- * docs/plans/08-22-local-embedding/00-plan.md §3.6. `null` whenever the
- * current model isn't local, or is local and healthy.
+ * (instead of adding a second). `null` whenever the current model isn't
+ * local, or is local and healthy.
  */
 export function useLocalEmbeddingEngineIssue(
   plugin: YoloPlugin,
@@ -276,8 +284,7 @@ type LocalEmbeddingShelfProps = {
  * The "本地" (on-device) embedding-model shelf inside the Knowledge Base
  * tab's embedding-model section — a curated download list with per-model
  * lifecycle (download / cancel / retry / delete / set-as-current), source
- * detail disclosure, and a shared endpoint picker. See
- * docs/plans/08-22-local-embedding/00-plan.md §3.6/§3.7. Deliberately not a
+ * detail disclosure, and a shared endpoint picker. Deliberately not a
  * normal Provider entry — local embedding models have no API key/base URL,
  * they're backed by the `embedding-engine` runtime component.
  */
@@ -450,6 +457,29 @@ export function LocalEmbeddingShelf({ plugin }: LocalEmbeddingShelfProps) {
     }))
   }
 
+  // `null` while the adapter probe is in flight — the GPU tab only disables
+  // once the machine is known not to support it.
+  const [gpuSupported, setGpuSupported] = useState<boolean | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void isLocalEmbeddingGpuSupported().then((supported) => {
+      if (!cancelled) setGpuSupported(supported)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  // A `'gpu'` setting synced from another machine stays untouched here; this
+  // machine just shows (and runs) the CPU side until it can use a GPU.
+  const deviceTab: LocalEmbeddingDevice =
+    gpuSupported === false ? 'cpu' : settings.localEmbedding.device
+  const handleDeviceChange = (device: LocalEmbeddingDevice) => {
+    applySettingsUpdate((prev) => ({
+      ...prev,
+      localEmbedding: { ...prev.localEmbedding, device },
+    }))
+  }
+
   const groupHeader = (
     <div className="yolo-kb-ml-group">
       <b>{tr('groupLabel', '本地')}</b>
@@ -478,7 +508,44 @@ export function LocalEmbeddingShelf({ plugin }: LocalEmbeddingShelfProps) {
   return (
     <>
       {groupHeader}
-      {LOCAL_EMBEDDING_CATALOG.map((entry) => {
+      <div
+        className="yolo-kb-ml-device-tabs"
+        role="tablist"
+        aria-label={tr('deviceAriaLabel', '本地推理设备')}
+      >
+        {(
+          [
+            { device: 'cpu', label: tr('deviceCpu', 'CPU'), Icon: Cpu },
+            { device: 'gpu', label: tr('deviceGpu', 'GPU'), Icon: Zap },
+          ] as const
+        ).map(({ device, label, Icon }) => {
+          const unavailable = device === 'gpu' && gpuSupported === false
+          return (
+            <button
+              key={device}
+              type="button"
+              role="tab"
+              aria-selected={deviceTab === device}
+              disabled={unavailable}
+              title={
+                unavailable
+                  ? tr('deviceGpuUnsupported', '此设备不支持 GPU 推理')
+                  : undefined
+              }
+              className={`yolo-kb-ml-device-tab${
+                deviceTab === device ? ' is-active' : ''
+              }`}
+              onClick={() => handleDeviceChange(device)}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          )
+        })}
+      </div>
+      {LOCAL_EMBEDDING_CATALOG.filter((entry) =>
+        entry.devices.includes(deviceTab),
+      ).map((entry) => {
         const state: LocalEmbeddingModelState = modelSnapshot.get(entry.id) ?? {
           status: 'not-installed',
         }

@@ -64,9 +64,10 @@ import {
 } from '../../../types/reasoning'
 import type { ToolCallResponse } from '../../../types/tool-call.types'
 import { renderAssistantIcon } from '../../../utils/assistant-icon'
-import type {
-  ContextualInjection,
-  EditorSnapshotInjection,
+import {
+  type ContextualInjection,
+  type EditorSnapshotInjection,
+  stampUserMessageInjectedContext,
 } from '../../../utils/chat/contextual-injections'
 import {
   getMentionableKey,
@@ -257,8 +258,7 @@ export function QuickAskPanel({
   const { createOrUpdateConversationImmediately, generateConversationTitle } =
     useChatHistory()
 
-  // Module tool sets (docs/plans/09-03-whiteboard-agent-tools/master.md D1b):
-  // same registry `useSyncExternalStore` pattern used by the chat mode
+  // Module tool sets: same registry `useSyncExternalStore` pattern used by the chat mode
   // registry in `useChatStreamManager.ts`, reduced to what
   // `getEnabledAssistantToolNames` needs so Quick Ask resolves the same
   // enabled tool set the sidebar chat does.
@@ -657,9 +657,8 @@ export function QuickAskPanel({
   }, [mentionables, selectionMentionable])
 
   // System prompt is intentionally minimal: Quick Ask's "current editor scene"
-  // (file path/title, cursor context, selection) is injected via the agent
-  // runtime's `contextualInjections` channel — see editorSnapshotInjection
-  // built below in the submit path.
+  // (file path/title, cursor context, selection) is stamped onto each user
+  // message as it is sent — see editorSnapshotInjection below.
   const requestContextBuilder = useMemo(() => {
     const globalSystemPrompt = settings.systemPrompt || ''
     const assistantPrompt = selectedAssistant?.systemPrompt || ''
@@ -985,19 +984,22 @@ export function QuickAskPanel({
 
       // Compile mentionables into promptContent up front so the title model
       // and the chat model see the same expanded context. Mirrors Chat.tsx.
-      let compiledMessages: ChatMessage[] = newMessages
+      const stampedUserMessage = await stampUserMessageInjectedContext(
+        userMessage,
+        contextualInjections,
+      )
+      let compiledMessages: ChatMessage[] = [
+        ...(options?.baseMessages ?? chatMessages),
+        stampedUserMessage,
+      ]
       try {
         const { promptContent } =
           await requestContextBuilder.compileUserMessagePrompt({
-            message: userMessage,
+            message: stampedUserMessage,
           })
-        const compiledUserMessage: ChatUserMessage = {
-          ...userMessage,
-          promptContent,
-        }
         compiledMessages = [
           ...(options?.baseMessages ?? chatMessages),
-          compiledUserMessage,
+          { ...stampedUserMessage, promptContent },
         ]
       } catch (error) {
         console.error('Failed to compile quick ask user message prompt', error)

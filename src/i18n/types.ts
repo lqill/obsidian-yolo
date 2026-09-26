@@ -83,18 +83,14 @@ export type TranslationKeys = {
       menuLabel: string
       claudeCodeLabel: string
       claudeCodeShortLabel: string
-      claudeCodeDescription: string
       codexLabel: string
-      codexDescription: string
       hermesLabel: string
-      hermesDescription: string
       piLabel: string
-      piDescription: string
       ompLabel: string
-      ompDescription: string
       variantToggleHint: string
       grokLabel: string
-      grokDescription: string
+      codebuddyLabel: string
+      codebuddyShortLabel: string
     }
     chatList?: {
       searchPlaceholder?: string
@@ -134,8 +130,6 @@ export type TranslationKeys = {
       subtitle: string
       backToChat: string
       modelSectionTitle: string
-      continuationModel: string
-      continuationModelDesc: string
       contextSectionTitle: string
       ragToggle: string
       ragToggleDesc: string
@@ -180,6 +174,8 @@ export type TranslationKeys = {
     supportYolo: {
       name: string
       desc: string
+      feedbackHint: string
+      star: string
       afdian: string
       buyMeACoffee: string
       reportBug: string
@@ -296,6 +292,7 @@ export type TranslationKeys = {
         pdfEngine: { name: string; description: string; impact: string }
         bashEngine: { name: string; description: string; impact: string }
         embeddingEngine: { name: string; description: string; impact: string }
+        claudeAgentSdk: { name: string; description: string; impact: string }
         statuses: {
           missing: string
           downloading: string
@@ -314,39 +311,8 @@ export type TranslationKeys = {
       chatFontScaleDesc?: string
     }
     assistants: {
-      title: string
-      desc: string
-      configureAssistants: string
-      assistantsCount: string
-      addAssistant: string
-      noAssistants: string
-      // existing optional keys in locales
       editAssistant?: string
-      deleteAssistant?: string
       noAssistant?: string
-      selectAssistant?: string
-      name?: string
-      nameDesc?: string
-      description?: string
-      descriptionDesc?: string
-      descriptionPlaceholder?: string
-      systemPrompt?: string
-      actions?: string
-      // new optional helpers
-      namePlaceholder?: string
-      systemPromptDesc?: string
-      systemPromptPlaceholder?: string
-      defaultAssistantName?: string
-      // Confirm modal & aria
-      deleteConfirmTitle?: string
-      deleteConfirmMessagePrefix?: string
-      deleteConfirmMessageSuffix?: string
-      addAssistantAria?: string
-      deleteAssistantAria?: string
-      dragHandleAria?: string
-      duplicate?: string
-      copySuffix?: string
-      currentBadge?: string
       manageAll?: string
     }
     agent?: {
@@ -363,9 +329,6 @@ export type TranslationKeys = {
       skillsCount?: string
       skillsCountWithEnabled?: string
       skillsGlobalDesc?: string
-      yoloBaseDir?: string
-      yoloBaseDirDesc?: string
-      yoloBaseDirPlaceholder?: string
       yoloBaseDirHiddenPath?: string
       yoloBaseDirMigrated?: string
       yoloBaseDirMigrationConflict?: string
@@ -374,7 +337,6 @@ export type TranslationKeys = {
       yoloBaseDirMigrationManualRepair?: string
       yoloBaseDirConflictTitle?: string
       yoloBaseDirConflictMessage?: string
-      skillsSourcePath?: string
       refreshSkills?: string
       skillsEmptyHint?: string
       createSkillTemplates?: string
@@ -506,7 +468,6 @@ export type TranslationKeys = {
         enableDesc?: string
         toolBypassNotice?: string
       }
-      editorTabModel?: string
       editorName?: string
       editorNameDesc?: string
       editorDescription?: string
@@ -530,31 +491,10 @@ export type TranslationKeys = {
       toolApprovalRequire?: string
       toolApprovalDangerousOnly?: string
       toolDisclosureAlways?: string
-      toolDisclosureMixed?: string
       toolDisclosureOnDemand?: string
-      editorEnabled?: string
-      editorDisabled?: string
       editorModel?: string
       editorModelDesc?: string
       followDefaultModel?: string
-      editorModelCurrent?: string
-      editorModelSampling?: string
-      editorModelResetDefaults?: string
-      modelPresetFocused?: string
-      modelPresetBalanced?: string
-      modelPresetCreative?: string
-      editorTemperature?: string
-      editorTemperatureDesc?: string
-      editorTopP?: string
-      editorTopPDesc?: string
-      editorMaxOutputTokens?: string
-      editorMaxOutputTokensDesc?: string
-      editorMaxContextMessages?: string
-      editorCustomParameters?: string
-      editorCustomParametersDesc?: string
-      editorCustomParametersAdd?: string
-      editorCustomParametersKeyPlaceholder?: string
-      editorCustomParametersValuePlaceholder?: string
       editorToolsCount?: string
       editorEstimatedContextTokens?: string
       editorSkillsCount?: string
@@ -589,6 +529,8 @@ export type TranslationKeys = {
       ompCliPathDesc?: string
       grokCliPathName?: string
       grokCliPathDesc?: string
+      codebuddyCliPathName?: string
+      codebuddyCliPathDesc?: string
       cliPathMissing?: string
       autoContextCompactionBlockTitle?: string
       autoContextCompaction?: string
@@ -855,6 +797,7 @@ export type TranslationKeys = {
     }
     models: {
       title: string
+      dragHandle?: string
       chatModels: string
       embeddingModels: string
       addChatModel: string
@@ -900,6 +843,7 @@ export type TranslationKeys = {
       availableModelsAuto?: string
       searchModels?: string
       // batch add models
+      addMode?: string
       modeSingle?: string
       modeBatch?: string
       batchSelectAll?: string
@@ -910,7 +854,7 @@ export type TranslationKeys = {
       fetchModelsFailed?: string
       embeddingModelsFirst?: string
       // local (on-device) embedding models — providerId `yolo-local`, no
-      // matching `settings.providers` entry (docs/plans/08-22-local-embedding)
+      // matching `settings.providers` entry
       localEmbeddingProviderLabel?: string
       // reasoning UI
       reasoningType?: string
@@ -968,6 +912,7 @@ export type TranslationKeys = {
       maxOutputTokens?: string
       requestParameters?: string
       requestParametersDesc?: string
+      samplingNotSentForModel?: string
       requestParametersEnabledCount?: string
       clearRequestParameterOverrides?: string
       additionalParameters?: string
@@ -1105,6 +1050,10 @@ export type TranslationKeys = {
       delete?: string
       deleteConfirm?: string
       lastUpdated?: string
+      updatedJustNow?: string
+      updatedMinutesAgo?: string
+      updatedHoursAgo?: string
+      updatedDaysAgo?: string
       setAsCurrent?: string
       // Create/edit modal
       createTitle?: string
@@ -1116,6 +1065,10 @@ export type TranslationKeys = {
       fieldDescriptionPlaceholder?: string
       scopeTitle?: string
       scopeDesc?: string
+      scopeWholeVault?: string
+      scopeOnlyPrefix?: string
+      scopeAndMore?: string
+      scopeExcludeSuffix?: string
       nameRequired?: string
       nameDuplicate?: string
       saveFailed?: string
@@ -1133,6 +1086,10 @@ export type TranslationKeys = {
       localEmbedding?: {
         groupLabel?: string
         groupDesc?: string
+        deviceAriaLabel?: string
+        deviceCpu?: string
+        deviceGpu?: string
+        deviceGpuUnsupported?: string
         desktopOnly?: string
         metaLine?: string
         download?: string
@@ -1314,10 +1271,6 @@ export type TranslationKeys = {
       title: string
       aiSubsectionTitle: string
       tabSubsectionTitle: string
-      superContinuation: string
-      superContinuationDesc: string
-      continuationModel: string
-      continuationModelDesc: string
       selectionChatSubsectionTitle: string
       selectionChatDescription: string
       selectionChatToggle: string
@@ -1349,8 +1302,6 @@ export type TranslationKeys = {
       tabCompletionAdvancedSectionDesc: string
       tabCompletion: string
       tabCompletionDesc: string
-      tabCompletionMultipleCandidates: string
-      tabCompletionMultipleCandidatesDesc: string
       tabCompletionModel: string
       tabCompletionModelDesc: string
       tabCompletionTriggerDelay: string
@@ -1369,12 +1320,6 @@ export type TranslationKeys = {
       tabCompletionLengthPresetMedium: string
       tabCompletionLengthPresetLong: string
       tabCompletionAdvanced: string
-      tabCompletionContextRange: string
-      tabCompletionContextRangeDesc: string
-      tabCompletionMinContextLength: string
-      tabCompletionMinContextLengthDesc: string
-      tabCompletionTemperature: string
-      tabCompletionTemperatureDesc: string
       tabCompletionRequestTimeout: string
       tabCompletionRequestTimeoutDesc: string
       tabCompletionConstraints: string
@@ -1510,8 +1455,6 @@ export type TranslationKeys = {
       actionCategoryDesc: string
       actionIcon: string
       actionIconDesc: string
-      actionEnabled: string
-      actionEnabledDesc: string
       moveUp: string
       moveDown: string
       duplicate: string
@@ -1564,6 +1507,9 @@ export type TranslationKeys = {
       actionInstructionPlaceholder: string
       actionInstructionRewriteDesc: string
       actionInstructionRewritePlaceholder: string
+      actionAssistant: string
+      actionAssistantDesc: string
+      actionAssistantFollowCurrent: string
       duplicate: string
       copySuffix?: string
       dragHandleAria?: string
@@ -1683,11 +1629,15 @@ export type TranslationKeys = {
       controlsLabel?: string
     }
     stopGeneration?: string
+    scrollToBottom?: string
+    scrollToBottomWhileStreaming?: string
     queueMessage?: {
       tooltip?: string
       hint?: string
       blockedApproval?: string
       blockedAwaitingInput?: string
+      blockedActiveTool?: string
+      blockedActiveTooltip?: string
       abortedRestoredOne?: string
       abortedRestoredMany?: string
     }
@@ -1797,6 +1747,7 @@ export type TranslationKeys = {
       cancelError?: string
       openError?: string
       transitionError?: string
+      unboundMessageError?: string
       sessionFallbackDividerTitle?: string
       sessionFallbackDividerDescription?: string
       sessionFallbackUnknownProfile?: string
@@ -1808,6 +1759,9 @@ export type TranslationKeys = {
       defaultModel?: string
       loadError?: string
       updateError?: string
+      defaultBadge?: string
+      setAsDefault?: string
+      removeDefault?: string
     }
     claudePlugins?: {
       title?: string
@@ -1850,6 +1804,10 @@ export type TranslationKeys = {
       runtimeSwitched?: string
       codexReadOnlyNote?: string
       codexUnsupportedVersion?: string
+    }
+    modelSelect?: {
+      searchPlaceholder?: string
+      empty?: string
     }
     quickAccess?: {
       manage?: string
@@ -1937,6 +1895,8 @@ export type TranslationKeys = {
       fileMissing?: string
       snapshotUnavailable?: string
       reviewOutsideVault?: string
+      reviewWhileRunning?: string
+      reviewContentChanged?: string
     }
     errorCard?: {
       title?: string
@@ -2035,6 +1995,7 @@ export type TranslationKeys = {
         originalUnavailable?: string
         collapsedLines?: string
         truncatedLines?: string
+        readingCurrent?: string
       }
     }
     toolSummary?: {
@@ -2134,6 +2095,7 @@ export type TranslationKeys = {
     indexedWithSkipped?: string
     continueComplete?: string
     continueFailed?: string
+    indexCancelled?: string
     openYoloNewChatFailed: string
     updatingIndex: string
     indexUpdated: string
@@ -2142,6 +2104,7 @@ export type TranslationKeys = {
     migrationFailed: string
     reloadingPlugin: string
     settingsInvalid: string
+    settingsUpdateFailed: string
     transportModeAutoPromoted: string
     capturePdfNoLeaf?: string
     capturePdfFailed?: string
@@ -2468,6 +2431,10 @@ export type TranslationKeys = {
     viewOnGitHub: string
     updateInCommunityPlugins: string
     manualInstallOnGitHub: string
+    modulesFollowedCore: string
+    updatesAvailable: string
+    updateAll: string
+    updated: string
   }
 
   // Module-provided file views (e.g. a module registering a custom file

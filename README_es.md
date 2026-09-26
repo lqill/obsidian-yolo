@@ -25,6 +25,10 @@
 </p>
 
 <p align="center">
+  <a href="./documentation/en/README.md"><b>Documentación</b></a> | <a href="./documentation/en/getting-started.md">Primeros pasos</a> | <a href="./documentation/en/faq.md">FAQ</a> <sub>(en inglés)</sub>
+</p>
+
+<p align="center">
   <a href="https://discord.gg/d8EHm48ppU">
     <img src="https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join the Discord community">
   </a>
@@ -33,23 +37,6 @@
 ## Sponsors
 
 <table>
-<tr>
-<td width="200" align="center" valign="middle">
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://www.atlascloud.ai/logo-white.svg">
-      <img src="https://www.atlascloud.ai/logo.svg" alt="Atlas Cloud" width="163">
-    </picture>
-  </a>
-</td>
-<td valign="middle">
-  <b><a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo">Atlas Cloud</a></b> ofrece a los desarrolladores una API unificada para crear con IA de lenguaje, imagen y vídeo. Una sola integración permite explorar más de 300 modelos seleccionados para todas las modalidades, sin tener que mantener conexiones separadas con cada proveedor. Desde agentes basados en LLM hasta generación de imágenes y vídeo, Atlas Cloud facilita la experimentación, la comparación de modelos y la incorporación de IA multimodal a producción.
-  <br><br>
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo"><b>Explora Atlas Cloud →</b></a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://www.atlascloud.ai/console/coding-plan"><b>Descubre el Coding Plan →</b></a>
-</td>
-</tr>
 <tr>
 <td width="200" align="center" valign="middle">
   <a href="https://go.apimart.ai/gh-obsidian-yolo">
@@ -62,13 +49,25 @@
   <a href="https://go.apimart.ai/gh-obsidian-yolo"><b>Regístrate en APIMart →</b></a>
 </td>
 </tr>
+<tr>
+<td width="200" align="center" valign="middle">
+  <a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO">
+    <img src="./assets/sponsor-fluxion.png" alt="Fluxion AI" width="163">
+  </a>
+</td>
+<td valign="middle">
+  ¡Gracias a <b><a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO">Fluxion AI</a></b> por patrocinar este proyecto! Fluxion AI es un servicio de retransmisión de API que ayuda a desarrolladores individuales y empresas a acceder y gestionar los principales modelos de IA del mundo mediante una API unificada. La planificación dinámica en varias rutas mejora la disponibilidad, y el rendimiento de los modelos, los tiempos de respuesta y los costes son transparentes. Con Fable 5.1, Fluxion AI permite ahorrar hasta aproximadamente un 90 % frente a los precios de la API oficial de Claude. Regístrate a través de este enlace y recibe 3 $ en crédito de API gratuito.
+  <br><br>
+  <a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO"><b>Regístrate en Fluxion AI →</b></a>
+</td>
+</tr>
 </table>
 
 ## Novedades
 
 - **`1.6`**
   - **Modelos de embedding locales on-device y múltiples bases de conocimiento**: indexa sin ninguna clave API, divide y gestiona las bases de conocimiento de forma independiente, y deja que el Agente elija automáticamente la correcta por su nombre.
-  - **Chat por CLI**: en escritorio puedes controlar desde la misma interfaz de chat el Claude Code, Codex, Hermes o Pi CLI con el que ya has iniciado sesión.
+  - **Chat por CLI**: en escritorio puedes controlar desde la misma interfaz de chat el Claude Code, Codex, Hermes, Pi o Grok CLI con el que ya has iniciado sesión.
   - **El nuevo Modo de Aprendizaje**: convierte cualquier tema y material de referencia en un proyecto de aprendizaje personalizado con esquemas estructurados, puntos de conocimiento, tarjetas de estudio y un mapa de conocimiento interactivo, respaldado por la repetición espaciada FSRS y la importación de `.apkg` de Anki para un repaso sostenible a largo plazo.
 
 - **`1.5`**: Presenta un nuevo runtime de Agente que convierte la IA de simples preguntas y respuestas en colaboración activa, con llamada completa a herramientas, MCP, Skills, Bash de escritorio, subagentes y búsqueda web, además de un contexto y una memoria más inteligentes para sesiones largas, RAG híbrido renovado, reconocimiento de foco/PDF y chat multiventana con Agentes en segundo plano.
@@ -85,7 +84,7 @@
 <td align="center"><img src="./assets/learning-mode.gif" alt="Learning Mode" width="100%"></td>
 </tr>
 <tr valign="top">
-<td align="center">Ve más allá de las respuestas. YOLO entiende y trabaja directamente con tu Vault, llama a herramientas y servidores MCP, y usa Skills para hacer trabajo real a tu manera. En escritorio puedes cambiar con un clic al Claude Code o Codex con el que ya has iniciado sesión y dejar que trabajen directamente en tu Vault.</td>
+<td align="center">Ve más allá de las respuestas. YOLO entiende y trabaja directamente con tu Vault, llama a herramientas y servidores MCP, y usa Skills para hacer trabajo real a tu manera. En escritorio puedes cambiar con un clic a un agente CLI compatible con el que ya has iniciado sesión y dejar que trabaje directamente en tu Vault.</td>
 <td align="center">Convierte temas y material de origen en un sistema de aprendizaje personal, y luego usa tarjetas y el repaso con FSRS para pasar de notas guardadas a conocimiento duradero.</td>
 </tr>
 <tr>
@@ -105,7 +104,7 @@ Además de las capacidades principales anteriores, YOLO también ofrece:
 
 | Función | Descripción |
 |---------|-------------|
-| 🖥️ Agente CLI (escritorio) | Reutiliza el Claude Code / Codex con el que ya has iniciado sesión en tu equipo y conversa con el agente CLI dentro de Obsidian |
+| 🖥️ Agente CLI (escritorio) | Reutiliza un agente CLI compatible con el que ya has iniciado sesión en tu equipo, incluidos Claude Code, Codex, Hermes, Pi y Grok, directamente dentro de Obsidian |
 | 🔌 Soporte de agentes externos | Conecta clientes MCP como Hermes y OpenClaw a la búsqueda en el Vault de YOLO, o delega tareas a un Agente YOLO configurado |
 | ⚡ Quick Ask | Pregunta, edita y continúa escribiendo sin salir del editor |
 | 🔎 RAG del Vault | Recupera información en todo tu Vault para obtener respuestas basadas en tus propias notas |
@@ -149,6 +148,12 @@ Consulta el Inicio rápido más arriba.
 - [ ] Asistente integrado — un ayudante fijado en una esquina para configuración/agentes, con compactación automática y tareas programadas
 - [ ] Mejor pizarra con IA
 - [ ] Entrada de voz y notas de reuniones
+
+## Documentación
+
+La documentación completa para usuarios está en **[documentation/en](./documentation/en/README.md)**: desde la primera configuración hasta MCP, Skills y agentes CLI.
+
+Disponible en [English](./documentation/en/README.md), [简体中文](./documentation/zh-CN/README.md) e [Italiano](./documentation/it/README.md). La traducción al español aún no está disponible.
 
 ## Comentarios y problemas
 

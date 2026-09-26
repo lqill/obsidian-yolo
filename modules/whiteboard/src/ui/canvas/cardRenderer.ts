@@ -1,31 +1,48 @@
 // Card mount/unmount, the hidden card pool, and per-card content rendering
-// for the `.yoloboard` canvas (docs/plans/08-25-yolo-whiteboard/p1-design.md
-// §3). Split out of `../canvas.ts` structurally (no behavior change): that
-// file remains the single state owner (board data, selection, editing) and
-// this class owns only the DOM/runtime side of a mounted card, reached
-// through the narrow `CardRendererCallbacks` it is constructed with.
+// for the `.yoloboard` canvas. Split out of `../canvas.ts` structurally (no
+// behavior change): that file remains the single state owner (board data,
+// selection, editing) and this class owns only the DOM/runtime side of a
+// mounted card, reached through the narrow `CardRendererCallbacks` it is
+// constructed with.
 //
 // `WhiteboardCanvas` is the only importer; this module must never import it
 // back (single-direction dependency between the canvas and its
 // collaborators).
 
-import type { BoardNode, NodeId } from '../../domain/fileFormat'
+import {
+  type BoardNode,
+  type NodeId,
+  isPlainText,
+} from '../../domain/fileFormat'
 import {
   type FileNodeKind,
   basenameWithoutExtension,
   fileNodeKind,
 } from '../../domain/naming'
+import { isSpreadTitle } from '../../domain/spread'
+import type { AnnotationLease } from '../../host/annotationStore'
 import {
+  ARRANGE_ANIMATION_EASING,
   CARD_BODY_LIVE_CLASS,
   CARD_BODY_SCROLLS_CLASS,
   CARD_FOCUSED_CLASS,
   CARD_HANDOFF_CLASS,
   CARD_SELECTED_CLASS,
   GROUP_LABEL_CLASS,
+  NODE_ENTER_FROM_SCALE,
+  NODE_ENTER_MS,
+  NODE_EXIT_EASING,
+  NODE_EXIT_MS,
+  NODE_EXIT_TO_SCALE,
+  PLAIN_TEXT_AUTO_CLASS,
+  SPREAD_SHEET_OF_SELECTED_CLASS,
   WEB_URL_PATTERN,
 } from '../constants'
-import { cardMarkdownWindow, nodeTitleText } from '../lod'
+import { type PdfPageLabels, cardMarkdownWindow, nodeTitleText } from '../lod'
+import type { PdfDrawQueue } from '../pdf/drawQueue'
+import { PdfReader, type ReaderAnnotationEvents } from '../pdf/pdfReader'
 import { applyColorToElement } from '../selectionToolbar'
+import { glideScrollBy } from '../wheelScroll'
 
 /** The host's one-pass Markdown renderer. Named through the Host API rather
  * than imported: the module SDK exports no alias for it. */
@@ -42,11 +59,27 @@ const PREVIEW_VIEW_CLASS = 'markdown-preview-view markdown-rendered'
 const PREVIEW_SIZER_CLASS = 'markdown-preview-sizer markdown-preview-section'
 
 const CARD_CLASS = 'yolo-whiteboard-card'
+/** A text node drawn as bare text (fileFormat.ts's `plain`): a card without
+ * the frame, whose box is its content's. */
+const PLAIN_TEXT_CLASS = 'yolo-whiteboard-text'
 const GROUP_CLASS = 'yolo-whiteboard-group'
+/** The title of an open PDF spread (domain/spread.ts): the document's name,
+ * standing on the board for the whole of it — no frame, no body. */
+const SPREAD_TITLE_CLASS = 'yolo-whiteboard-spread-title'
+const SPREAD_TITLE_TEXT_CLASS = 'yolo-whiteboard-spread-title-text'
+const SPREAD_TITLE_LINE_CLASS = 'yolo-whiteboard-spread-title-line'
+const SPREAD_TITLE_BADGE_CLASS = 'yolo-whiteboard-spread-title-badge'
+/** One sheet of a spread: a card that is a page of paper, edge to edge. */
+const SPREAD_SHEET_CLASS = 'yolo-whiteboard-spread-sheet'
+/** The page number in a sheet's corner. */
+const SPREAD_SHEET_NUMBER_CLASS = 'yolo-whiteboard-spread-sheet-number'
 const CARD_BODY_CLASS = 'yolo-whiteboard-card-body'
 const CARD_MEDIA_CLASS = 'yolo-whiteboard-card-media'
 const CARD_WEB_FRAME_CLASS = 'yolo-whiteboard-card-web-frame'
 const CARD_TITLE_CLASS = 'yolo-whiteboard-card-title'
+/** A PDF card's title: its spread's title line (`pdfTitleParts`), in the
+ * place the spread's title stands, so the two are one title. */
+const CARD_TITLE_PDF_CLASS = 'yolo-whiteboard-card-title-pdf'
 const CARD_TITLE_BLOCK_CLASS = 'yolo-whiteboard-card-title-block'
 const CARD_MISSING_CLASS = 'yolo-whiteboard-card-missing'
 const CARD_UNSUPPORTED_PLACEHOLDER_CLASS =
@@ -62,6 +95,11 @@ const CARD_PARKED_CLASS = 'yolo-whiteboard-card-parked'
  * page inside it. See WEB_FRAME_POOL_CAPACITY. */
 const CARD_POOLED_CLASS = 'yolo-whiteboard-card-pooled'
 const CARD_HINT_CLASS = 'yolo-whiteboard-card-hint'
+/** A deleted card playing its way out (`playExit`): pixels only, never a
+ * pointer target. */
+const CARD_EXITING_CLASS = 'yolo-whiteboard-card-exiting'
+/** A body whose image or page has not arrived yet (`showLoadingUntil`). */
+const CARD_BODY_LOADING_CLASS = 'yolo-whiteboard-card-body-loading'
 
 /**
  * What a web card's frame is allowed to do.
@@ -83,8 +121,7 @@ const WEB_FRAME_SANDBOX =
   'allow-forms allow-presentation allow-same-origin allow-scripts allow-modals'
 
 /**
- * How many *web* cards may keep a live page while parked off screen
- * (p3-canvas-parity §六's D13 scope revision).
+ * How many *web* cards may keep a live page while parked off screen.
  *
  * An `<iframe>` removed from the document tree loses its browsing context, and
  * re-inserting it reloads the page from the top — every scroll position, form
@@ -133,9 +170,16 @@ export type NodeRuntime = {
    * down (see WEB_FRAME_POOL_CAPACITY and `unmountNode`).
    */
   webFrameUrl: string | null
+  /**
+   * A PDF card's reader, or null when the body holds anything else. Like a
+   * rendered note it is parked rather than destroyed when the card leaves the
+   * viewport (`unmountNode`): its document, its drawn pages and its scroll
+   * position are what coming back would otherwise have to rebuild.
+   */
+  pdfReader: PdfReader | null
   missingFile: boolean
   /** Last known content for a *note* card (its backing file's text), cached
-   * because note-card content never lives in `board` (p1-design §1.2) — this
+   * because note-card content never lives in `board` — this
    * is the only place it's available to seed the live editor. Unused for
    * text/pdf cards. */
   noteText: string | null
@@ -163,7 +207,20 @@ export type CardRendererCallbacks = Readonly<{
    * chips can be put back or taken away from the one place every card state
    * passes through. */
   onTextCardRendered: (id: NodeId) => void
+  /** Bare text laid itself out at a new size — what its node's `w`/`h` now
+   * are (see `observeText`). */
+  onTextMeasured: (id: NodeId, size: Readonly<{ w: number; h: number }>) => void
+  /** Called after a note card's text has been read and drawn — the first
+   * moment its editor can be opened (`noteText` is known). */
+  onNoteCardRendered: (id: NodeId) => void
   canBuildContent: () => boolean
+  /** The board's one queue for PDF page draws (../pdf/drawQueue.ts). */
+  pdfDraws: PdfDrawQueue
+  /** How far a card is from the middle of the viewport, for the order its
+   * pages are drawn in. */
+  drawPriority: (id: NodeId) => number
+  /** A page's thumbnail (../pdf/thumbnails.ts), or null if it has none. */
+  pdfThumbnail: (path: string, page: number) => ImageBitmap | null
   queueContentSync: (id: NodeId) => void
   dequeueContentSync: (id: NodeId) => void
   getMountedCount: () => number
@@ -176,6 +233,17 @@ export type CardRendererCallbacks = Readonly<{
    * `destroyRuntime` for the half that moved here. */
   purgeNode: (id: NodeId) => void
   getSourcePath: () => string
+  /** The camera's current zoom — what a PDF card's pages are drawn for. */
+  getViewScale: () => number
+  /** Where a PDF card's reader opens: the node's `startPage`. */
+  getPdfStartPosition: (id: NodeId) => number | undefined
+  /** The annotations of a PDF, for a reader to hold until it goes. */
+  openAnnotations: (path: string) => AnnotationLease
+  /** Where the board's readers report selections and annotation clicks. */
+  getAnnotationEvents: () => ReaderAnnotationEvents | undefined
+  /** What a PDF card's or a sheet's title block says about its page
+   * (ui/lod.ts's `nodeTitleText`). */
+  pdfPageLabels: PdfPageLabels
   reportError: (stage: string, error: unknown) => void
   t: (key: string, fallback?: string) => string
 }>
@@ -188,6 +256,9 @@ export type CardRendererCallbacks = Readonly<{
  */
 export class CardRenderer {
   private readonly runtimeByNodeId = new Map<NodeId, NodeRuntime>()
+  /** Deleted cards still playing their exit (`playExit`): no longer cards,
+   * but still holding content that has to be released when they finish. */
+  private readonly exiting = new Set<NodeRuntime>()
   /**
    * Cards parked off screen with what they hold intact, least-recently-seen
    * first: a Set iterates in insertion order, and every re-park deletes before
@@ -211,6 +282,11 @@ export class CardRenderer {
    * `setGroupLabelFontSize`.
    */
   private groupLabelFontPx: number | null = null
+  /** Cards that hold (or held) a PDF reader — what a camera move has to
+   * reach (`setViewScale`). Pruned lazily as their readers go. */
+  private readonly pdfCards = new Set<NodeId>()
+  /** Watches every mounted bare text for its size; created with the first. */
+  private textObserver: ResizeObserver | null = null
 
   constructor(
     private readonly context: YoloModuleHostFileViewContextV1,
@@ -248,6 +324,13 @@ export class CardRenderer {
   /** Tears every mounted/parked card down to nothing — used by
    * canvas.ts's `teardownAllCards` on a full reload/dispose. */
   destroyAll(): void {
+    // Cards still fading out are released now; their elements go with the
+    // root, or with the reload that is about to replace them.
+    for (const runtime of this.exiting) {
+      this.destroyCardContent(runtime)
+      runtime.el?.remove()
+    }
+    this.exiting.clear()
     for (const runtime of this.runtimeByNodeId.values()) {
       this.destroyCardContent(runtime)
       runtime.el?.remove()
@@ -256,6 +339,8 @@ export class CardRenderer {
     }
     this.runtimeByNodeId.clear()
     this.parkedCards.clear()
+    this.textObserver?.disconnect()
+    this.textObserver = null
   }
 
   /**
@@ -267,14 +352,147 @@ export class CardRenderer {
    * see `CardRendererCallbacks.purgeNode` for how the two halves stay one
    * operation from every other caller's point of view.
    */
-  destroyRuntime(id: NodeId): void {
+  destroyRuntime(id: NodeId, options?: Readonly<{ exit?: boolean }>): void {
     const runtime = this.runtimeByNodeId.get(id)
-    if (runtime) {
-      this.destroyCardContent(runtime)
-      runtime.el?.remove()
-    }
     this.runtimeByNodeId.delete(id)
     this.parkedCards.delete(id)
+    if (!runtime) return
+    const el = runtime.el
+    if (options?.exit === true && el && this.playExit(runtime, el)) return
+    this.destroyCardContent(runtime)
+    el?.remove()
+  }
+
+  /**
+   * Lets a deleted card leave rather than vanish: it fades and settles
+   * inward, and its content is released only once it has gone.
+   *
+   * The card stops being a card at once — out of the runtime map, its node id
+   * taken off so no hit test or selection can find it, pointer-transparent —
+   * and only its pixels stay for the length of the motion. Its content is
+   * kept rather than torn down first, because tearing down is what empties a
+   * card (a PDF's pages, a note's render), and a blank box fading out reads
+   * as a glitch rather than a deletion. `exiting` holds it so a board that
+   * closes mid-motion still releases it (`destroyAll`).
+   *
+   * Declined — and the caller tears down at once — under reduced motion, and
+   * for a card the viewer cannot see (parked in the pool).
+   */
+  private playExit(runtime: NodeRuntime, el: HTMLElement): boolean {
+    const win = this.context.getWindow()
+    if (win.matchMedia('(prefers-reduced-motion: reduce)').matches) return false
+    if (
+      el.classList.contains(CARD_PARKED_CLASS) ||
+      el.classList.contains(CARD_POOLED_CLASS)
+    ) {
+      return false
+    }
+    delete el.dataset.nodeId
+    el.classList.add(CARD_EXITING_CLASS)
+    this.exiting.add(runtime)
+    const finish = () => {
+      if (!this.exiting.delete(runtime)) return
+      this.destroyCardContent(runtime)
+      el.remove()
+    }
+    const animation = el.animate(
+      [
+        { opacity: 1, transform: 'scale(1)' },
+        { opacity: 0, transform: `scale(${String(NODE_EXIT_TO_SCALE)})` },
+      ],
+      { duration: NODE_EXIT_MS, easing: NODE_EXIT_EASING, fill: 'forwards' },
+    )
+    animation.onfinish = finish
+    animation.oncancel = finish
+    return true
+  }
+
+  /**
+   * Lets a card that has just been added to the board arrive: it grows out of
+   * a slightly smaller, transparent version of itself into place. Only
+   * `opacity` and `transform`, as a Web Animation so nothing is left on the
+   * element for the next drag to inherit (the same reasoning as the
+   * arrangement FLIP in canvas.ts).
+   */
+  playEnter(id: NodeId): void {
+    const el = this.runtimeByNodeId.get(id)?.el
+    if (!el) return
+    const win = this.context.getWindow()
+    if (win.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    el.animate(
+      [
+        {
+          opacity: 0,
+          transform: `scale(${String(NODE_ENTER_FROM_SCALE)})`,
+        },
+        { opacity: 1, transform: 'scale(1)' },
+      ],
+      { duration: NODE_ENTER_MS, easing: ARRANGE_ANIMATION_EASING },
+    )
+  }
+
+  // -----------------------------------------------------------------------
+  // Bare text's size.
+  //
+  // A card's box is its node's rectangle; bare text's is its content's, and
+  // the node follows. The two alternate: while there is content laid out in
+  // the element its box is left to the content (`releaseTextSize`) and every
+  // size it settles at is reported back (`observeText`); whenever there is
+  // not — mounting, a rebuild, an editor coming or going, the hidden pool —
+  // the element is pinned at the size last reported (`holdTextSize`), so an
+  // empty body is never measured as an empty text.
+  //
+  // Held or not is read off the element's inline height: set while held,
+  // absent while the content has the say. That is the state itself, not a
+  // flag beside it that could disagree.
+  // -----------------------------------------------------------------------
+
+  private observeText(el: HTMLElement): void {
+    if (!this.textObserver) {
+      // The window the board is in, which a popout's is not the main one's.
+      const win = el.ownerDocument.defaultView
+      if (!win) return
+      this.textObserver = new win.ResizeObserver((entries) => {
+        for (const entry of entries) this.reportTextSize(entry.target)
+      })
+    }
+    this.textObserver.observe(el)
+  }
+
+  private reportTextSize(target: Element): void {
+    const el = target as HTMLElement
+    if (!el.isConnected) {
+      this.textObserver?.unobserve(el)
+      return
+    }
+    const id = el.dataset.nodeId
+    if (id === undefined || el.style.height !== '') return
+    if (this.runtimeByNodeId.get(id)?.el !== el) return
+    // Layout size, in world units: the element sits inside the camera's
+    // transform, which `offset*` ignores.
+    const w = el.offsetWidth
+    const h = el.offsetHeight
+    if (w > 0 && h > 0) this.callbacks.onTextMeasured(id, { w, h })
+  }
+
+  /** Pins bare text at its node's size (a card is left alone). */
+  holdTextSize(el: HTMLElement, node: BoardNode | undefined): void {
+    if (!isPlainText(node)) return
+    el.style.width = `${node.w}px`
+    el.style.height = `${node.h}px`
+  }
+
+  /** Gives bare text's box back to its content: its height always, its
+   * width too when the width follows the text. */
+  releaseTextSize(id: NodeId): void {
+    const node = this.callbacks.getNode(id)
+    const el = this.runtimeByNodeId.get(id)?.el
+    if (!el || !isPlainText(node)) return
+    if (this.parkedCards.has(id)) return
+    el.classList.toggle(PLAIN_TEXT_AUTO_CLASS, node.autoWidth === true)
+    if (node.autoWidth === true) el.style.removeProperty('width')
+    else el.style.width = `${node.w}px`
+    el.style.removeProperty('height')
   }
 
   // -----------------------------------------------------------------------
@@ -296,12 +514,17 @@ export class CardRenderer {
     const doc = this.context.getDocument()
     const el = doc.createElement('div')
     el.className = node.type === 'group' ? GROUP_CLASS : CARD_CLASS
+    const plain = isPlainText(node)
+    if (plain) {
+      el.classList.add(PLAIN_TEXT_CLASS)
+      el.classList.toggle(PLAIN_TEXT_AUTO_CLASS, node.autoWidth === true)
+    }
     el.style.left = `${node.x}px`
     el.style.top = `${node.y}px`
     el.style.width = `${node.w}px`
     el.style.height = `${node.h}px`
     el.dataset.nodeId = id
-    // JSON Canvas's `color` (p3-canvas-parity D5): a preset or a hex, both
+    // JSON Canvas's `color`: a preset or a hex, both
     // resolved to the one custom property style.css paints from.
     applyColorToElement(el, node.color)
     // Re-apply selection state — a selected node can unmount (scrolled
@@ -310,8 +533,7 @@ export class CardRenderer {
     if (this.callbacks.isFocused(id)) el.classList.add(CARD_FOCUSED_CLASS)
 
     // A group is a labelled frame behind the cards, not a card: it has no
-    // body, no content view and no title block (p3-canvas-parity D5, and
-    // batch 3 for the membership interactions). Everything else a node gets
+    // body, no content view and no title block. Everything else a node gets
     // here — selection, dragging, resizing, edges — it gets for free, because
     // it goes through the same runtime as a card.
     if (node.type === 'group') {
@@ -344,6 +566,7 @@ export class CardRenderer {
         contentSourcePath: null,
         releaseContent: null,
         webFrameUrl: null,
+        pdfReader: null,
         missingFile: false,
         noteText: null,
       })
@@ -377,6 +600,11 @@ export class CardRenderer {
     // (`nodeIdFromEventTarget`), not the geometry. No longer the only handle,
     // now that a card has to be entered before its body is given away, but
     // the one that still works once the pointer is inside the page.
+    if (isSpreadTitle(node)) {
+      this.mountSpreadTitle(id, el, node.file)
+      return
+    }
+
     const chromeTitle =
       node.type === 'file'
         ? basenameWithoutExtension(node.file)
@@ -386,7 +614,15 @@ export class CardRenderer {
     if (chromeTitle !== null) {
       const title = doc.createElement('div')
       title.className = CARD_TITLE_CLASS
-      title.textContent = chromeTitle
+      if (node.type === 'file' && fileNodeKind(node.file) === 'pdf') {
+        title.classList.add(CARD_TITLE_PDF_CLASS)
+        const line = doc.createElement('div')
+        line.className = SPREAD_TITLE_LINE_CLASS
+        line.append(...pdfTitleParts(doc, node.file))
+        title.appendChild(line)
+      } else {
+        title.textContent = chromeTitle
+      }
       el.appendChild(title)
     }
 
@@ -394,17 +630,34 @@ export class CardRenderer {
     body.className = CARD_BODY_CLASS
     el.appendChild(body)
 
+    // A sheet is a page of its document: named by the number in its corner,
+    // the document itself by its title.
+    if (node.type === 'pdf-page') {
+      el.classList.add(SPREAD_SHEET_CLASS)
+      if (this.callbacks.isSelected(node.parent)) {
+        el.classList.add(SPREAD_SHEET_OF_SELECTED_CLASS)
+      }
+      const number = doc.createElement('div')
+      number.className = SPREAD_SHEET_NUMBER_CLASS
+      number.textContent = String(node.page)
+      el.appendChild(number)
+    }
+
     // Title block: always built — it is a line of text, and it is what the
     // card shows for as long as its body holds nothing, which is every card
     // between mounting and its content build. Which of the two is laid out is
     // the stylesheet's answer to whether the body is empty; nothing here
     // toggles it. Computed once from card data at mount time; card
-    // title-affecting fields (file/markdown) never change post-mount in M1,
-    // only position does.
-    const titleBlock = doc.createElement('div')
-    titleBlock.className = CARD_TITLE_BLOCK_CLASS
-    titleBlock.textContent = nodeTitleText(node)
-    el.appendChild(titleBlock)
+    // title-affecting fields (file/markdown) never change post-mount, only
+    // position does.
+    // Bare text has no card to stand in for: until its content arrives it
+    // holds its last size, empty.
+    if (!plain) {
+      const titleBlock = doc.createElement('div')
+      titleBlock.className = CARD_TITLE_BLOCK_CLASS
+      titleBlock.textContent = nodeTitleText(node, this.callbacks.pdfPageLabels)
+      el.appendChild(titleBlock)
+    }
 
     // Click-to-edit vs. drag-to-move is disambiguated centrally in
     // onPointerDown/Move/Up (DRAG_THRESHOLD_PX) rather than a per-card
@@ -420,11 +673,44 @@ export class CardRenderer {
       contentSourcePath: null,
       releaseContent: null,
       webFrameUrl: null,
+      pdfReader: null,
       missingFile: false,
       noteText: existing?.noteText ?? null,
     })
+    if (plain) this.observeText(el)
 
     void this.renderCardPreview(id)
+  }
+
+  /**
+   * An open spread's title: the line over its first sheet that says what the
+   * document is — its type and name, as its folded card's says it — and the handle for the whole of it:
+   * what a group holds, an edge reaches and a drag carries the pages with
+   * (domain/spread.ts). It has no body. The node is one sheet wide
+   * (`layoutSpreadGrid`); the line it shows is as wide as the whole name
+   * needs, and reaches past the node when the name is long.
+   */
+  private mountSpreadTitle(id: NodeId, el: HTMLElement, file: string): void {
+    const doc = el.ownerDocument
+    el.classList.add(SPREAD_TITLE_CLASS)
+    const line = doc.createElement('div')
+    line.className = SPREAD_TITLE_LINE_CLASS
+    line.append(...pdfTitleParts(doc, file))
+    el.appendChild(line)
+    this.worldEl.appendChild(el)
+    this.runtimeByNodeId.set(id, {
+      el,
+      bodyEl: null,
+      contentRenderer: null,
+      contentView: null,
+      contentMarkdown: null,
+      contentSourcePath: null,
+      releaseContent: null,
+      webFrameUrl: null,
+      pdfReader: null,
+      missingFile: false,
+      noteText: null,
+    })
   }
 
   unmountNode(id: NodeId): void {
@@ -448,14 +734,21 @@ export class CardRenderer {
     //     behind it — ~2ms for a five-line card but ~25ms for a 160-line one
     //     (2026-08-31 baseline), and a pan that pushes a card off one edge
     //     very often brings it back moments later: half the mounts in one
-    //     measured pan were cards that had just left. This is D13's verdict,
-    //     taken on that measurement.
+    //     measured pan were cards that had just left. Parking them was decided
+    //     on that measurement.
+    //   - a PDF card would reopen its document and redraw every page it was
+    //     showing, blank until it had. Parked, it keeps the pages it has drawn
+    //     — which is bounded by what it showed, since pages far from its
+    //     viewport are released anyway — and its document handle; the handle
+    //     is let go when the card is evicted from the pool or deleted, or the
+    //     board closes (`destroyCardContent`).
     //
-    // Everything else — media (its "off-screen stops playing" is deliberate,
-    // p3-canvas-parity §六), placeholders, groups — is torn down here, because
+    // Everything else — media (its "off-screen stops playing" is deliberate),
+    // placeholders, groups — is torn down here, because
     // rebuilding it costs nothing worth keeping DOM for.
     if (
       runtime.webFrameUrl !== null ||
+      runtime.pdfReader !== null ||
       runtime.contentRenderer !== null ||
       runtime.contentView !== null
     ) {
@@ -470,7 +763,7 @@ export class CardRenderer {
   }
 
   // -----------------------------------------------------------------------
-  // Hidden card pool (p3-canvas-parity §六, and D13's verdict).
+  // Hidden card pool.
   //
   // Obsidian Canvas parks an off-screen node by detaching its content element
   // and keeping the instance in a cache. We park the whole card in place
@@ -480,12 +773,12 @@ export class CardRenderer {
   // detached frame loses its browsing context).
   //
   // Parking in place is also what keeps a pool from needing an invalidation
-  // story of its own — the thing D13 was right to be wary of. A parked card
-  // is still a card: it keeps its runtime entry, its element and its place in
-  // `runtimeByNodeId`, so every path that updates a mounted card (an external
-  // edit through `handleBackingFileModified`, an undo through
-  // `applyHistoryBoard`, a delete through `purgeNodeRuntime`) reaches it
-  // unchanged. There is no second copy of anything to go stale.
+  // story of its own. A parked card is still a card: it keeps its runtime
+  // entry, its element and its place in `runtimeByNodeId`, so every path that
+  // updates a mounted card (an external edit through
+  // `handleBackingFileModified`, an undo through `applyHistoryBoard`, a
+  // delete through `purgeNodeRuntime`) reaches it unchanged. There is no
+  // second copy of anything to go stale.
   // -----------------------------------------------------------------------
 
   private parkCard(id: NodeId, runtime: NodeRuntime): void {
@@ -494,7 +787,12 @@ export class CardRenderer {
     runtime.el?.classList.add(
       runtime.webFrameUrl !== null ? CARD_POOLED_CLASS : CARD_PARKED_CLASS,
     )
+    // A parked card is skipped with its contents, which leaves a box sized by
+    // its content with nothing to size it by: bare text is held at the size
+    // it had, and let go again when it comes back.
+    if (runtime.el) this.holdTextSize(runtime.el, this.callbacks.getNode(id))
     this.callbacks.dequeueContentSync(id)
+    runtime.pdfReader?.setVisible(false)
     // Delete before adding so a re-parked card moves to the back of the queue:
     // insertion order is the LRU order (see `parkedCards`).
     this.parkedCards.delete(id)
@@ -517,6 +815,7 @@ export class CardRenderer {
       runtime.el.style.width = `${node.w}px`
       runtime.el.style.height = `${node.h}px`
       applyColorToElement(runtime.el, node.color)
+      if (runtime.contentRenderer !== null) this.releaseTextSize(id)
     }
     runtime.el.classList.toggle(
       CARD_SELECTED_CLASS,
@@ -526,6 +825,12 @@ export class CardRenderer {
       CARD_FOCUSED_CLASS,
       this.callbacks.isFocused(id),
     )
+    if (runtime.pdfReader) {
+      // The camera kept moving while the card was away; its pages are redrawn
+      // for where it is now once that zoom has settled.
+      runtime.pdfReader.setViewScale(this.callbacks.getViewScale())
+      runtime.pdfReader.setVisible(true)
+    }
   }
 
   /**
@@ -569,7 +874,7 @@ export class CardRenderer {
 
   /**
    * Pins the pool's capacity at what the board is holding right now, for as
-   * long as the overview tier lasts (P4-D5).
+   * long as the overview tier lasts.
    *
    * Entering that tier unmounts every card at once, which the ordinary rule
    * would read as "the mounted set is empty, so the pool should be too" and
@@ -728,8 +1033,13 @@ export class CardRenderer {
     runtime.contentSourcePath = null
     runtime.contentMarkdown = null
     runtime.webFrameUrl = null
+    runtime.pdfReader?.destroy()
+    runtime.pdfReader = null
     this.runContentRelease(runtime)
-    runtime.bodyEl?.classList.remove(CARD_BODY_LIVE_CLASS)
+    runtime.bodyEl?.classList.remove(
+      CARD_BODY_LIVE_CLASS,
+      CARD_BODY_LOADING_CLASS,
+    )
     runtime.bodyEl?.classList.remove(CARD_BODY_SCROLLS_CLASS)
   }
 
@@ -774,7 +1084,9 @@ export class CardRenderer {
         // Only markdown has text an editor could be seeded from; leaving the
         // cache set from a previous identity would seed one with a stale note.
         runtime.noteText = null
-        if (kind === 'unsupported') {
+        if (kind === 'pdf') {
+          this.renderPdfInto(id, runtime, node.file)
+        } else if (kind === 'unsupported') {
           this.renderUnsupportedFilePlaceholder(runtime, node.file)
         } else if (kind === 'html') {
           this.renderFileFrameInto(runtime, node.file)
@@ -798,6 +1110,12 @@ export class CardRenderer {
       runtime.missingFile = false
       runtime.noteText = text
       this.renderMarkdownInto(id, runtime, text, node.file)
+      this.callbacks.onNoteCardRendered(id)
+      return
+    }
+
+    if (node.type === 'pdf-page') {
+      this.renderPdfInto(id, runtime, node.file, node.page)
       return
     }
 
@@ -813,7 +1131,7 @@ export class CardRenderer {
 
   /**
    * Puts markdown on a card through the one content path both card types
-   * share (p3-canvas-parity D2/D11): a one-pass render of as much of the
+   * share: a one-pass render of as much of the
    * source as the card can show (`cardMarkdownWindow`).
    *
    * The prefix is the whole design. A card clips and does not scroll, so it
@@ -833,7 +1151,7 @@ export class CardRenderer {
    * a view's *behaviour* — an internal link renders but nothing wires its
    * click or its hover preview — which costs a card nothing: everything inside
    * a card that is not being edited is unhittable by design (style.css's
-   * content mask, D7).
+   * content mask).
    *
    * This is the one expensive thing the canvas does per card, and so the one
    * place besides the drain that asks whether this frame may build. It has to
@@ -887,17 +1205,23 @@ export class CardRenderer {
     // handover it never makes. What still comes back is the whole card, when
     // it leaves the viewport or the board drops into the overview tier, and
     // that is where the memory goes back too.
-    const scrollable =
-      this.callbacks.isFocused(id) || runtime.contentView !== null
-
+    //
+    // Bare text is neither: it has no window to scroll, because it is as
+    // tall as everything it holds, so it always gets the one-pass render of
+    // all of it.
     const node = this.callbacks.getNode(id)
+    const plain = isPlainText(node)
+    const scrollable =
+      !plain && (this.callbacks.isFocused(id) || runtime.contentView !== null)
+
     const startLine =
       node && (node.type === 'text' || node.type === 'file')
         ? (node.startLine ?? 0)
         : 0
-    const wanted = scrollable
-      ? markdown
-      : cardMarkdownWindow(markdown, node?.h ?? 0, startLine)
+    const wanted =
+      scrollable || plain
+        ? markdown
+        : cardMarkdownWindow(markdown, node?.h ?? 0, startLine)
     // Nothing to do when neither the visible source, what it resolves against,
     // nor which of the two surfaces should hold it has changed — which is
     // every edit made below an unfocused card's fold.
@@ -931,6 +1255,7 @@ export class CardRenderer {
     const endHandoff =
       scrollable && startLine > 0 ? this.beginContentHandoff(runtime) : null
     if (!endHandoff) {
+      if (runtime.el) this.holdTextSize(runtime.el, node)
       this.destroyCardContent(runtime)
       bodyEl.replaceChildren()
     }
@@ -983,6 +1308,7 @@ export class CardRenderer {
       .then(() => {
         if (runtime.contentRenderer !== renderer) return
         this.markUnresolvedLinks(sizer, sourcePath)
+        if (plain) this.releaseTextSize(id)
       })
       .catch((error: unknown) => {
         // A render that lost its card was cancelled, not failed: `unload()`
@@ -1033,7 +1359,7 @@ export class CardRenderer {
    * put inside the body (PREVIEW_VIEW_CLASS) — so this reads the same way for
    * the focused card's windowed view and for anything else that ends up
    * asking. Written rather than delegated to the browser because a card's
-   * content is deliberately unhittable (style.css's content mask, D7): the
+   * content is deliberately unhittable (style.css's content mask): the
    * wheel never reaches the scroller on its own.
    *
    * False only when there is nothing to scroll at all, which is what hands the
@@ -1060,18 +1386,105 @@ export class CardRenderer {
   }
 
   scrollCardContent(id: NodeId, deltaX: number, deltaY: number): boolean {
-    const scroller = this.runtimeByNodeId
-      .get(id)
-      ?.bodyEl?.querySelector<HTMLElement>('.markdown-preview-view')
-    if (!scroller) return false
-    const room = scroller.scrollHeight - scroller.clientHeight
-    if (room <= 0) return false
-    scroller.scrollTop = Math.max(
-      0,
-      Math.min(room, scroller.scrollTop + deltaY),
+    const runtime = this.runtimeByNodeId.get(id)
+    if (runtime?.pdfReader) return runtime.pdfReader.scrollBy(deltaX, deltaY)
+    const scroller = runtime?.bodyEl?.querySelector<HTMLElement>(
+      '.markdown-preview-view',
     )
-    scroller.scrollLeft += deltaX
+    if (!scroller) return false
+    if (scroller.scrollHeight - scroller.clientHeight <= 0) return false
+    glideScrollBy(scroller, deltaX, deltaY)
     return true
+  }
+
+  /**
+   * Where a PDF card is being read, as a 1-based fractional page, or null
+   * when this card holds no reader.
+   */
+  getPdfPosition(id: NodeId): number | null {
+    return this.runtimeByNodeId.get(id)?.pdfReader?.getPosition() ?? null
+  }
+
+  /**
+   * Tells every PDF card on screen how far the camera is zoomed. Called on
+   * every frame the camera moves, so it touches only the cards holding a
+   * reader; each one redraws for the new zoom once it holds still.
+   */
+  setViewScale(scale: number): void {
+    for (const id of this.pdfCards) {
+      const reader = this.runtimeByNodeId.get(id)?.pdfReader
+      if (!reader) {
+        this.pdfCards.delete(id)
+        continue
+      }
+      if (!this.parkedCards.has(id)) reader.setViewScale(scale)
+    }
+  }
+
+  /**
+   * Puts a PDF on a card: a reader over the whole document, opened where the
+   * card was last read (`startPage`).
+   *
+   * Its body is live content, like a web page's, and for the same reason: a
+   * PDF has text to select, which a masked body cannot give it. So it is
+   * entered the way a web card is — double-click, or Enter on the selected
+   * card — and until then a press on it is a press on the card
+   * (canvas.ts's `enterLiveContent`). Scrolling needs no entering: the
+   * focused card takes the wheel, as a note card does.
+   *
+   * A card that already holds a reader over this file keeps it: this is
+   * reached again on every focus change and every modify event, and the
+   * reader handles a changed file itself (it reopens, in place). What changes
+   * here is only whether it is the card being read — the one whose pages
+   * carry text layers.
+   */
+  private renderPdfInto(
+    id: NodeId,
+    runtime: NodeRuntime,
+    path: string,
+    sheet?: number,
+  ): void {
+    const existing = runtime.pdfReader
+    if (
+      existing &&
+      existing.path === path &&
+      existing.sheet === (sheet ?? null)
+    ) {
+      existing.setInteractive(this.callbacks.isFocused(id))
+      existing.retryIfFailed()
+      return
+    }
+    // Not a sheet's: what one costs in this frame is a few elements and a
+    // thumbnail copied in, while held back it is a blank page over the
+    // overview's picture of it. The file is opened and drawn later either
+    // way — the reader asks `canStartWork` before each draw.
+    if (sheet === undefined && !this.callbacks.canBuildContent()) {
+      this.callbacks.queueContentSync(id)
+      return
+    }
+    this.destroyCardContent(runtime)
+    const bodyEl = runtime.bodyEl
+    if (!bodyEl) return
+    const reader = new PdfReader({
+      pdf: this.host.pdf,
+      path,
+      container: bodyEl,
+      sheet,
+      position: this.callbacks.getPdfStartPosition(id),
+      viewScale: this.callbacks.getViewScale(),
+      interactive: this.callbacks.isFocused(id),
+      t: (key) => this.callbacks.t(key),
+      canStartWork: () => this.callbacks.canBuildContent(),
+      drawQueue: this.callbacks.pdfDraws,
+      drawPriority: () => this.callbacks.drawPriority(id),
+      placeholder: (page) => this.callbacks.pdfThumbnail(path, page),
+      annotations: this.callbacks.openAnnotations(path),
+      annotationEvents: this.callbacks.getAnnotationEvents(),
+      reportError: (stage, error) => this.callbacks.reportError(stage, error),
+    })
+    runtime.pdfReader = reader
+    bodyEl.classList.add(CARD_BODY_LIVE_CLASS)
+    this.pdfCards.add(id)
   }
 
   private renderMissingFilePlaceholder(
@@ -1088,7 +1501,7 @@ export class CardRenderer {
   }
 
   /** What a file card shows while its file type has no card of its own — a
-   * PDF (M2), anything else. Named after the file so the card still says
+   * CSV, an archive, anything else. Named after the file so the card still says
    * which one it is. */
   private renderUnsupportedFilePlaceholder(
     runtime: NodeRuntime,
@@ -1107,7 +1520,7 @@ export class CardRenderer {
    * Puts a vault image, audio or video file on a card, pointing the element at
    * the same `app://` resource URL Obsidian's own embeds use
    * (`vault.getResourceUrl`) so it streams and seeks exactly as it does in a
-   * note (p3-canvas-parity D1).
+   * note.
    *
    * The element fills the card and keeps its aspect ratio without cropping
    * (style.css's `.yolo-whiteboard-card-media`). Obsidian Canvas instead
@@ -1115,7 +1528,7 @@ export class CardRenderer {
    * and writes that back to the file — a load-time geometry mutation we
    * deliberately do not copy: our cards mount and unmount with the viewport,
    * so it would rewrite the board on every pan. Aspect-locked geometry belongs
-   * with the resize interactions (P3 batch 3).
+   * with the resize interactions.
    *
    * Audio and video get a `releaseContent`: taking a media element out of the
    * DOM neither pauses it nor stops it streaming, so an off-screen card would
@@ -1124,7 +1537,7 @@ export class CardRenderer {
   private renderMediaInto(
     runtime: NodeRuntime,
     path: string,
-    kind: Exclude<FileNodeKind, 'markdown' | 'html' | 'unsupported'>,
+    kind: Exclude<FileNodeKind, 'markdown' | 'pdf' | 'html' | 'unsupported'>,
   ): void {
     this.destroyCardContent(runtime)
     const bodyEl = runtime.bodyEl
@@ -1142,6 +1555,7 @@ export class CardRenderer {
       image.draggable = false
       frame.appendChild(image)
       bodyEl.replaceChildren(frame)
+      this.showLoadingUntil(bodyEl, image)
       return
     }
 
@@ -1248,6 +1662,7 @@ export class CardRenderer {
     frame.src = url
     bodyEl.replaceChildren(frame)
     bodyEl.classList.add(CARD_BODY_LIVE_CLASS)
+    this.showLoadingUntil(bodyEl, frame)
     runtime.webFrameUrl = url
     // A detached frame keeps its page (and its timers, media and sockets)
     // running until it is collected; navigating it away first is what ends
@@ -1258,6 +1673,32 @@ export class CardRenderer {
       frame.src = 'about:blank'
       frame.remove()
     }
+  }
+
+  /**
+   * Marks a body as still loading until `el` (an image or a frame) has loaded
+   * or failed. An image or a page arriving over a slow disk or network used to
+   * be an empty white card until it painted — indistinguishable from a card
+   * with nothing in it. The stylesheet draws a quiet shimmer meanwhile, the
+   * same "working on it" a PDF card already says with its loading line.
+   */
+  private showLoadingUntil(
+    bodyEl: HTMLElement,
+    el: HTMLImageElement | HTMLIFrameElement,
+  ): void {
+    // Tested by tag rather than `instanceof`, which would ask the main
+    // window's constructor about an element that may belong to a popout's.
+    if (el.tagName === 'IMG' && (el as HTMLImageElement).complete) return
+    bodyEl.classList.add(CARD_BODY_LOADING_CLASS)
+    const done = () => {
+      // Only if the element is still the body's: a re-render may have
+      // replaced it, and its own load owns the class now.
+      if (el.isConnected && bodyEl.contains(el)) {
+        bodyEl.classList.remove(CARD_BODY_LOADING_CLASS)
+      }
+    }
+    el.addEventListener('load', done, { once: true })
+    el.addEventListener('error', done, { once: true })
   }
 
   private renderPlaceholder(
@@ -1278,4 +1719,16 @@ export class CardRenderer {
     placeholder.append(title, hint)
     runtime.bodyEl.replaceChildren(placeholder)
   }
+}
+
+/** The type and the name a PDF is titled by, open as a spread or folded
+ * into its card alike. */
+function pdfTitleParts(doc: Document, file: string): HTMLElement[] {
+  const badge = doc.createElement('span')
+  badge.className = SPREAD_TITLE_BADGE_CLASS
+  badge.textContent = 'PDF'
+  const text = doc.createElement('span')
+  text.className = SPREAD_TITLE_TEXT_CLASS
+  text.textContent = basenameWithoutExtension(file)
+  return [badge, text]
 }

@@ -8,16 +8,39 @@ import type {
 } from '@agentclientprotocol/sdk'
 
 import type { ChatToolMessage } from '../../../types/chat'
-import { ToolCallResponseStatus } from '../../../types/tool-call.types'
+import {
+  type FileChangeRows,
+  ToolCallResponseStatus,
+} from '../../../types/tool-call.types'
+import {
+  buildFileChangeRowsFromContent,
+  buildFileChangeRowsFromTexts,
+} from '../../tools/file-change-rows'
 
 import {
   AcpSessionAggregator,
   buildCancelledApprovalOutcome,
   buildPendingApprovalMessages,
+  extractAcpThoughtLevelState,
   mapAcpUsageUpdate,
+  resolveAcpWholeFileDiff,
   resolveApprovalOptionId,
   toAcpPromptBlocks,
 } from './mapping'
+
+/**
+ * A reported diff's rows before the runtime settled it against disk: ACP does
+ * not say whether its texts are the whole file, so the line numbers are left
+ * out rather than shown possibly wrong.
+ */
+const unnumbered = (file: FileChangeRows): FileChangeRows => ({
+  ...file,
+  rows: file.rows.map((row) =>
+    row.type === 'line'
+      ? { type: 'line', change: row.change, text: row.text }
+      : row,
+  ),
+})
 
 describe('ACP session update aggregation', () => {
   it('concatenates streaming agent_message_chunk deltas into one message', () => {
@@ -406,6 +429,314 @@ describe('ACP session update aggregation — replay mode', () => {
   })
 })
 
+describe('ACP file-change diffs', () => {
+  const apply = (
+    aggregator: AcpSessionAggregator,
+    update: SessionUpdate,
+  ): ChatToolMessage =>
+    (aggregator.apply(update, 'hermes') as [unknown, ChatToolMessage])[1]
+
+  const editSummaryOf = (tool: ChatToolMessage) => {
+    const response = tool.toolCalls[0].response
+    return response.status === ToolCallResponseStatus.Success
+      ? response.data.metadata?.editSummary
+      : undefined
+  }
+
+  const startEdit = (
+    aggregator: AcpSessionAggregator,
+    diffs: Array<{ path: string; oldText?: string | null; newText: string }>,
+  ) =>
+    apply(aggregator, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'edit-1',
+      title: 'Edit note.md',
+      kind: 'edit',
+      status: 'pending',
+      content: diffs.map((diff) => ({ type: 'diff' as const, ...diff })),
+    })
+
+  const complete = (aggregator: AcpSessionAggregator) =>
+    apply(aggregator, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'edit-1',
+      status: 'completed',
+      content: [
+        { type: 'content', content: { type: 'text', text: 'Edited.' } },
+      ],
+    })
+
+  it('records every path in the vault-relative form, whatever form the agent reported', () => {
+    // CodeBuddy reports absolute paths, Hermes paths relative to its cwd.
+    const aggregator = new AcpSessionAggregator('live', '/vault')
+    startEdit(aggregator, [
+      { path: '/vault/notes/a.md', oldText: 'a\n', newText: 'b\n' },
+      { path: 'notes/b.md', oldText: 'a\n', newText: 'b\n' },
+      { path: '/elsewhere/c.md', oldText: 'a\n', newText: 'b\n' },
+    ])
+    const tool = complete(aggregator)
+
+    const paths = ['notes/a.md', 'notes/b.md', '/elsewhere/c.md']
+    expect(editSummaryOf(tool)?.files.map((file) => file.path)).toEqual(paths)
+    expect(
+      tool.toolCalls[0].request.metadata?.fileChangeRows?.map(
+        (file) => file.path,
+      ),
+    ).toEqual(paths)
+  })
+
+  it('keeps the diff from tool_call after the completing update replaces content', () => {
+    // Hermes' real sequence: the diff rides on the pending tool_call, and the
+    // completing update swaps content for plain result text.
+    const aggregator = new AcpSessionAggregator()
+    startEdit(aggregator, [
+      { path: '/vault/note.md', oldText: 'a\nb\n', newText: 'a\nc\nd\n' },
+    ])
+    const tool = complete(aggregator)
+
+    const response = tool.toolCalls[0].response
+    expect(response).toMatchObject({
+      status: ToolCallResponseStatus.Success,
+      data: { text: 'Edited.' },
+    })
+    expect(editSummaryOf(tool)).toEqual({
+      files: [
+        {
+          path: '/vault/note.md',
+          addedLines: 2,
+          removedLines: 1,
+          lineStatsAvailable: true,
+          operation: 'edit',
+          undoStatus: 'unavailable',
+          // The round its review snapshot is stored under: the tool card's id.
+          reviewRoundId: 'acp-result-edit-1',
+        },
+      ],
+      totalFiles: 1,
+      totalAddedLines: 2,
+      totalRemovedLines: 1,
+      undoStatus: 'unavailable',
+    })
+    expect(
+      aggregator.getToolCall('edit-1')?.diffs.map((diff) => diff.newText),
+    ).toEqual(['a\nc\nd\n'])
+  })
+
+  it('treats oldText: null as a new file', () => {
+    const aggregator = new AcpSessionAggregator()
+    startEdit(aggregator, [
+      { path: '/vault/new.md', oldText: null, newText: 'x\ny' },
+    ])
+    expect(editSummaryOf(complete(aggregator))?.files).toEqual([
+      expect.objectContaining({
+        operation: 'create',
+        addedLines: 2,
+        removedLines: 0,
+        lineStatsAvailable: true,
+      }),
+    ])
+  })
+
+  it('does not count an omitted oldText as a creation', () => {
+    const aggregator = new AcpSessionAggregator()
+    startEdit(aggregator, [{ path: '/vault/note.md', newText: 'x\ny\n' }])
+    const summary = editSummaryOf(complete(aggregator))
+
+    expect(summary?.files).toEqual([
+      expect.objectContaining({
+        path: '/vault/note.md',
+        operation: 'edit',
+        lineStatsAvailable: false,
+      }),
+    ])
+    expect(summary?.totalLineStatsAvailable).toBe(false)
+  })
+
+  it('merges repeated reports per path: first known oldText, latest newText', () => {
+    const aggregator = new AcpSessionAggregator()
+    startEdit(aggregator, [
+      { path: '/vault/a.md', oldText: 'one\n', newText: 'two\n' },
+      { path: '/vault/b.md', newText: 'b1\n' },
+    ])
+    apply(aggregator, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'edit-1',
+      status: 'in_progress',
+      content: [
+        {
+          type: 'diff',
+          path: '/vault/a.md',
+          oldText: 'two\n',
+          newText: 'three\n',
+        },
+        { type: 'diff', path: '/vault/b.md', oldText: 'b0\n', newText: 'b2\n' },
+      ],
+    })
+    complete(aggregator)
+
+    expect(aggregator.getToolCall('edit-1')?.diffs).toEqual([
+      { path: '/vault/a.md', oldText: 'one\n', newText: 'three\n' },
+      { path: '/vault/b.md', oldText: 'b0\n', newText: 'b2\n' },
+    ])
+  })
+
+  it('keeps a known new-file null over a later re-report', () => {
+    const aggregator = new AcpSessionAggregator()
+    startEdit(aggregator, [
+      { path: '/vault/new.md', oldText: null, newText: 'v1' },
+    ])
+    apply(aggregator, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'edit-1',
+      content: [
+        {
+          type: 'diff',
+          path: '/vault/new.md',
+          oldText: 'v1',
+          newText: 'v2',
+        },
+      ],
+    })
+    expect(editSummaryOf(complete(aggregator))?.files[0]).toMatchObject({
+      operation: 'create',
+      addedLines: 1,
+    })
+  })
+
+  const rowsOf = (tool: ChatToolMessage) =>
+    tool.toolCalls[0].request.metadata?.fileChangeRows
+
+  it('builds file-change rows from each oldText form', () => {
+    const aggregator = new AcpSessionAggregator()
+    const pendingTool = startEdit(aggregator, [
+      { path: '/vault/edited.md', oldText: 'a\nb\n', newText: 'a\nc\n' },
+      { path: '/vault/new.md', oldText: null, newText: 'x\ny\n' },
+      { path: '/vault/unknown.md', newText: 'z\n' },
+    ])
+    const expected = [
+      // A string is the prior content: a real diff.
+      buildFileChangeRowsFromTexts('/vault/edited.md', 'a\nb\n', 'a\nc\n'),
+      // `null` is a new file: everything added.
+      buildFileChangeRowsFromTexts('/vault/new.md', '', 'x\ny\n'),
+      // Omitted says nothing about the prior state: written content only.
+      buildFileChangeRowsFromContent('/vault/unknown.md', 'z\n'),
+    ].map(unnumbered)
+    expect(expected.map((file) => file.completeness)).toEqual([
+      'diff',
+      'diff',
+      'afterOnly',
+    ])
+
+    // Present while the call is still running…
+    expect(pendingTool.toolCalls[0].response.status).toBe(
+      ToolCallResponseStatus.Running,
+    )
+    expect(rowsOf(pendingTool)).toEqual(expected)
+    // …and kept after the completing update replaces `content`.
+    const completed = complete(aggregator)
+    expect(rowsOf(completed)).toEqual(expected)
+    expect(
+      completed.toolCalls[0].request.metadata?.cliToolCall?.capability,
+    ).toBe('file_change')
+  })
+
+  it('treats a call with a diff as a file change even without an edit kind', () => {
+    const aggregator = new AcpSessionAggregator()
+    const tool = apply(aggregator, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'edit-2',
+      title: 'patch',
+      content: [
+        { type: 'diff', path: '/vault/a.md', oldText: 'a', newText: 'b' },
+      ],
+    })
+    expect(tool.toolCalls[0].request.metadata?.cliToolCall?.capability).toBe(
+      'file_change',
+    )
+    expect(rowsOf(tool)).toEqual([
+      unnumbered(buildFileChangeRowsFromTexts('/vault/a.md', 'a', 'b')),
+    ])
+  })
+
+  it('draws a call settled against disk from the whole-file texts, with line numbers', () => {
+    // CodeBuddy's shape: the diff is only the replaced span.
+    const aggregator = new AcpSessionAggregator('live', '/vault')
+    startEdit(aggregator, [
+      { path: '/vault/a.md', oldText: 'old 3\n', newText: 'new 3\n' },
+    ])
+    complete(aggregator)
+    const whole = {
+      path: 'a.md',
+      oldText: '1\n2\nold 3\n4\n',
+      newText: '1\n2\nnew 3\n4\n',
+    }
+    const [, tool] = aggregator.settleToolCallAgainstDisk(
+      'edit-1',
+      [whole],
+      'codebuddy',
+    ) as [unknown, ChatToolMessage]
+
+    expect(rowsOf(tool)).toEqual([
+      buildFileChangeRowsFromTexts('a.md', whole.oldText, whole.newText),
+    ])
+    expect(editSummaryOf(tool)?.files).toEqual([
+      expect.objectContaining({ path: 'a.md', addedLines: 1, removedLines: 1 }),
+    ])
+    // A later update of the same call keeps what disk settled.
+    expect(rowsOf(complete(aggregator))).toEqual(rowsOf(tool))
+  })
+
+  it('returns nothing to settle for a call the session no longer knows', () => {
+    const aggregator = new AcpSessionAggregator()
+    expect(aggregator.settleToolCallAgainstDisk('gone', [], 'hermes')).toEqual(
+      [],
+    )
+  })
+
+  it('attaches no rows to a file-change call that reported no diff', () => {
+    const aggregator = new AcpSessionAggregator()
+    startEdit(aggregator, [])
+    expect(rowsOf(complete(aggregator))).toBeUndefined()
+  })
+})
+
+describe('resolveAcpWholeFileDiff', () => {
+  const text = (value: string) => ({ state: 'text' as const, text: value })
+
+  it('takes a diff whose new text is the whole file as it is', () => {
+    const diff = { path: 'a.md', oldText: 'a\n', newText: 'b\n' }
+    expect(resolveAcpWholeFileDiff(diff, text('b\n'))).toBe(diff)
+    const created = { path: 'a.md', oldText: null, newText: 'b' }
+    expect(resolveAcpWholeFileDiff(created, text('b'))).toBe(created)
+  })
+
+  it('puts a replaced span back into the file to recover the whole before-text', () => {
+    expect(
+      resolveAcpWholeFileDiff(
+        { path: 'a.md', oldText: 'old\n', newText: 'new\n' },
+        text('1\nnew\n3\n'),
+      ),
+    ).toEqual({ path: 'a.md', oldText: '1\nold\n3\n', newText: '1\nnew\n3\n' })
+  })
+
+  it('makes no claim when the disk does not bear the diff out', () => {
+    const span = { path: 'a.md', oldText: 'old', newText: 'new' }
+    // Changed again since, or the span occurs more than once.
+    expect(resolveAcpWholeFileDiff(span, text('other'))).toBeNull()
+    expect(resolveAcpWholeFileDiff(span, text('new new'))).toBeNull()
+    // Nothing to put back for an absent or unknown before-text.
+    expect(
+      resolveAcpWholeFileDiff({ ...span, oldText: null }, text('a new b')),
+    ).toBeNull()
+    expect(
+      resolveAcpWholeFileDiff({ path: 'a.md', newText: 'new' }, text('a new')),
+    ).toBeNull()
+    // No text to compare against.
+    expect(resolveAcpWholeFileDiff(span, { state: 'absent' })).toBeNull()
+    expect(resolveAcpWholeFileDiff(span, { state: 'unreadable' })).toBeNull()
+  })
+})
+
 describe('ACP approval decision mapping', () => {
   const options: PermissionOption[] = [
     { optionId: 'once', name: 'Allow once', kind: 'allow_once' },
@@ -474,6 +805,141 @@ describe('buildPendingApprovalMessages', () => {
       },
       response: { status: ToolCallResponseStatus.PendingApproval },
     })
+  })
+
+  /**
+   * Shaped after a real CodeBuddy permission request: ACP types this payload
+   * as a ToolCallUpdate, so the agent sends only what changed and leaves the
+   * title and kind it already announced in the preceding `tool_call`.
+   */
+  const incrementalRequest: RequestPermissionRequest = {
+    sessionId: 'sess-1',
+    toolCall: {
+      toolCallId: 'chatcmpl-tool-90ed',
+      rawInput: { command: 'echo hi', description: 'Run echo' },
+    },
+    options: [],
+  }
+
+  const announced = {
+    toolCallId: 'chatcmpl-tool-90ed',
+    title: 'Bash',
+    name: 'Bash',
+    kind: 'execute' as const,
+    status: 'in_progress' as const,
+    content: [],
+    diffs: [],
+    rawInput: {},
+  }
+
+  it('falls back to the tool call id when nothing was announced for it', () => {
+    const [, tool] = buildPendingApprovalMessages(incrementalRequest, 'hermes')
+
+    expect(tool.toolCalls[0].request.name).toBe('chatcmpl-tool-90ed')
+    expect(
+      tool.toolCalls[0].request.metadata?.cliToolCall?.capability,
+    ).toBeUndefined()
+  })
+
+  it('names the card from the state the agent already announced', () => {
+    const [, tool] = buildPendingApprovalMessages(
+      incrementalRequest,
+      'codebuddy',
+      announced,
+    )
+
+    expect(tool.toolCalls[0].request.name).toBe('Bash')
+    expect(tool.toolCalls[0].request.metadata?.cliToolCall).toMatchObject({
+      name: 'Bash',
+      capability: 'command_execution',
+    })
+  })
+
+  it('still prefers a field the request itself carries over the remembered one', () => {
+    const [, tool] = buildPendingApprovalMessages(
+      {
+        ...incrementalRequest,
+        toolCall: { ...incrementalRequest.toolCall, title: 'Renamed' },
+      },
+      'codebuddy',
+      { ...announced, name: undefined },
+    )
+
+    expect(tool.toolCalls[0].request.name).toBe('Renamed')
+  })
+
+  it('keeps the request’s own rawInput rather than the announced placeholder', () => {
+    const [, tool] = buildPendingApprovalMessages(
+      incrementalRequest,
+      'codebuddy',
+      announced,
+    )
+
+    // `announced.rawInput` is the empty object the agent opened the call
+    // with; the request carries the arguments the user is approving.
+    expect(tool.toolCalls[0].request.arguments).toMatchObject({
+      kind: 'complete',
+      value: { command: 'echo hi' },
+    })
+  })
+
+  it('carries the diff the approval request itself reports as file-change rows', () => {
+    // Hermes: a separate toolCallId, the diff on the request's own content.
+    const [, tool] = buildPendingApprovalMessages(
+      {
+        sessionId: 'sess-1',
+        toolCall: {
+          toolCallId: 'edit-approval-1',
+          title: 'Approve edit: test.md',
+          content: [
+            {
+              type: 'diff',
+              path: '/vault/test.md',
+              oldText: 'a\n',
+              newText: 'b\n',
+            },
+          ],
+        },
+        options: [],
+      },
+      'hermes',
+    )
+    expect(tool.toolCalls[0]).toMatchObject({
+      request: {
+        metadata: {
+          cliToolCall: { capability: 'file_change' },
+          fileChangeRows: [
+            unnumbered(
+              buildFileChangeRowsFromTexts('/vault/test.md', 'a\n', 'b\n'),
+            ),
+          ],
+        },
+      },
+      response: { status: ToolCallResponseStatus.PendingApproval },
+    })
+  })
+
+  it('carries the diff an earlier notification reported for the same call', () => {
+    // CodeBuddy: the request is an increment and reports no content itself.
+    const [, tool] = buildPendingApprovalMessages(
+      {
+        sessionId: 'sess-1',
+        toolCall: { toolCallId: 'edit-3', rawInput: { path: 'x.md' } },
+        options: [],
+      },
+      'codebuddy',
+      {
+        toolCallId: 'edit-3',
+        title: 'Write',
+        kind: 'edit',
+        status: 'pending',
+        content: [],
+        diffs: [{ path: '/vault/x.md', oldText: null, newText: 'new\n' }],
+      },
+    )
+    expect(tool.toolCalls[0].request.metadata?.fileChangeRows).toEqual([
+      unnumbered(buildFileChangeRowsFromTexts('/vault/x.md', '', 'new\n')),
+    ])
   })
 })
 
@@ -553,5 +1019,109 @@ describe('mapAcpUsageUpdate', () => {
         size: 200_000,
       }),
     ).toBeNull()
+  })
+})
+
+describe('extractAcpThoughtLevelState', () => {
+  /**
+   * Shaped after what CodeBuddy actually returns from `session/new`: the
+   * reserved `thought_level` category alongside the mode and model
+   * selectors that share the same `configOptions` array.
+   */
+  const response = {
+    sessionId: 's1',
+    configOptions: [
+      {
+        type: 'select',
+        id: 'mode',
+        name: 'Permission Mode',
+        category: 'mode',
+        currentValue: 'default',
+        options: [{ value: 'default', name: 'Always Ask' }],
+      },
+      {
+        type: 'select',
+        id: 'thought_level',
+        name: 'Deep Thinking',
+        category: 'thought_level',
+        currentValue: 'high',
+        options: [
+          {
+            value: 'disabled',
+            name: 'Off',
+            description: 'No extended thinking',
+          },
+          { value: 'low', name: 'Low' },
+          { value: 'high', name: 'High', description: 'Deep reasoning' },
+          { value: 'enabled', name: 'On (default)' },
+        ],
+      },
+    ],
+  }
+
+  it('picks the thought_level option out of the shared config list', () => {
+    const state = extractAcpThoughtLevelState(response)
+
+    expect(state?.optionId).toBe('thought_level')
+    expect(state?.currentValue).toBe('high')
+    expect(state?.options).toEqual([
+      { id: 'disabled', description: 'No extended thinking' },
+      { id: 'low' },
+      { id: 'high', description: 'Deep reasoning' },
+      { id: 'enabled' },
+    ])
+  })
+
+  it('collects every value id so a write can be validated before sending', () => {
+    expect([
+      ...(extractAcpThoughtLevelState(response)?.valueIds ?? []),
+    ]).toEqual(['disabled', 'low', 'high', 'enabled'])
+  })
+
+  it('flattens grouped select options in the order the agent listed them', () => {
+    const state = extractAcpThoughtLevelState({
+      configOptions: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          category: 'thought_level',
+          currentValue: 'fast',
+          options: [
+            {
+              group: 'cheap',
+              name: 'Cheap',
+              options: [{ value: 'fast', name: 'Fast' }],
+            },
+            {
+              group: 'deep',
+              name: 'Deep',
+              options: [{ value: 'slow', name: 'Slow' }],
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(state?.options.map((option) => option.id)).toEqual(['fast', 'slow'])
+  })
+
+  it('ignores a boolean option that claims the category', () => {
+    expect(
+      extractAcpThoughtLevelState({
+        configOptions: [
+          {
+            type: 'boolean',
+            id: 'thinking',
+            category: 'thought_level',
+            currentValue: true,
+          },
+        ],
+      }),
+    ).toBeNull()
+  })
+
+  it('returns null for agents that advertise no config options at all', () => {
+    expect(extractAcpThoughtLevelState({ sessionId: 's1' })).toBeNull()
+    expect(extractAcpThoughtLevelState(null)).toBeNull()
   })
 })

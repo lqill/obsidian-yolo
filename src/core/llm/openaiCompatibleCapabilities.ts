@@ -17,10 +17,17 @@ type OpenAICompatibleHostCapabilities = {
     | 'siliconflow'
 }
 
+const DASHSCOPE_HOSTS = new Set([
+  'dashscope.aliyuncs.com',
+  'dashscope-intl.aliyuncs.com',
+])
+
+const GLM_HOSTS = new Set(['open.bigmodel.cn', 'api.z.ai'])
+
 const VOLCENGINE_REASONING_HOSTS = new Set([
   'ark.cn-beijing.volces.com',
-  'open.bigmodel.cn',
   'api.moonshot.cn',
+  ...GLM_HOSTS,
 ])
 
 function getHost(baseUrl?: string): string | null {
@@ -41,7 +48,7 @@ export function resolveOpenAICompatibleHostCapabilities(
 ): OpenAICompatibleHostCapabilities {
   const host = getHost(baseUrl)
 
-  if (host === 'dashscope.aliyuncs.com') {
+  if (host && DASHSCOPE_HOSTS.has(host)) {
     return {
       host,
       disableStreamOptions: false,
@@ -108,6 +115,8 @@ export function applyOpenAICompatibleCapabilities(params: {
         return
       }
       request.enable_thinking = true
+      // Read back the reasoning sent with earlier turns instead of dropping it.
+      request.preserve_thinking = true
       if (reasoningLevel === 'auto') {
         request.thinking_budget = -1
         return
@@ -124,9 +133,15 @@ export function applyOpenAICompatibleCapabilities(params: {
       return
     }
     case 'volcengine': {
-      request.thinking = {
-        type: reasoningLevel === 'off' ? 'disabled' : 'enabled',
+      if (reasoningLevel === 'off') {
+        request.thinking = { type: 'disabled' }
+        return
       }
+      request.thinking =
+        capabilities.host && GLM_HOSTS.has(capabilities.host)
+          ? // GLM drops earlier turns' reasoning unless told to keep it.
+            { type: 'enabled', clear_thinking: false }
+          : { type: 'enabled' }
       return
     }
     case 'openai':

@@ -10,6 +10,7 @@
 @import './settings/assistants.css';
 @import './settings/tabs.css';
 @import './settings/agent.css';
+@import './settings/sortable-card-grid.css';
 @import './settings/modules.css';
 @import './settings/web-search.css';
 @import './settings/connectivity-test.css';
@@ -17,6 +18,8 @@
 @import './settings/cli-native-actions.css';
 
 @import './popover/index.css';
+
+@import './button.css';
 
 @import './action-toast.css';
 @import './acknowledgement-modal.css';
@@ -43,8 +46,10 @@
 @import './selection/selection-chat.css';
 @import './selection/selection-rewrite.css';
 @import './selection/pdf-selection.css';
+@import './selection/reading-selection.css';
 
 @import './editor/tab-completion.css';
 
 @import './pdf-screenshot.css';
+@import './pdf/text-layer.css';
 @import './config-transfer.css';

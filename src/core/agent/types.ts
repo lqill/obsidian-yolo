@@ -75,10 +75,9 @@ export type AgentRuntimeRunInput = {
     }
   >
   /**
-   * Per-capability enabled/approval state for built-in tools (D9,
-   * docs/plans/2026-08-15-tool-registry/phase2-migration.md D9). Sibling to
-   * `toolPreferences` above, which as of that migration only carries remote
-   * MCP tool state — built-in tool approval/enablement resolution
+   * Per-capability enabled/approval state for built-in tools. Sibling to
+   * `toolPreferences` above, which as of the `80_to_81` migration only
+   * carries remote MCP tool state — built-in tool approval/enablement resolution
    * (`AgentToolGateway.resolveApprovalMode`/`isToolAllowed`) needs both.
    */
   builtinCapabilityPreferences?: Record<
@@ -113,6 +112,10 @@ export type AgentRuntimeRunInput = {
    * approval. Present only for a mode that enforces that boundary (Max).
    */
   vaultPathBoundary?: NativePathBoundary
+  /**
+   * What to stamp on a queued user message the run takes in mid-way. The
+   * message that starts the run arrives already stamped by its caller.
+   */
   contextualInjections?: ContextualInjection[]
   runtimeMode?: RuntimeMode
   /**

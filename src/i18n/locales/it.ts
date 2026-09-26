@@ -91,19 +91,15 @@ export const it: DeepPartial<TranslationKeys> = {
       menuLabel: 'Provider CLI',
       claudeCodeLabel: 'Claude Code',
       claudeCodeShortLabel: 'CC',
-      claudeCodeDescription: 'Claude Code su questo dispositivo',
       codexLabel: 'Codex',
-      codexDescription: 'Codex su questo dispositivo',
       hermesLabel: 'Hermes',
-      hermesDescription: 'Hermes su questo dispositivo',
       piLabel: 'Pi',
-      piDescription: 'Pi su questo dispositivo',
       ompLabel: 'omp',
-      ompDescription: 'Oh My Pi su questo dispositivo',
       variantToggleHint:
         'Passa tra {base} e {variant} — cambiare canale avvia una nuova sessione',
       grokLabel: 'Grok',
-      grokDescription: 'Grok Build su questo dispositivo',
+      codebuddyLabel: 'CodeBuddy',
+      codebuddyShortLabel: 'CB',
     },
     chatList: {
       searchPlaceholder: 'Cerca conversazioni',
@@ -144,9 +140,6 @@ export const it: DeepPartial<TranslationKeys> = {
         'Configura i parametri di continuazione e il contesto prima di generare.',
       backToChat: 'Torna alla chat',
       modelSectionTitle: 'Modello',
-      continuationModel: 'Modello di continuazione',
-      continuationModelDesc:
-        'Quando la super continuazione è abilitata, questa vista usa questo modello per le attività di continuazione.',
       contextSectionTitle: 'Fonti di contesto',
       ragToggle: 'Abilita recupero con embeddings',
       ragToggleDesc:
@@ -217,7 +210,9 @@ export const it: DeepPartial<TranslationKeys> = {
     },
     supportYolo: {
       name: 'Supporta il progetto',
-      desc: 'Se trovi utile questo plugin, considera di supportarne lo sviluppo!',
+      desc: 'Se trovi utile questo plugin, considera di supportarne lo sviluppo.',
+      feedbackHint: 'Problemi o idee? {bug} o {feature}',
+      star: 'Star YOLO',
       afdian: 'Afdian (CN)',
       buyMeACoffee: 'Buy Me a Coffee',
       reportBug: 'Segnala bug',
@@ -377,6 +372,13 @@ export const it: DeepPartial<TranslationKeys> = {
           impact:
             'Disattivandolo, i modelli di embedding locali non sono disponibili; il RAG utilizza un provider di embedding remoto.',
         },
+        claudeAgentSdk: {
+          name: 'Claude Agent SDK',
+          description:
+            'Collega YOLO al Claude Code locale per l’agente Claude Code e il provider di accesso Claude Code.',
+          impact:
+            'Disattivandolo, l’agente Claude Code e i modelli che usano l’accesso Claude Code non sono disponibili.',
+        },
         statuses: {
           missing: 'In attesa di installazione',
           downloading: 'Download in corso',
@@ -412,8 +414,6 @@ export const it: DeepPartial<TranslationKeys> = {
       actionCategoryDesc: 'Gruppo in cui viene visualizzata questa azione',
       actionIcon: 'Icona',
       actionIconDesc: 'Icona visiva per questa azione',
-      actionEnabled: 'Abilitata',
-      actionEnabledDesc: 'Mostra questa azione nello smart space',
       moveUp: 'Sposta su',
       moveDown: 'Sposta giù',
       duplicate: 'Duplica',
@@ -472,6 +472,10 @@ export const it: DeepPartial<TranslationKeys> = {
         'Istruzione di riscrittura (richiesta per il prompt predefinito).',
       actionInstructionRewritePlaceholder:
         'Ad esempio: rendilo conciso e mantieni la struttura Markdown.',
+      actionAssistant: 'Assistente',
+      actionAssistantDesc:
+        "Assistente usato durante l'esecuzione di questa azione; lascia vuoto per seguire la selezione corrente.",
+      actionAssistantFollowCurrent: 'Segui la selezione corrente',
       duplicate: 'Duplica',
       copySuffix: '(copia)',
       dragHandleAria: 'Trascina per riordinare',
@@ -486,36 +490,8 @@ export const it: DeepPartial<TranslationKeys> = {
         "Regola la scala complessiva dell'interfaccia chat (predefinito 100%).",
     },
     assistants: {
-      title: 'Assistenti',
-      desc: 'Gestisci gli assistenti AI personalizzati con istruzioni e comportamenti specifici.',
-      configureAssistants: 'Configura assistenti',
-      assistantsCount: 'Assistenti configurati: {count}',
-      addAssistant: 'Aggiungi assistente',
-      noAssistants: 'Nessun assistente configurato',
       editAssistant: 'Modifica assistente',
-      deleteAssistant: 'Elimina assistente',
       noAssistant: 'Nessun assistente',
-      selectAssistant: 'Seleziona un assistente',
-      name: 'Nome',
-      nameDesc: "Nome dell'assistente",
-      namePlaceholder: 'Ad esempio, Assistente di codifica',
-      description: 'Descrizione',
-      descriptionDesc: "Breve descrizione dello scopo dell'assistente",
-      descriptionPlaceholder: 'Ad esempio, Aiuta con domande di programmazione',
-      systemPrompt: 'Prompt di sistema',
-      systemPromptDesc: "Questo prompt viene aggiunto all'inizio di ogni chat.",
-      systemPromptPlaceholder: 'Ad esempio, Sei un esperto programmatore...',
-      defaultAssistantName: 'Nuovo assistente',
-      actions: 'Azioni',
-      deleteConfirmTitle: 'Elimina assistente',
-      deleteConfirmMessagePrefix: 'Sei sicuro di voler eliminare',
-      deleteConfirmMessageSuffix: '?',
-      addAssistantAria: 'Aggiungi nuovo assistente',
-      deleteAssistantAria: 'Elimina assistente',
-      dragHandleAria: 'Trascina per riordinare',
-      duplicate: 'Duplica',
-      copySuffix: '(copia)',
-      currentBadge: 'Corrente',
       manageAll: 'Gestisci tutti…',
     },
     agent: {
@@ -533,10 +509,6 @@ export const it: DeepPartial<TranslationKeys> = {
       skillsCountWithEnabled: '{count} competenze (abilitate {enabled})',
       skillsGlobalDesc:
         'Le skill vengono rilevate dalle skill integrate, dai file {path}/*.md e dai pacchetti {path}/<folder>/SKILL.md. Disabilitale qui per bloccarle su tutti gli agent.',
-      yoloBaseDir: 'Cartella base YOLO',
-      yoloBaseDirDesc:
-        'Inserisci un percorso relativo al vault (senza / iniziale). Esempio: YOLO nella radice del vault, oppure setting/YOLO nella cartella setting.',
-      yoloBaseDirPlaceholder: 'YOLO',
       yoloBaseDirHiddenPath:
         'La cartella base YOLO non può usare cartelle nascoste. Rimuovi il punto iniziale dal nome, ad esempio cambia .yolo in yolo.',
       yoloBaseDirMigrated:
@@ -552,8 +524,6 @@ export const it: DeepPartial<TranslationKeys> = {
       yoloBaseDirConflictTitle: 'La cartella base YOLO non è stata spostata',
       yoloBaseDirConflictMessage:
         '{target} esiste già e contiene file. Nessun contenuto è stato spostato per evitare sovrascritture o fusioni. Scegli una cartella vuota o inesistente.',
-      skillsSourcePath:
-        'Origine: skill integrate + {path}/*.md + {path}/<folder>/SKILL.md',
       refreshSkills: 'Aggiorna',
       skillsEmptyHint:
         'Nessuna skill trovata. Crea un file Markdown o una cartella contenente SKILL.md in {path}.',
@@ -701,7 +671,6 @@ export const it: DeepPartial<TranslationKeys> = {
         toolBypassNotice:
           'Gli agent con comandi da terminale o strumenti MCP di terze parti abilitati possono aggirare questo ambito: non è un confine di sicurezza.',
       },
-      editorTabModel: 'Modello',
       editorName: 'Nome',
       editorNameDesc: "Nome visualizzato dell'agent",
       editorDescription: 'Descrizione',
@@ -729,20 +698,10 @@ export const it: DeepPartial<TranslationKeys> = {
       toolApprovalRequire: 'Richiedi approvazione',
       toolApprovalDangerousOnly: 'Approva solo operazioni pericolose',
       toolDisclosureAlways: 'In contesto',
-      toolDisclosureMixed: 'Misto',
       toolDisclosureOnDemand: 'Su richiesta',
-      editorEnabled: 'Abilitato',
-      editorDisabled: 'Disabilitato',
       editorModel: 'Modello',
       editorModelDesc: 'Seleziona il modello usato da questo agent',
       followDefaultModel: 'Segui modello predefinito',
-      editorModelCurrent: 'Corrente: {model}',
-      editorTemperature: 'Temperatura',
-      editorTemperatureDesc: '0.0 - 2.0',
-      editorTopP: 'Top P',
-      editorTopPDesc: '0.0 - 1.0',
-      editorMaxOutputTokens: 'Token massimi in output',
-      editorMaxOutputTokensDesc: 'Numero massimo di token generati',
       editorToolsCount: '{count} strumenti',
       editorSkillsCount: '{count} competenze',
       editorSkillsCountWithEnabled: '{count} competenze (abilitate {enabled})',
@@ -788,6 +747,9 @@ export const it: DeepPartial<TranslationKeys> = {
       grokCliPathName: 'Percorso CLI di Grok',
       grokCliPathDesc:
         'Percorso personalizzato dell\'eseguibile grok — incolla l\'output di "which grok" ("where grok" su Windows). Lascia vuoto per il rilevamento automatico. Salvato solo su questo dispositivo.',
+      codebuddyCliPathName: 'Percorso CLI di CodeBuddy',
+      codebuddyCliPathDesc:
+        'Percorso personalizzato dell\'eseguibile codebuddy — incolla l\'output di "which codebuddy" ("where codebuddy" su Windows). Lascia vuoto per il rilevamento automatico. Salvato solo su questo dispositivo.',
       cliPathMissing:
         'Questo percorso non esiste su questo dispositivo; verrà usato il rilevamento automatico.',
       autoContextCompactionBlockTitle: 'Compattazione contesto',
@@ -1038,6 +1000,7 @@ export const it: DeepPartial<TranslationKeys> = {
       addCustomEmbeddingModel: 'Aggiungi modello embedding personalizzato',
       editChatModel: 'Modifica modello chat',
       editEmbeddingModel: 'Modifica modello embedding',
+      dragHandle: 'Trascina per riordinare',
       editCustomChatModel: 'Modifica modello chat personalizzato',
       editCustomEmbeddingModel: 'Modifica modello embedding personalizzato',
       modelId: 'ID modello',
@@ -1075,6 +1038,7 @@ export const it: DeepPartial<TranslationKeys> = {
       },
       availableModelsAuto: 'Modelli disponibili (recuperati automaticamente)',
       searchModels: 'Cerca modelli...',
+      addMode: 'Modalità di aggiunta',
       modeSingle: 'Singolo',
       modeBatch: 'In blocco',
       batchSelectAll: 'Seleziona tutto',
@@ -1279,6 +1243,10 @@ export const it: DeepPartial<TranslationKeys> = {
       chunks: 'Chunk',
       pendingFiles: '{{n}} file modificati',
       lastUpdated: 'Ultimo aggiornamento {{time}}',
+      updatedJustNow: 'Aggiornata poco fa',
+      updatedMinutesAgo: 'Aggiornata {{n}} minuti fa',
+      updatedHoursAgo: 'Aggiornata {{n}} ore fa',
+      updatedDaysAgo: 'Aggiornata {{n}} giorni fa',
       enableAndIndex: 'Attiva e indicizza',
       disable: 'Disattiva indicizzazione',
       rebuildThis: 'Ricostruisci questa base',
@@ -1295,6 +1263,11 @@ export const it: DeepPartial<TranslationKeys> = {
         groupLabel: 'Locale',
         groupDesc:
           'Eseguito sul tuo dispositivo: le note non lasciano questo computer.',
+        deviceAriaLabel: 'Dispositivo di inferenza locale',
+        deviceCpu: 'CPU',
+        deviceGpu: 'GPU',
+        deviceGpuUnsupported:
+          "L'inferenza su GPU non è supportata su questo dispositivo",
         desktopOnly:
           'I modelli di embedding locali sono disponibili solo su desktop.',
         metaLine: '{{dimension}} dim · {{size}}',
@@ -1359,6 +1332,10 @@ export const it: DeepPartial<TranslationKeys> = {
         'Es. Verbali riunioni quotidiane e documenti dei progetti in corso',
       scopeTitle: 'Ambito',
       scopeDesc: 'Decide quali cartelle entrano in questa knowledge base.',
+      scopeWholeVault: 'Intero vault',
+      scopeOnlyPrefix: 'Solo',
+      scopeAndMore: ' e altre ({{n}} in totale)',
+      scopeExcludeSuffix: ', escluse {{n}} cartelle',
       nameRequired: 'Inserisci un nome per la knowledge base',
       nameDuplicate: 'Esiste già una knowledge base con questo nome',
       saveFailed: 'Impossibile salvare la knowledge base',
@@ -1468,12 +1445,6 @@ export const it: DeepPartial<TranslationKeys> = {
       title: 'Sparkle',
       aiSubsectionTitle: 'Continuazione AI',
       tabSubsectionTitle: 'Completamento Tab',
-      superContinuation: 'Abilita vista Sparkle',
-      superContinuationDesc:
-        'Abilita la vista Sparkle nella barra laterale per configurare modelli, parametri, regole e fonti di riferimento dedicati alla continuazione. Se disabilitata, resta disponibile solo la vista Chat.',
-      continuationModel: 'Modello di continuazione',
-      continuationModelDesc:
-        'Seleziona il modello usato per la continuazione in Sparkle.',
       selectionChatSubsectionTitle: 'Cursor chat',
       selectionChatDescription:
         'Offre azioni rapide sul testo selezionato, come chiedere, riscrivere o spiegare.',
@@ -1516,9 +1487,6 @@ export const it: DeepPartial<TranslationKeys> = {
       tabCompletion: 'Completamento tab',
       tabCompletionDesc:
         'Genera suggerimenti quando una regola trigger corrisponde.',
-      tabCompletionMultipleCandidates: 'Genera più suggerimenti',
-      tabCompletionMultipleCandidatesDesc:
-        'Quando attivo, genera tre suggerimenti di completamento.',
       tabCompletionModel: 'Modello completamento tab',
       tabCompletionModelDesc:
         'Modello usato per il completamento tab e la regolazione della lunghezza.',
@@ -1545,15 +1513,6 @@ export const it: DeepPartial<TranslationKeys> = {
       tabCompletionLengthPresetMedium: 'Medio',
       tabCompletionLengthPresetLong: 'Lungo',
       tabCompletionAdvanced: 'Impostazioni avanzate',
-      tabCompletionContextRange: 'Intervallo contesto',
-      tabCompletionContextRangeDesc:
-        'Caratteri totali di contesto inviati al modello (divisi 4:1 tra prima e dopo il cursore).',
-      tabCompletionMinContextLength: 'Lunghezza minima contesto',
-      tabCompletionMinContextLengthDesc:
-        'Numero minimo di caratteri richiesti prima del cursore per attivare i suggerimenti.',
-      tabCompletionTemperature: 'Temperatura',
-      tabCompletionTemperatureDesc:
-        'Controlla la casualità dei suggerimenti (0 = deterministico, 1 = creativo).',
       tabCompletionRequestTimeout: 'Timeout richiesta (secondi)',
       tabCompletionRequestTimeoutDesc:
         'Interrompe la richiesta di completamento se supera questo numero di secondi. Aumentalo per modelli più lenti o con ragionamento lungo.',
@@ -1785,6 +1744,8 @@ export const it: DeepPartial<TranslationKeys> = {
       controlsLabel: 'Controlli diagramma',
     },
     stopGeneration: 'Ferma generazione',
+    scrollToBottom: 'Torna in fondo',
+    scrollToBottomWhileStreaming: 'Torna in fondo e continua a seguire',
     queueMessage: {
       tooltip:
         'Metti in coda questo messaggio — verrà inviato al termine del passaggio corrente',
@@ -1793,6 +1754,10 @@ export const it: DeepPartial<TranslationKeys> = {
         'Approva o rifiuta lo strumento in attesa prima di inviare un nuovo messaggio.',
       blockedAwaitingInput:
         "Rispondi alla domanda dell'agente nella chat prima di inviare un nuovo messaggio.",
+      blockedActiveTool:
+        'Attendi il completamento della chiamata allo strumento in corso prima di inviare un nuovo messaggio.',
+      blockedActiveTooltip:
+        'Potrai inviare di nuovo al termine della chiamata allo strumento in corso',
       abortedRestoredOne:
         'Messaggio in coda ripristinato nella casella di input',
       abortedRestoredMany:
@@ -1916,6 +1881,8 @@ export const it: DeepPartial<TranslationKeys> = {
       openError: 'Impossibile aprire la sessione CLI: {message}',
       transitionError:
         'Impossibile lasciare la sessione CLI corrente: {message}',
+      unboundMessageError:
+        'La sessione CLI non è ancora stata avviata: impossibile mostrare questo messaggio del provider.',
       sessionFallbackDividerTitle: 'Passato al profilo predefinito',
       sessionFallbackDividerDescription:
         'L\'agente originale "{profile}" non è disponibile, quindi questa conversazione è passata al profilo predefinito: i messaggi precedenti non fanno parte della sua memoria.',
@@ -1928,6 +1895,9 @@ export const it: DeepPartial<TranslationKeys> = {
       defaultModel: 'Modello predefinito di {provider}',
       loadError: 'Impossibile caricare i modelli CLI: {message}',
       updateError: 'Impossibile aggiornare la configurazione CLI: {message}',
+      defaultBadge: 'Predefinito',
+      setAsDefault: 'Imposta come predefinito',
+      removeDefault: 'Rimuovi predefinito',
     },
     claudePlugins: {
       title: 'Gestisci plugin',
@@ -1977,6 +1947,10 @@ export const it: DeepPartial<TranslationKeys> = {
         'Lo stato dei server MCP di Codex è di sola lettura qui. Gestisci i server dal terminale.',
       codexUnsupportedVersion:
         'Questa versione di Codex CLI non supporta la query dello stato dei server MCP. Aggiorna Codex CLI.',
+    },
+    modelSelect: {
+      searchPlaceholder: 'Cerca modelli',
+      empty: 'Nessun modello corrispondente',
     },
     quickAccess: {
       manage: 'Gestisci accessi rapidi',
@@ -2114,7 +2088,11 @@ export const it: DeepPartial<TranslationKeys> = {
       snapshotUnavailable:
         'Questo dispositivo non ha uno snapshot di quella modifica, quindi non puo essere annullata ne revisionata. Gli snapshot restano sul dispositivo che ha fatto la modifica.',
       reviewOutsideVault:
-        'Questo file si trova fuori dal vault, quindi non puo essere revisionato nell editor. Annulla funziona comunque.',
+        'Questo file si trova fuori dal vault, quindi non puo essere revisionato nell editor.',
+      reviewWhileRunning:
+        "L'agente e ancora in esecuzione e potrebbe modificare di nuovo il file. Revisionalo al termine dell'esecuzione.",
+      reviewContentChanged:
+        'Il file e stato modificato di nuovo dopo questa modifica, quindi la revisione non puo essere aperta.',
     },
     errorCard: {
       title: 'Questa risposta non e stata generata',
@@ -2227,6 +2205,7 @@ export const it: DeepPartial<TranslationKeys> = {
           "Il contenuto precedente alla modifica non è disponibile su questo dispositivo; qui sotto c'è solo il contenuto scritto da questa chiamata.",
         collapsedLines: '⋯ {{count}} righe invariate nascoste',
         truncatedLines: 'Altre {{count}} righe non mostrate',
+        readingCurrent: 'Lettura del file attuale…',
       },
     },
     toolSummary: {
@@ -2324,6 +2303,7 @@ export const it: DeepPartial<TranslationKeys> = {
     indexedWithSkipped: 'Indice completato · {{count}} file non indicizzabili.',
     continueComplete: 'Indicizzazione ripresa completata.',
     continueFailed: 'Indicizzazione ripresa fallita.',
+    indexCancelled: 'Indicizzazione annullata.',
     openYoloNewChatFailed:
       'Impossibile aprire la finestra chat YOLO; prova prima dal palette comandi.',
     updatingIndex: 'Aggiornamento indice vault in corso…',
@@ -2334,6 +2314,7 @@ export const it: DeepPartial<TranslationKeys> = {
       'Migrazione a storage JSON fallita; controlla la console per i dettagli.',
     reloadingPlugin: 'Ricaricamento "next-composer" a causa della migrazione',
     settingsInvalid: 'Impostazioni non valide',
+    settingsUpdateFailed: 'Impossibile aggiornare le impostazioni',
     transportModeAutoPromoted:
       'Rilevato un problema di rete/CORS. Questo provider e stato impostato automaticamente su {mode}.',
     capturePdfNoLeaf: 'Nessun file PDF aperto al momento.',
@@ -2547,6 +2528,10 @@ export const it: DeepPartial<TranslationKeys> = {
     updateInCommunityPlugins: 'Aggiorna dai plugin community',
     manualInstallOnGitHub:
       'Non riesci ad aggiornare? Installa manualmente da GitHub',
+    modulesFollowedCore: '{modules} aggiornato insieme a YOLO',
+    updatesAvailable: '{count} aggiornamenti disponibili',
+    updateAll: 'Aggiorna tutto',
+    updated: 'Aggiornato',
   },
   moduleFileView: {
     inactivePlaceholder:

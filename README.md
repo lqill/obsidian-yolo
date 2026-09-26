@@ -28,6 +28,10 @@
 </p>
 
 <p align="center">
+  <a href="./documentation/en/README.md"><b>Documentation</b></a> | <a href="./documentation/en/getting-started.md">Getting started</a> | <a href="./documentation/en/faq.md">FAQ</a>
+</p>
+
+<p align="center">
   <a href="https://discord.gg/d8EHm48ppU">
     <img src="https://img.shields.io/badge/Discord-Join_the_community-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join the Discord community">
   </a>
@@ -177,23 +181,6 @@ Small, generic seams rather than voice-specific branches:
 <table>
 <tr>
 <td width="200" align="center" valign="middle">
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://www.atlascloud.ai/logo-white.svg">
-      <img src="https://www.atlascloud.ai/logo.svg" alt="Atlas Cloud" width="163">
-    </picture>
-  </a>
-</td>
-<td valign="middle">
-  <b><a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo">Atlas Cloud</a></b> gives developers one unified API for building with language, image, and video AI. Connect once to explore 300+ curated models across every modality—without maintaining separate integrations for each provider. From LLM-powered agents to image and video generation, Atlas Cloud makes it easier to experiment, compare models, and bring multimodal AI into production.
-  <br><br>
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=obsidian-yolo"><b>Explore Atlas Cloud →</b></a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://www.atlascloud.ai/console/coding-plan"><b>View the Coding Plan →</b></a>
-</td>
-</tr>
-<tr>
-<td width="200" align="center" valign="middle">
   <a href="https://go.apimart.ai/gh-obsidian-yolo">
     <img src="./assets/sponsor-apimart.png" alt="APIMart" width="163">
   </a>
@@ -204,13 +191,25 @@ Small, generic seams rather than voice-specific branches:
   <a href="https://go.apimart.ai/gh-obsidian-yolo"><b>Sign up for APIMart →</b></a>
 </td>
 </tr>
+<tr>
+<td width="200" align="center" valign="middle">
+  <a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO">
+    <img src="./assets/sponsor-fluxion.png" alt="Fluxion AI" width="163">
+  </a>
+</td>
+<td valign="middle">
+  Thanks to <b><a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO">Fluxion AI</a></b> for sponsoring this project! Fluxion AI is an API relay that helps individual developers and businesses access and manage the world's leading AI models through one unified API. Multi-route dynamic scheduling keeps requests available, and model performance, response times, and costs are all transparent. With Fable 5.1, Fluxion AI can save you up to about 90% compared with Claude's official API pricing. Sign up through this link to get $3 in free API credit.
+  <br><br>
+  <a href="https://fluxionai.space/register?source=github&amp;campaign=github-yolo&amp;promo=YOLO"><b>Sign up for Fluxion AI →</b></a>
+</td>
+</tr>
 </table>
 
 ## What's New
 
 - **`1.6`**
   - **On-device local embedding models and multiple knowledge bases**: index without any API key, split and manage knowledge bases independently, and let the Agent auto-pick the right one by name.
-  - **CLI chat**: on desktop, drive the Claude Code, Codex, Hermes, Pi, or Grok CLI you're already signed into from the same chat surface. Grok reuses an official Grok Build CLI login; it does not reuse an xAI API key.
+  - **CLI chat**: on desktop, drive the Claude Code, Codex, Hermes, Pi, or Grok CLI you're already signed into from the same chat surface.
   - **The new Learning Mode**: turn any topic and reference material into a personalized learning project with structured outlines, knowledge points, flashcards, and an interactive knowledge map, backed by FSRS spaced repetition and Anki `.apkg` import for sustainable long-term review.
 
 - **`1.5`**: Introduces a new Agent runtime that turns AI from Q&A into active collaboration—with full tool calling, MCP, Skills, desktop Bash, subagents, and web search—plus smarter long-session context and memory, refreshed hybrid RAG, focus/PDF awareness, and multi-window chat with background Agents.
@@ -266,8 +265,6 @@ Beyond the core capabilities above, YOLO also provides:
    - [OpenAI](https://platform.openai.com/api-keys) / [Anthropic](https://console.anthropic.com/settings/keys) / [Gemini](https://aistudio.google.com/apikey) / [Groq](https://console.groq.com/keys)
 4. Open the sidebar to start chatting — or try Quick Ask by typing `@` in the editor
 
-For Grok subscription CLI chat on desktop, install [Grok Build](https://docs.x.ai/build) and run `grok login` (or `grok login --device-auth`) in a terminal first. YOLO asks the official CLI to reuse that cached login and does not copy its OAuth tokens into the Vault. The plugin starts a dedicated Grok ACP process in its default ask-first permission mode; YOLO auto-approval is not offered for this runtime.
-
 ## Installation
 
 ### Community Plugin Store (Recommended)
@@ -293,6 +290,24 @@ See Quick Start above.
 - [ ] Built-in assistant — a corner-pinned helper for config/agents, with auto-compaction and scheduled tasks
 - [ ] Better AI whiteboard
 - [ ] Voice input & meeting notes
+
+## Documentation
+
+Full user documentation lives in **[documentation/en](./documentation/en/README.md)**:
+
+| | |
+|---|---|
+| [Getting started](./documentation/en/getting-started.md) | Install, configure a working model, run your first chat |
+| [Models & providers](./documentation/en/models.md) | Connect providers, OAuth sign-in, model parameters |
+| [Chat](./documentation/en/chat.md) | Referencing notes, the three modes, tool approvals, applying edits |
+| [Sparkle](./documentation/en/sparkle.md) | Quick Ask, Tab completion, selection rewrite |
+| [Knowledge base](./documentation/en/knowledge-base.md) | Indexing, multiple knowledge bases, local embedding models |
+| [Tools & permissions](./documentation/en/tools-and-permissions.md) | What it can touch, and how to rein it in |
+| [Memory](./documentation/en/memory.md) · [Skills](./documentation/en/skills.md) · [Agents](./documentation/en/assistants.md) | Tailoring it to you |
+| [MCP](./documentation/en/mcp.md) · [CLI agents](./documentation/en/cli-agent.md) · [Modules](./documentation/en/modules.md) | Going further |
+| [Settings reference](./documentation/en/settings-reference.md) · [FAQ](./documentation/en/faq.md) | Look things up |
+
+Also available in [简体中文](./documentation/zh-CN/README.md) and [Italiano](./documentation/it/README.md).
 
 ## Feedback & Issues
 

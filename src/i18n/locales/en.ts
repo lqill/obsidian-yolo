@@ -74,19 +74,15 @@ export const en: TranslationKeys = {
       menuLabel: 'CLI provider',
       claudeCodeLabel: 'Claude Code',
       claudeCodeShortLabel: 'CC',
-      claudeCodeDescription: 'Claude Code on this device',
       codexLabel: 'Codex',
-      codexDescription: 'Codex on this device',
       hermesLabel: 'Hermes',
-      hermesDescription: 'Hermes on this device',
       piLabel: 'Pi',
-      piDescription: 'Pi on this device',
       ompLabel: 'omp',
-      ompDescription: 'Oh My Pi on this device',
       variantToggleHint:
         'Switch between {base} and {variant} — changing channel starts a new session',
       grokLabel: 'Grok',
-      grokDescription: 'Grok Build on this device',
+      codebuddyLabel: 'CodeBuddy',
+      codebuddyShortLabel: 'CB',
     },
     chatList: {
       searchPlaceholder: 'Search conversations',
@@ -127,9 +123,6 @@ export const en: TranslationKeys = {
         'Configure continuation parameters and context before generating.',
       backToChat: 'Back to chat',
       modelSectionTitle: 'Model',
-      continuationModel: 'Continuation model',
-      continuationModelDesc:
-        'When super continuation is enabled, this view uses this model for continuation tasks.',
       contextSectionTitle: 'Context sources',
       ragToggle: 'Enable retrieval with embeddings',
       ragToggleDesc:
@@ -200,7 +193,9 @@ export const en: TranslationKeys = {
     },
     supportYolo: {
       name: 'Support the project',
-      desc: 'If you find this plugin valuable, consider supporting its development!',
+      desc: 'If you find this plugin valuable, consider supporting its development.',
+      feedbackHint: 'Hit a problem or have an idea? {bug} or {feature}',
+      star: 'Star YOLO',
       afdian: 'Afdian (CN)',
       buyMeACoffee: 'Buy Me a Coffee',
       reportBug: 'Report Bug',
@@ -354,6 +349,13 @@ export const en: TranslationKeys = {
           impact:
             'Turning this off disables local embedding models; RAG falls back to a remote embedding provider.',
         },
+        claudeAgentSdk: {
+          name: 'Claude Agent SDK',
+          description:
+            'Connects YOLO to your local Claude Code for the Claude Code agent and the Claude Code login provider.',
+          impact:
+            'Turning this off disables the Claude Code agent and models that use the Claude Code login.',
+        },
         statuses: {
           missing: 'Waiting to install',
           downloading: 'Downloading',
@@ -389,8 +391,6 @@ export const en: TranslationKeys = {
       actionCategoryDesc: 'Category this action belongs to',
       actionIcon: 'Icon',
       actionIconDesc: 'Choose an icon',
-      actionEnabled: 'Enabled',
-      actionEnabledDesc: 'Whether to show this action in smart space',
       moveUp: 'Move up',
       moveDown: 'Move down',
       duplicate: 'Duplicate',
@@ -449,6 +449,10 @@ export const en: TranslationKeys = {
         'Rewrite instruction (required for preset prompt).',
       actionInstructionRewritePlaceholder:
         'For example: make it concise and keep Markdown structure.',
+      actionAssistant: 'Assistant',
+      actionAssistantDesc:
+        'Assistant used when running this action; leave it empty to follow the current selection.',
+      actionAssistantFollowCurrent: 'Follow current selection',
       duplicate: 'Duplicate',
       copySuffix: ' (copy)',
       dragHandleAria: 'Drag to reorder',
@@ -463,32 +467,8 @@ export const en: TranslationKeys = {
         'Adjust the overall scale of the chat interface (default 100%).',
     },
     assistants: {
-      title: 'Assistants',
-      desc: 'Create and manage custom AI assistants',
-      configureAssistants: 'Configure assistants',
-      assistantsCount: 'Configured {count} assistants',
-      addAssistant: 'Add assistant',
       editAssistant: 'Edit assistant',
-      deleteAssistant: 'Delete assistant',
-      name: 'Name',
-      description: 'Description',
-      systemPrompt: 'System prompt',
-      systemPromptDesc:
-        'This prompt will be added to the beginning of every chat.',
-      systemPromptPlaceholder:
-        "Enter system prompt to define assistant's behavior and capabilities",
-      namePlaceholder: 'Enter assistant name',
-      defaultAssistantName: 'New assistant',
-      deleteConfirmTitle: 'Confirm delete assistant',
-      deleteConfirmMessagePrefix: 'Are you sure you want to delete assistant',
-      deleteConfirmMessageSuffix: ' This action cannot be undone.',
-      addAssistantAria: 'Add new assistant',
-      deleteAssistantAria: 'Delete assistant',
-      actions: 'Actions',
-      noAssistants: 'No assistants available',
       noAssistant: 'Default',
-      selectAssistant: 'Select assistant',
-      duplicate: 'Duplicate',
       manageAll: 'Manage all…',
     },
     agent: {
@@ -506,10 +486,6 @@ export const en: TranslationKeys = {
       skillsCountWithEnabled: '{count} skills (enabled {enabled})',
       skillsGlobalDesc:
         'Skills are discovered from built-in skills, {path}/*.md files, and {path}/<folder>/SKILL.md packages. Disable a skill here to block it for all agents.',
-      yoloBaseDir: 'YOLO base folder',
-      yoloBaseDirDesc:
-        'Enter a vault-relative path (without a leading /). Example: use YOLO at vault root, or setting/YOLO under the setting folder.',
-      yoloBaseDirPlaceholder: 'YOLO',
       yoloBaseDirHiddenPath:
         'YOLO root cannot use hidden folders. Remove the dot at the beginning of the folder name, for example change .yolo to yolo.',
       yoloBaseDirMigrated:
@@ -525,8 +501,6 @@ export const en: TranslationKeys = {
       yoloBaseDirConflictTitle: 'YOLO root was not moved',
       yoloBaseDirConflictMessage:
         '{target} already exists and contains files. Nothing was moved to avoid overwriting or merging data. Choose an empty or nonexistent folder.',
-      skillsSourcePath:
-        'Source: built-in skills + {path}/*.md + {path}/<folder>/SKILL.md',
       refreshSkills: 'Refresh',
       skillsEmptyHint:
         'No skills found. Create a Markdown file or a folder containing SKILL.md under {path}.',
@@ -686,7 +660,6 @@ export const en: TranslationKeys = {
         toolBypassNotice:
           'Agents with terminal commands or third-party MCP tools enabled can go around this range — it is not a security boundary.',
       },
-      editorTabModel: 'Model',
       editorName: 'Name',
       editorNameDesc: 'Agent display name',
       editorDescription: 'Description',
@@ -713,32 +686,10 @@ export const en: TranslationKeys = {
       toolApprovalRequire: 'Require approval',
       toolApprovalDangerousOnly: 'Approve dangerous operations',
       toolDisclosureAlways: 'In context',
-      toolDisclosureMixed: 'Mixed',
       toolDisclosureOnDemand: 'On demand',
-      editorEnabled: 'Enabled',
-      editorDisabled: 'Disabled',
       editorModel: 'Model',
       editorModelDesc: 'Select the model used by this agent',
       followDefaultModel: 'Follow default model',
-      editorModelCurrent: 'Current: {model}',
-      editorModelSampling: 'Sampling parameters',
-      editorModelResetDefaults: 'Restore defaults',
-      modelPresetFocused: 'Focused',
-      modelPresetBalanced: 'Balanced',
-      modelPresetCreative: 'Creative',
-      editorTemperature: 'Temperature',
-      editorTemperatureDesc: '0.0 - 2.0',
-      editorTopP: 'Top P',
-      editorTopPDesc: '0.0 - 1.0',
-      editorMaxOutputTokens: 'Max output tokens',
-      editorMaxOutputTokensDesc: 'Maximum generated tokens',
-      editorMaxContextMessages: 'Max context messages',
-      editorCustomParameters: 'Custom parameters',
-      editorCustomParametersDesc:
-        'Additional request fields for this agent. Same keys override model-level parameters',
-      editorCustomParametersAdd: 'Add parameter',
-      editorCustomParametersKeyPlaceholder: 'Key',
-      editorCustomParametersValuePlaceholder: 'Value',
       editorToolsCount: '{count} tools',
       editorEstimatedContextTokens: '~{count} tokens',
       editorSkillsCount: '{count} skills',
@@ -785,6 +736,9 @@ export const en: TranslationKeys = {
       grokCliPathName: 'Grok CLI path',
       grokCliPathDesc:
         'Custom path to the grok executable — paste the output of "which grok" ("where grok" on Windows). Leave empty to auto-detect. Stored on this device only.',
+      codebuddyCliPathName: 'CodeBuddy CLI path',
+      codebuddyCliPathDesc:
+        'Custom path to the codebuddy executable — paste the output of "which codebuddy" ("where codebuddy" on Windows). Leave empty to auto-detect. Stored on this device only.',
       cliPathMissing:
         'This path does not exist on this device; auto-detection will be used instead.',
       autoContextCompactionBlockTitle: 'Context compaction',
@@ -1125,6 +1079,7 @@ export const en: TranslationKeys = {
       addCustomEmbeddingModel: 'Add custom embedding model',
       editChatModel: 'Edit chat model',
       editEmbeddingModel: 'Edit embedding model',
+      dragHandle: 'Drag to reorder',
       editCustomChatModel: 'Edit custom chat model',
       editCustomEmbeddingModel: 'Edit custom embedding model',
       modelId: 'Model ID',
@@ -1162,6 +1117,7 @@ export const en: TranslationKeys = {
       },
       availableModelsAuto: 'Available models (auto-fetched)',
       searchModels: 'Search models...',
+      addMode: 'Add mode',
       modeSingle: 'Single',
       modeBatch: 'Batch',
       batchSelectAll: 'Select all',
@@ -1242,6 +1198,8 @@ export const en: TranslationKeys = {
       requestParameters: 'Request parameters',
       requestParametersDesc:
         'Usually no adjustment is needed. Fields left disabled use the provider defaults.',
+      samplingNotSentForModel:
+        'This model does not accept Temperature or Top P, so they are not sent.',
       requestParametersEnabledCount: '{count} request parameters enabled',
       clearRequestParameterOverrides: 'Clear overrides',
       additionalParameters: 'Other parameters',
@@ -1381,6 +1339,10 @@ export const en: TranslationKeys = {
       chunks: 'Chunks',
       pendingFiles: '{{n}} file(s) changed',
       lastUpdated: 'Last updated {{time}}',
+      updatedJustNow: 'Updated just now',
+      updatedMinutesAgo: 'Updated {{n}} minute(s) ago',
+      updatedHoursAgo: 'Updated {{n}} hour(s) ago',
+      updatedDaysAgo: 'Updated {{n}} day(s) ago',
       enableAndIndex: 'Enable and index',
       disable: 'Disable indexing',
       rebuildThis: 'Rebuild this base',
@@ -1396,6 +1358,10 @@ export const en: TranslationKeys = {
       localEmbedding: {
         groupLabel: 'Local',
         groupDesc: 'Runs on your device — your notes never leave this machine.',
+        deviceAriaLabel: 'Local inference device',
+        deviceCpu: 'CPU',
+        deviceGpu: 'GPU',
+        deviceGpuUnsupported: 'GPU inference is not supported on this device',
         desktopOnly: 'Local embedding models are only available on desktop.',
         metaLine: '{{dimension}} dims · {{size}}',
         download: 'Download',
@@ -1455,6 +1421,10 @@ export const en: TranslationKeys = {
         'e.g. Daily meeting notes and current project docs',
       scopeTitle: 'Scope',
       scopeDesc: 'Decides which folders go into this knowledge base.',
+      scopeWholeVault: 'Entire vault',
+      scopeOnlyPrefix: 'Only',
+      scopeAndMore: ' and more ({{n}} in total)',
+      scopeExcludeSuffix: ', excluding {{n}} folder(s)',
       nameRequired: 'Enter a name for the knowledge base',
       nameDuplicate: 'A knowledge base with this name already exists',
       saveFailed: 'Failed to save the knowledge base',
@@ -1612,12 +1582,6 @@ export const en: TranslationKeys = {
       title: 'Sparkle',
       aiSubsectionTitle: 'Super continuation',
       tabSubsectionTitle: 'Tab completion',
-      superContinuation: 'Enable Sparkle view',
-      superContinuationDesc:
-        'Enable the Sparkle sidebar view where you can configure dedicated continuation models, parameters, rules, and reference sources; when disabled, only the chat view is available.',
-      continuationModel: 'Continuation model',
-      continuationModelDesc:
-        'Select the model used for continuation in Sparkle.',
       selectionChatSubsectionTitle: 'Cursor chat',
       selectionChatDescription:
         'Provides inline ask, rewrite, explain, and other quick actions around selected text.',
@@ -1660,9 +1624,6 @@ export const en: TranslationKeys = {
       tabCompletion: 'Enable tab completion',
       tabCompletionDesc:
         'Request a completion when a trigger rule matches, then show it as gray ghost text that can be accepted with the tab key.',
-      tabCompletionMultipleCandidates: 'Generate multiple candidates',
-      tabCompletionMultipleCandidatesDesc:
-        'Generate three completion suggestions when enabled.',
       tabCompletionModel: 'Completion model',
       tabCompletionModelDesc:
         'Choose the model used for tab completion and length adjustment.',
@@ -1688,15 +1649,6 @@ export const en: TranslationKeys = {
       tabCompletionLengthPresetMedium: 'Medium',
       tabCompletionLengthPresetLong: 'Long',
       tabCompletionAdvanced: 'Advanced settings',
-      tabCompletionContextRange: 'Context range',
-      tabCompletionContextRangeDesc:
-        'Total characters of context sent to the model (split 4:1 between before and after cursor).',
-      tabCompletionMinContextLength: 'Minimum context length',
-      tabCompletionMinContextLengthDesc:
-        'Skip tab completion unless the text before the cursor contains at least this many characters.',
-      tabCompletionTemperature: 'Sampling temperature',
-      tabCompletionTemperatureDesc:
-        'Controls creativity for prefix suggestions (0 = deterministic, higher = more diverse).',
       tabCompletionRequestTimeout: 'Request timeout (seconds)',
       tabCompletionRequestTimeoutDesc:
         'Abort a tab completion request if it takes longer than this many seconds. Raise it for slower or long-reasoning models.',
@@ -1937,6 +1889,8 @@ export const en: TranslationKeys = {
       controlsLabel: 'Diagram controls',
     },
     stopGeneration: 'Stop generation',
+    scrollToBottom: 'Scroll to bottom',
+    scrollToBottomWhileStreaming: 'Scroll to bottom and keep following',
     queueMessage: {
       tooltip: 'Queue this message — it will be sent after the current step',
       hint: 'Waiting for the agent to finish the current step...',
@@ -1944,6 +1898,10 @@ export const en: TranslationKeys = {
         'Approve or reject the pending tool call before sending a new message.',
       blockedAwaitingInput:
         "Answer the agent's question in the chat before sending a new message.",
+      blockedActiveTool:
+        'Wait for the running tool call to finish before sending a new message.',
+      blockedActiveTooltip:
+        'You can send again once the running tool call finishes',
       abortedRestoredOne: 'Queued message restored to the input box',
       abortedRestoredMany:
         'Restored the latest queued message to the input box ({{count}} dropped)',
@@ -2064,6 +2022,8 @@ export const en: TranslationKeys = {
       cancelError: 'Could not stop the CLI run: {message}',
       openError: 'Could not open the CLI session: {message}',
       transitionError: 'Could not leave the current CLI session: {message}',
+      unboundMessageError:
+        'The CLI session has not been established yet, so this provider message cannot be shown.',
       sessionFallbackDividerTitle: 'Switched to default',
       sessionFallbackDividerDescription:
         'The original agent "{profile}" is unavailable, so this conversation switched to default — earlier messages are not in its memory.',
@@ -2076,6 +2036,9 @@ export const en: TranslationKeys = {
       defaultModel: '{provider} default model',
       loadError: 'Could not load CLI models: {message}',
       updateError: 'Could not update CLI configuration: {message}',
+      defaultBadge: 'Default',
+      setAsDefault: 'Set as default',
+      removeDefault: 'Remove default',
     },
     claudePlugins: {
       title: 'Manage Plugins',
@@ -2123,6 +2086,10 @@ export const en: TranslationKeys = {
         'Codex MCP server status is read-only here. Manage servers in the terminal.',
       codexUnsupportedVersion:
         'This Codex CLI version does not support querying MCP server status. Please upgrade Codex CLI.',
+    },
+    modelSelect: {
+      searchPlaceholder: 'Search models',
+      empty: 'No matching model',
     },
     quickAccess: {
       manage: 'Manage quick access',
@@ -2255,7 +2222,11 @@ export const en: TranslationKeys = {
       snapshotUnavailable:
         'This device has no snapshot of that edit, so it cannot be undone or reviewed. Snapshots stay on the device that made the edit.',
       reviewOutsideVault:
-        'This file lives outside the vault, so it cannot be reviewed in the editor. Undo still works.',
+        'This file lives outside the vault, so it cannot be reviewed in the editor.',
+      reviewWhileRunning:
+        'The agent is still running and may edit the file again. Review it once the run finishes.',
+      reviewContentChanged:
+        'The file has changed again since this edit, so the review cannot be opened.',
     },
     errorCard: {
       title: 'This response failed to generate',
@@ -2368,6 +2339,7 @@ export const en: TranslationKeys = {
           'The pre-edit content is not available on this device; below is only the content this call wrote.',
         collapsedLines: '⋯ {{count}} unchanged lines hidden',
         truncatedLines: '{{count}} more lines not shown',
+        readingCurrent: 'Reading the current file…',
       },
     },
     toolSummary: {
@@ -2466,6 +2438,7 @@ export const en: TranslationKeys = {
       'Index complete · {{count}} file(s) could not be indexed.',
     continueComplete: 'Resumed index completed.',
     continueFailed: 'Resumed index failed.',
+    indexCancelled: 'Indexing cancelled.',
     openYoloNewChatFailed:
       'Failed to open the YOLO chat window; try the command palette first.',
     updatingIndex: 'Updating vault index…',
@@ -2476,6 +2449,7 @@ export const en: TranslationKeys = {
       'Failed to migrate to JSON storage; please check the console for details.',
     reloadingPlugin: 'Reloading "next-composer" due to migration',
     settingsInvalid: 'Invalid settings',
+    settingsUpdateFailed: 'Failed to update settings',
     transportModeAutoPromoted:
       'Detected network/CORS issue. Automatically switched this provider to {mode}.',
     capturePdfNoLeaf: 'No PDF file is currently open.',
@@ -2836,6 +2810,10 @@ export const en: TranslationKeys = {
     viewOnGitHub: 'View on GitHub',
     updateInCommunityPlugins: 'Update in community plugins',
     manualInstallOnGitHub: "Can't update? Install manually from GitHub",
+    modulesFollowedCore: '{modules} updated along with YOLO',
+    updatesAvailable: '{count} updates available',
+    updateAll: 'Update all',
+    updated: 'Updated',
   },
   moduleFileView: {
     inactivePlaceholder:

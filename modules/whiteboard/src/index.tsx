@@ -1,7 +1,6 @@
 // Module entry point for YOLO Whiteboard.
 //
-// M1 canvas milestone (docs/plans/08-25-yolo-whiteboard/p1-design.md):
-// registers the `.yoloboard` file view via the Host API's
+// Registers the `.yoloboard` file view via the Host API's
 // `registerFileView` (added in host API 1.8.0; the declared floor is 1.9.0,
 // where `vault.getResourceUrl` — what a media card points an <img>/<audio>/
 // <video> at — first exists). All the actual camera/virtualization/card-lifecycle
@@ -12,13 +11,18 @@
 // point is fixed at that path (scripts/build-first-party-modules.mjs), not
 // because it uses JSX.
 
+import { AnnotationPrefs } from './host/annotationPrefs'
+import { AnnotationStores } from './host/annotationStore'
 import { registerWhiteboardAgentTools } from './host/boardTools'
 import { createWhiteboard } from './host/createWhiteboard'
+import { exportAnnotatedPdf } from './host/exportAnnotatedPdf'
 import {
   importAllCanvasFiles,
   importCanvasFileAndOpen,
 } from './host/importCanvasFile'
 import { OpenBoards } from './host/openBoards'
+import { PdfThumbnailStore } from './host/pdfThumbnailStore'
+import { ReaderPanelPrefs } from './host/readerPanelPrefs'
 import { registerWhiteboardRenameRewriter } from './host/renameRewriter'
 import { createWhiteboardLocalizedText } from './i18n'
 import { WhiteboardCanvas } from './ui/canvas'
@@ -38,6 +42,29 @@ yolo.registerModule({
     // Per-activation, not module scope: a deactivate must leave no view
     // behind for the next one to find.
     const openBoards = new OpenBoards()
+    const readerPanelPrefs = new ReaderPanelPrefs(
+      host.privateStorage.deviceLocal,
+      (stage, error) =>
+        console.error(`[YOLO Whiteboard] ${stage} failed`, error),
+    )
+
+    const reportError = (stage: string, error: unknown) =>
+      console.error(`[YOLO Whiteboard] ${stage} failed`, error)
+    // PDF annotations: one store per PDF shared by every board and reader,
+    // and the follower that keeps each annotation file beside its PDF across
+    // renames and deletes — for PDFs no board shows, too.
+    const annotationStores = new AnnotationStores(host, reportError)
+    host.lifecycle.add(() => annotationStores.dispose())
+    const annotationPrefs = new AnnotationPrefs(
+      host.privateStorage.synchronized,
+      reportError,
+    )
+    // PDF page thumbnails, kept on this device for every board.
+    const pdfThumbnailStore = new PdfThumbnailStore(
+      host.privateStorage.deviceLocal,
+      reportError,
+    )
+    host.lifecycle.add(() => pdfThumbnailStore.dispose())
 
     host.workspace.registerFileView({
       viewType: VIEW_TYPE,
@@ -45,7 +72,18 @@ yolo.registerModule({
       name: createWhiteboardLocalizedText('module.name'),
       icon: WHITEBOARD_ICON,
       factory: (context) => {
-        const canvas = new WhiteboardCanvas(context, host)
+        // Read on the first board opened, not at activation: private
+        // storage only answers once the module is active.
+        readerPanelPrefs.load()
+        annotationPrefs.load()
+        const canvas = new WhiteboardCanvas(
+          context,
+          host,
+          readerPanelPrefs,
+          annotationStores,
+          annotationPrefs,
+          pdfThumbnailStore,
+        )
         const forgetOpenBoard = openBoards.add(canvas)
         return {
           setViewData: (data, clear) => canvas.setViewData(data, clear),
@@ -61,16 +99,15 @@ yolo.registerModule({
     })
 
     // The agent's view of a board: `fs_read` renders it as a summary, and
-    // `edit_board` / `create_board` are how it writes one
-    // (docs/plans/09-03-whiteboard-agent-tools/master.md D2, D3).
+    // `edit_board` / `create_board` are how it writes one.
     registerWhiteboardAgentTools(host, openBoards)
 
-    // Event-layer reference resilience (p1-design §1.2): keeps every
+    // Event-layer reference resilience: keeps every
     // `.yoloboard` file's card references correct across renames/moves for
     // as long as the module is active, independent of any open leaf.
     host.lifecycle.add(registerWhiteboardRenameRewriter(host))
 
-    // Creation entries (p1-design §5): command and ribbon create at the vault
+    // Creation entries: command and ribbon create at the vault
     // root; the folder context menu action creates inside the target folder.
     // The ribbon is a creation entry rather than an "open" one because a board
     // is a file — there is no home surface for it to open.
@@ -95,7 +132,22 @@ yolo.registerModule({
       onSelect: (entry) => createWhiteboard(host, entry.path),
     })
 
-    // `.canvas` import (p3-canvas-parity D4): one-way, never registers a view
+    // A PDF's annotations written into a copy of it, from anywhere the PDF
+    // is offered as a file: the file explorer, and the "more options" menu of
+    // Obsidian's own PDF tab. The same entry is on a PDF card's context menu
+    // and the reading panel's header menu. There is no command for it: a
+    // command carries no target (the Host API has no active-file surface).
+    host.workspace.registerFileMenuAction({
+      id: 'whiteboard-export-annotated-pdf',
+      title: createWhiteboardLocalizedText('menu.exportAnnotatedPdf'),
+      icon: 'file-output',
+      appliesTo: 'file',
+      extensions: ['pdf'],
+      onSelect: (entry) =>
+        exportAnnotatedPdf(host, annotationStores, entry.path),
+    })
+
+    // `.canvas` import: one-way, never registers a view
     // for `.canvas` and never writes one. Two entries because they answer two
     // different questions — "bring this canvas across" (right-click one) and
     // "bring my canvases across" (the migration a command can express, since

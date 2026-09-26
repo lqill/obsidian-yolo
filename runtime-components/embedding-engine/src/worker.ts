@@ -15,6 +15,7 @@ import {
 import { toErrorInfo } from './errorInfo'
 import { matchDeclaredModelFile } from './modelFileMatcher'
 import type {
+  EmbeddingWorkerDevice,
   EmbeddingWorkerDisposeRequest,
   EmbeddingWorkerEmbedRequest,
   EmbeddingWorkerErrorStage,
@@ -43,7 +44,7 @@ type Session = Readonly<{
   tokenizer: Tokenizer
   model: Model
   spec: EmbeddingWorkerSpec
-  device: 'wasm'
+  device: EmbeddingWorkerDevice
 }>
 
 let session: Session | null = null
@@ -63,7 +64,7 @@ function postError(
   type: 'init-result' | 'embed-result' | 'dispose-result',
   error: unknown,
   stage: EmbeddingWorkerErrorStage,
-  device?: 'wasm',
+  device?: EmbeddingWorkerDevice,
 ): void {
   post({
     type,
@@ -154,19 +155,16 @@ function urlForWasmAsset(
 /**
  * onnxruntime-web's `env.wasm.wasmPaths` takes a single `{ wasm, mjs }` pair
  * (`WasmFilePaths` in `onnxruntime-common`'s `env.d.ts`) — NOT a
- * filename-keyed map, despite the shape being easy to mistake for one. Only
- * the plain-wasm build variant is shipped in this release (see
- * `WASM_ASSET_NAMES` in `protocol.ts`); the JSEP/WebGPU variant
- * (`ort-wasm-simd-threaded.jsep.{wasm,mjs}`) returns alongside WebGPU
- * device support in a future release.
+ * filename-keyed map, despite the shape being easy to mistake for one. The
+ * pair must match the ORT JS entry — see `WASM_ASSET_NAMES` in `protocol.ts`.
  */
 function installWasmPaths(
   wasm: Readonly<Record<string, ArrayBuffer>>,
   numThreads: number,
 ): void {
   const wasmPaths = {
-    wasm: urlForWasmAsset(wasm, 'ort-wasm-simd-threaded.wasm'),
-    mjs: urlForWasmAsset(wasm, 'ort-wasm-simd-threaded.mjs'),
+    wasm: urlForWasmAsset(wasm, 'ort-wasm-simd-threaded.asyncify.wasm'),
+    mjs: urlForWasmAsset(wasm, 'ort-wasm-simd-threaded.asyncify.mjs'),
   }
   const onnx = env.backends.onnx as unknown as {
     wasm: {
@@ -208,22 +206,22 @@ async function handleInit(request: EmbeddingWorkerInitRequest): Promise<void> {
   try {
     installWasmPaths(request.wasm, request.numThreads)
     model = await AutoModel.from_pretrained(MODEL_ID, {
-      device: 'wasm',
+      device: request.device,
       dtype: request.spec.dtype ?? 'q8',
     })
   } catch (error) {
     releaseModelBytes()
-    postError(request, 'init-result', error, 'load-model', 'wasm')
+    postError(request, 'init-result', error, 'load-model', request.device)
     return
   }
 
   releaseModelBytes()
-  session = { tokenizer, model, spec: request.spec, device: 'wasm' }
+  session = { tokenizer, model, spec: request.spec, device: request.device }
   post({
     type: 'init-result',
     requestId: request.requestId,
     ok: true,
-    device: 'wasm',
+    device: request.device,
   })
 }
 

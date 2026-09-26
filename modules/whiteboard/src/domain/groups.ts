@@ -1,6 +1,5 @@
-// Group membership and the rectangle a new group takes (P3 batch 3 wave B,
-// feature 3) — pure geometry over board nodes, no DOM (Module Boundaries,
-// CLAUDE.md).
+// Group membership and the rectangle a new group takes — pure geometry over
+// board nodes, no DOM (Module Boundaries, CLAUDE.md).
 //
 // Membership is **spatial, not stored**: a node belongs to a group while it
 // sits inside the group's rectangle, and stops belonging the moment either one
@@ -20,6 +19,7 @@
 // away anything the frame merely grazed.
 
 import type { Board, BoardNode, NodeId } from './fileFormat'
+import { isSpreadTitle } from './spread'
 
 export type GroupRect = Readonly<{ x: number; y: number; w: number; h: number }>
 
@@ -45,14 +45,41 @@ export function rectContains(outer: GroupRect, inner: GroupRect): boolean {
  * Ids of every node that sits wholly inside `group`, excluding the group
  * itself. Other groups count: a group nested inside another is carried by it,
  * and so (being inside the outer one too) is everything the inner group holds.
+ *
+ * A spread's pages are the one exception to geometry (domain/spread.ts): the
+ * PDF is in the group when its title is, and then all of it is — a sheet
+ * placed outside the frame included — while a sheet inside the frame whose
+ * title is elsewhere is not. A document is held or not held as a whole.
  */
 export function nodesInsideGroup(
   group: BoardNode,
   nodes: readonly BoardNode[],
 ): NodeId[] {
+  const inside = nodes.filter(
+    (node) =>
+      node.id !== group.id &&
+      node.type !== 'pdf-page' &&
+      rectContains(group, node),
+  )
+  const titles = new Set(inside.filter(isSpreadTitle).map((node) => node.id))
+  if (titles.size === 0) return inside.map((node) => node.id)
+  const ids = new Set(inside.map((node) => node.id))
+  for (const node of nodes) {
+    if (node.type === 'pdf-page' && titles.has(node.parent)) ids.add(node.id)
+  }
+  return nodes.filter((node) => ids.has(node.id)).map((node) => node.id)
+}
+
+/**
+ * What moving `node` carries along: a group what it holds, a spread's title
+ * its pages. Nothing for any other node.
+ */
+function carriedBy(node: BoardNode, nodes: readonly BoardNode[]): NodeId[] {
+  if (node.type === 'group') return nodesInsideGroup(node, nodes)
+  if (!isSpreadTitle(node)) return []
   return nodes
-    .filter((node) => node.id !== group.id && rectContains(group, node))
-    .map((node) => node.id)
+    .filter((other) => other.type === 'pdf-page' && other.parent === node.id)
+    .map((other) => other.id)
 }
 
 /**
@@ -74,8 +101,7 @@ export function nodesToDragWith(
   for (const node of nodes) {
     if (!selectedIds.has(node.id)) continue
     ids.add(node.id)
-    if (node.type !== 'group') continue
-    for (const contained of nodesInsideGroup(node, nodes)) ids.add(contained)
+    for (const contained of carriedBy(node, nodes)) ids.add(contained)
   }
   return Array.from(ids)
 }
@@ -103,8 +129,7 @@ export function arrangeTargets(
   // would let an align pull a card out of the group it sits in.
   const carried = new Set<NodeId>()
   for (const node of selected) {
-    if (node.type !== 'group') continue
-    for (const id of nodesInsideGroup(node, board.nodes)) carried.add(id)
+    for (const id of carriedBy(node, board.nodes)) carried.add(id)
   }
   return selected.filter((node) => !carried.has(node.id))
 }
@@ -129,12 +154,12 @@ export function carryGroupMembers(
   const carried = new Map(positions)
   const byId = new Map(nodes.map((node) => [node.id, node]))
   for (const [id, point] of positions) {
-    const group = byId.get(id)
-    if (group?.type !== 'group') continue
-    const dx = point.x - group.x
-    const dy = point.y - group.y
+    const carrier = byId.get(id)
+    if (!carrier) continue
+    const dx = point.x - carrier.x
+    const dy = point.y - carrier.y
     if (dx === 0 && dy === 0) continue
-    for (const memberId of nodesInsideGroup(group, nodes)) {
+    for (const memberId of carriedBy(carrier, nodes)) {
       if (positions.has(memberId)) continue
       const member = byId.get(memberId)
       if (!member) continue

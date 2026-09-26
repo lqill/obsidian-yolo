@@ -1,7 +1,6 @@
 /**
  * Unit tests for pdfSelectionHighlightController — focused on the
- * anchor/paint decoupling contract added in the 2026-08-16 addendum to
- * docs/plans/2026-08-16-pdf-annotation-quotes.md ("锚点与涂色必须解耦"):
+ * anchor/paint decoupling contract ("锚点与涂色必须解耦"):
  * `addHighlight` must always build the anchor (offsets, ranges, the
  * `textlayerrendered` resubscription) even when painting is disabled, either
  * by the caller's `options.paint` or by the CSS Custom Highlight API being
@@ -10,7 +9,8 @@
  * Runs in the default node environment (this repo has no jsdom dependency —
  * see captureCanvasRegion.test.ts for the same hand-rolled-DOM pattern) and
  * mocks only the minimal surface the controller touches: TreeWalker-based
- * text-node discovery, Range construction, a `.page`/`.textLayer` element
+ * text-node discovery and Range construction through the nodes'
+ * `ownerDocument`, a `.page`/`.textLayer` element
  * pair, a PDF.js-shaped eventBus, and the CSS Custom Highlight API.
  */
 
@@ -21,8 +21,31 @@ import { Platform, TFile } from 'obsidian'
 // Minimal DOM mocks required by the controller
 // ---------------------------------------------------------------------------
 
+/**
+ * The document every fake node belongs to. `defaultView` resolves to the
+ * current global `window` mock, so a test swapping `window` (e.g. to drop the
+ * CSS Custom Highlight API) changes the window the painted ranges live in.
+ */
+const fakeDocument = {
+  createTreeWalker: (root: FakeTextLayer) => {
+    const nodes = root.__textNodes ?? []
+    let i = -1
+    return {
+      nextNode: () => {
+        i += 1
+        return i < nodes.length ? nodes[i] : null
+      },
+    }
+  },
+  createRange: () => new FakeRange(),
+  get defaultView() {
+    return (global as any).window
+  },
+}
+
 class FakeText {
   __layer: FakeTextLayer | null = null
+  ownerDocument = fakeDocument
   constructor(public textContent: string) {}
   get length(): number {
     return this.textContent.length
@@ -31,7 +54,8 @@ class FakeText {
 
 type FakeTextLayer = {
   __textNodes: FakeText[]
-  ownerDocument: { createRange: () => FakeRange }
+  ownerDocument: typeof fakeDocument
+  contains: (node: unknown) => boolean
 }
 
 /**
@@ -92,7 +116,9 @@ class FakeRange {
 function makeTextLayer(texts: string[]): FakeTextLayer {
   const layer: FakeTextLayer = {
     __textNodes: texts.map((t) => new FakeText(t)),
-    ownerDocument: { createRange: () => new FakeRange() },
+    ownerDocument: fakeDocument,
+    contains: (node) =>
+      node === layer || (node instanceof FakeText && node.__layer === layer),
   }
   for (const node of layer.__textNodes) node.__layer = layer
   return layer
@@ -185,24 +211,10 @@ const FILE = new TFile()
 // ---------------------------------------------------------------------------
 
 beforeAll(() => {
-  ;(global as any).document = {
-    createTreeWalker: (root: FakeTextLayer) => {
-      const nodes = root.__textNodes ?? []
-      let i = -1
-      return {
-        nextNode: () => {
-          i += 1
-          return i < nodes.length ? nodes[i] : null
-        },
-      }
-    },
-    createRange: () => new FakeRange(),
-  }
   ;(global as any).NodeFilter = { SHOW_TEXT: 4 }
 })
 
 afterAll(() => {
-  delete (global as any).document
   delete (global as any).NodeFilter
   delete (global as any).window
 })

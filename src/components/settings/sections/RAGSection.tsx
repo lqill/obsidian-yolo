@@ -1,4 +1,5 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import clsx from 'clsx'
 import dayjs from 'dayjs'
 import { useReducedMotion } from 'framer-motion'
 import {
@@ -39,6 +40,7 @@ import { ObsidianSetting } from '../../common/ObsidianSetting'
 import { ObsidianTextInput } from '../../common/ObsidianTextInput'
 import { ObsidianToggle } from '../../common/ObsidianToggle'
 import { ConfirmModal } from '../../modals/ConfirmModal'
+import { SortableCardGrid } from '../common/SortableCardGrid'
 import { IndexProgressRing } from '../IndexProgressRing'
 import {
   EmbeddingDbManageModal,
@@ -231,8 +233,10 @@ function CardScopeCaption({
   )
 }
 
+const getKnowledgeBaseId = (kb: KnowledgeBase) => kb.id
+
 export function RAGSection({ app, plugin }: RAGSectionProps) {
-  const { settings, setSettings } = useSettings()
+  const { settings, setSettings, updateSettings } = useSettings()
   const { t } = useLanguage()
 
   const [indexSnapshot, setIndexSnapshot] = useState<RagIndexServiceSnapshot>(
@@ -260,55 +264,66 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
   }, [plugin])
 
   // Cheap per-kb stats/pending recompute: on mount, whenever the knowledge
-  // base list or its scopes change, and on a throttled vault-event timer —
-  // matches the plan's "Tab 挂载、每次运行结束、vault 文件事件节流 2s 后重算".
-  const refreshKbData = useCallback(async () => {
-    if (knowledgeBases.length === 0) {
-      setKbData({})
-      return
-    }
-    const dbManager = await plugin.getDbManager()
-    const currentDimension = settings.embeddingModels.find(
-      (model) => model.id === settings.embeddingModelId,
-    )?.dimension
-    const entries = await Promise.all(
-      knowledgeBases.map(async (kb): Promise<[string, KbData]> => {
-        try {
-          const vectorManager = await dbManager.getVectorManager(kb.id)
-          const [docCount, stats, pending] = await Promise.all([
-            vectorManager.getIndexedFileCount(settings.embeddingModelId),
-            vectorManager.getEmbeddingStats(),
-            plugin.countPendingChanges(kb.id),
-          ])
-          const modelStats = stats.find(
-            (s) => s.model === settings.embeddingModelId,
-          )
-          const rowCount = modelStats?.rowCount ?? 0
-          return [
-            kb.id,
-            {
-              docCount,
-              chunkCount: rowCount,
-              estimateMb: inMemoryIndexMb(rowCount, currentDimension) ?? 0,
-              pendingChanged: pending.changed,
-            },
-          ]
-        } catch (error) {
-          console.warn(
-            `[YOLO] Failed to load knowledge base stats for "${kb.id}".`,
-            error,
-          )
-          return [kb.id, EMPTY_KB_DATA]
-        }
-      }),
-    )
-    setKbData(Object.fromEntries(entries))
-  }, [
-    plugin,
-    knowledgeBases,
-    settings.embeddingModelId,
-    settings.embeddingModels,
-  ])
+  // base list or its scopes change, and on a throttled vault-event timer.
+  // `onlyKbIds` recomputes just those bases and merges them in; omit it to
+  // recompute every base and drop entries for bases that no longer exist.
+  const refreshKbData = useCallback(
+    async (onlyKbIds?: ReadonlySet<string>) => {
+      if (knowledgeBases.length === 0) {
+        setKbData({})
+        return
+      }
+      const dbManager = await plugin.getDbManager()
+      const currentDimension = settings.embeddingModels.find(
+        (model) => model.id === settings.embeddingModelId,
+      )?.dimension
+      const targets = onlyKbIds
+        ? knowledgeBases.filter((kb) => onlyKbIds.has(kb.id))
+        : knowledgeBases
+      const entries = await Promise.all(
+        targets.map(async (kb): Promise<[string, KbData]> => {
+          try {
+            const vectorManager = await dbManager.getVectorManager(kb.id)
+            const [docCount, stats, pending] = await Promise.all([
+              vectorManager.getIndexedFileCount(settings.embeddingModelId),
+              vectorManager.getEmbeddingStats(),
+              plugin.countPendingChanges(kb.id),
+            ])
+            const modelStats = stats.find(
+              (s) => s.model === settings.embeddingModelId,
+            )
+            const rowCount = modelStats?.rowCount ?? 0
+            return [
+              kb.id,
+              {
+                docCount,
+                chunkCount: rowCount,
+                estimateMb: inMemoryIndexMb(rowCount, currentDimension) ?? 0,
+                pendingChanged: pending.changed,
+              },
+            ]
+          } catch (error) {
+            console.warn(
+              `[YOLO] Failed to load knowledge base stats for "${kb.id}".`,
+              error,
+            )
+            return [kb.id, EMPTY_KB_DATA]
+          }
+        }),
+      )
+      setKbData((previous) =>
+        onlyKbIds
+          ? { ...previous, ...Object.fromEntries(entries) }
+          : Object.fromEntries(entries),
+      )
+    },
+    [
+      plugin,
+      knowledgeBases,
+      settings.embeddingModelId,
+      settings.embeddingModels,
+    ],
+  )
 
   const knowledgeBaseScopeKey = useMemo(
     () =>
@@ -325,20 +340,27 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
   // While a run is active, vectors land in IndexedDB batch by batch
   // (VectorManager flushes per adaptive batch), so poll the same cheap stats
   // on the vault-event cadence to let the card's doc/chunk/MB numbers grow
-  // live instead of sitting at 0 until completion.
-  const anyRunRunning = useMemo(
+  // live instead of sitting at 0 until completion. Only running bases are
+  // polled: idle bases' numbers can't move from a run, and every scan here
+  // competes with the run for the main thread and the store's transactions.
+  const runningKbIdsKey = useMemo(
     () =>
-      Object.values(indexSnapshot.runs).some((run) => run.status === 'running'),
+      Object.entries(indexSnapshot.runs)
+        .filter(([, run]) => run.status === 'running')
+        .map(([kbId]) => kbId)
+        .sort()
+        .join('\n'),
     [indexSnapshot],
   )
   useEffect(() => {
-    if (!anyRunRunning) return
+    if (!runningKbIdsKey) return
+    const runningKbIds = new Set(runningKbIdsKey.split('\n'))
     const win = sectionWindowRef.current
     const timer = win.setInterval(() => {
-      void refreshKbData()
+      void refreshKbData(runningKbIds)
     }, 2000)
     return () => win.clearInterval(timer)
-  }, [anyRunRunning, refreshKbData])
+  }, [runningKbIdsKey, refreshKbData])
 
   const previousRunningKbIdsRef = useRef<Set<string>>(new Set())
   useEffect(() => {
@@ -606,8 +628,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
 
   // The only scenario where local-embedding engine info surfaces in the
   // status bar: the currently selected model is local and can't actually
-  // run right now (not downloaded / component disabled / mobile). See
-  // docs/plans/08-22-local-embedding/00-plan.md §3.6.
+  // run right now (not downloaded / component disabled / mobile).
   const localEmbeddingIssue = useLocalEmbeddingEngineIssue(
     plugin,
     currentEmbeddingModel,
@@ -781,8 +802,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
       {/* Status bar: main toggle + one-line status + primary actions. The
           local-embedding engine's health is not its own row — it only ever
           takes over this one status line, when the currently selected model
-          is local and can't actually run right now. See
-          docs/plans/08-22-local-embedding/00-plan.md §3.6. */}
+          is local and can't actually run right now. */}
       <div
         className={`yolo-kb-status-bar${isIndexing ? ' is-busy' : ''}${!isRagEnabled ? ' is-off' : ''}${isRagEnabled && localEmbeddingIssue ? ' is-warn' : ''}`}
       >
@@ -1062,8 +1082,21 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
             />
           </div>
 
-          <div className="yolo-kb-grid">
-            {knowledgeBases.map((kb) => {
+          <SortableCardGrid
+            className="yolo-kb-grid"
+            items={knowledgeBases}
+            getId={getKnowledgeBaseId}
+            onOpen={(kb) => handleOpenKbModal(kb.id)}
+            onReorder={(nextKnowledgeBases) =>
+              updateSettings((current) => ({
+                ...current,
+                knowledgeBases: nextKnowledgeBases,
+              }))
+            }
+            getCardClassName={(kb) =>
+              clsx('yolo-kb-card', { 'is-indexing': activeKbId === kb.id })
+            }
+            renderCard={(kb) => {
               const data = kbData[kb.id] ?? EMPTY_KB_DATA
               const run = indexSnapshot.runs[kb.id]
               const isThisIndexing = activeKbId === kb.id
@@ -1080,19 +1113,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
                   : undefined
 
               return (
-                <article
-                  key={kb.id}
-                  className={`yolo-agent-card yolo-agent-card--clickable yolo-kb-card${isThisIndexing ? ' is-indexing' : ''}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => handleOpenKbModal(kb.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      handleOpenKbModal(kb.id)
-                    }
-                  }}
-                >
+                <>
                   {isThisIndexing && (
                     <div className="yolo-kb-card-ring">
                       <IndexProgressRing percent={ringPercentFor(run, true)} />
@@ -1274,29 +1295,31 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
                       </div>
                     </div>
                   </div>
-                </article>
+                </>
               )
-            })}
-            <article
-              className="yolo-agent-create-card"
-              role="button"
-              tabIndex={0}
-              onClick={() => handleOpenKbModal()}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  handleOpenKbModal()
-                }
-              }}
-            >
-              <div className="yolo-agent-create-card-icon">
-                <Plus size={28} />
-              </div>
-              <div className="yolo-agent-create-card-text">
-                {t('settings.knowledgeBases.new', '新建知识库')}
-              </div>
-            </article>
-          </div>
+            }}
+            trailing={
+              <article
+                className="yolo-agent-create-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => handleOpenKbModal()}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    handleOpenKbModal()
+                  }
+                }}
+              >
+                <div className="yolo-agent-create-card-icon">
+                  <Plus size={28} />
+                </div>
+                <div className="yolo-agent-create-card-text">
+                  {t('settings.knowledgeBases.new', '新建知识库')}
+                </div>
+              </article>
+            }
+          />
         </div>
 
         {/* Embedding model shelf: the API row below only selects among
@@ -1304,8 +1327,7 @@ export function RAGSection({ app, plugin }: RAGSectionProps) {
               stays on the Models tab. The "本地" group right after it is
               `LocalEmbeddingShelf`, a curated download list with its own
               per-model lifecycle; local embedding models are deliberately
-              not a normal Provider entry (no API key/base URL), see
-              docs/plans/08-22-local-embedding/00-plan.md §3.5-§3.7. */}
+              not a normal Provider entry (no API key/base URL). */}
         <div className="yolo-kb-divider-label yolo-kb-divider-label--sub">
           {t('settings.knowledgeBases.embeddingModelShelf', '嵌入模型')}
           <span className="yolo-kb-divider-label-faint">

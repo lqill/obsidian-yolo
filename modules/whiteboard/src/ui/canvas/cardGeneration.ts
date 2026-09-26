@@ -1,12 +1,14 @@
-// Rung one of the board's AI ladder (master.md §5): an empty text card offers
+// Rung one of the board's AI ladder: an empty text card offers
 // a few one-click instructions, and clicking one streams a single agent turn
 // straight into that card.
 //
 // Two states of one card, and that is the whole surface:
 //
-//   - **empty** — the card's body holds its chips. Not an overlay and not a
-//     button beside the card: a card with nothing in it is a card asking what
-//     goes in it, and the chips are what that looks like. The first character
+//   - **empty** — while it is the card the user is on (selected alone, or
+//     being edited), its body holds a placeholder line whose instruction
+//     words are the chips. Not an overlay and not a button beside the card:
+//     a card with nothing in it is a card asking what goes in it, and a
+//     placeholder is what that looks like. The first character
 //     typed into the card takes them away (`syncChips` is called from the same
 //     content path that renders every other card state, so "has content" is
 //     never asked twice).
@@ -22,14 +24,14 @@
 //     arrives. Nothing is written to the board while it streams: the card is
 //     pinned, the renderer is told to leave it alone, and the accumulated text
 //     lands in one `applyBoardChange` when the run settles, so Cmd+Z undoes a
-//     generation in one step (Q20).
+//     generation in one step.
 //
-// Stopping keeps what has arrived (Q12), and so does double-clicking into the
-// card mid-run (Q35) — the editor and the stream share the card's body, so
+// Stopping keeps what has arrived, and so does double-clicking into the card
+// mid-run — the editor and the stream share the card's body, so
 // asking to type in it is asking to stop.
 //
 // The run itself is deliberately small: `host.agent.stream` with a system
-// prompt that *replaces* the host's default one (W0), the card's context as
+// prompt that *replaces* the host's default one, the card's context as
 // the prompt (domain/cardContext.ts), and exactly one run-scoped read-only
 // tool. No writes, no board tools, no follow-up turn.
 
@@ -47,6 +49,7 @@ import {
 
 const CHIPS_CLASS = 'yolo-whiteboard-card-chips'
 const CHIP_CLASS = 'yolo-whiteboard-card-chip'
+const CHIP_SEPARATOR_CLASS = 'yolo-whiteboard-card-chip-separator'
 const STREAM_CLASS = 'yolo-whiteboard-card-stream'
 const STREAM_STATUS_CLASS = 'yolo-whiteboard-card-stream-status'
 const STREAM_LABEL_CLASS = 'yolo-whiteboard-card-stream-label'
@@ -67,6 +70,8 @@ export type CardGenerationCallbacks = Readonly<{
   getBody: (id: NodeId) => HTMLElement | null
   /** False on a board that cannot be edited or is drawn as an overview. */
   isAvailable: () => boolean
+  /** True for the lone selected card. */
+  isFocused: (id: NodeId) => boolean
   /**
    * The live text of this card's open editor, or null when it is not the
    * card being edited. While an editor is open it — not the node — is what
@@ -99,7 +104,7 @@ type Generation = {
   text: string
   /** True once the run has been handed back — every path is idempotent. */
   settled: boolean
-  /** Set by a stop that means "let me type in this card instead" (Q35). */
+  /** Set by a stop that means "let me type in this card instead". */
   edit: boolean
 }
 
@@ -188,12 +193,18 @@ export class CardGeneration {
     if (this.generations.has(id)) return false
     const node = this.callbacks.getNode(id)
     // A file card is never "empty" in this sense: its content lives in a note,
-    // and an empty note is a note to write in, not a card to generate into
-    // (Q20).
+    // and an empty note is a note to write in, not a card to generate into.
     if (node?.type !== 'text') return false
+    // Neither is bare text: it is something being written by hand, and an
+    // empty one only exists while its editor is open.
+    if (node.plain === true) return false
+    // Only the card the user is on offers them: the lone selected card, or
+    // the one being edited (editing clears the selection, so it has to be
+    // asked separately). A board of empty cards is not a board of prompts.
     // An open editor is the card's content while it is open — including the
     // keystrokes it holds that the board has not been told about yet.
     const editing = this.callbacks.editingText(id)
+    if (editing === null && !this.callbacks.isFocused(id)) return false
     return (editing ?? node.text).trim() === ''
   }
 
@@ -206,7 +217,18 @@ export class CardGeneration {
     const chips = doc.createElement('div')
     chips.className = CHIPS_CLASS
     chips.dataset.instructions = signature
-    for (const instruction of instructions) {
+    // Read as the card's placeholder: one faint line where the first line of
+    // text will go, whose instruction words happen to be pressable.
+    const lead = doc.createElement('span')
+    lead.textContent = this.callbacks.t('cardAi.hint')
+    chips.appendChild(lead)
+    for (const [index, instruction] of instructions.entries()) {
+      if (index > 0) {
+        const separator = doc.createElement('span')
+        separator.className = CHIP_SEPARATOR_CLASS
+        separator.textContent = '·'
+        chips.appendChild(separator)
+      }
       const chip = doc.createElement('button')
       chip.type = 'button'
       chip.className = CHIP_CLASS
@@ -295,7 +317,7 @@ export class CardGeneration {
   }
 
   /**
-   * The run's only tool (Q9): one card, read-only. `read_board` is not given —
+   * The run's only tool: one card, read-only. `read_board` is not given —
    * the board's summary is already in the prompt — and nothing that writes is,
    * so the run has nothing to ask approval for.
    */
@@ -391,7 +413,7 @@ export class CardGeneration {
     }
     generation.text = next
     // The status line has said everything it has to say once the card is
-    // writing itself (Q11); the stop button stays.
+    // writing itself; the stop button stays.
     generation.labelEl.textContent = ''
   }
 

@@ -79,17 +79,14 @@ import {
 } from '../llm/model-modalities'
 import { getNestedFiles, readTFileContent } from '../obsidian'
 import {
-  PDF_INDEX_MAX_BYTES,
-  PDF_INDEX_MAX_PAGES,
+  PDF_READ_MAX_BYTES,
+  PDF_READ_MAX_PAGES,
   extractPdfText,
   extractPdfTextFromBase64,
 } from '../pdf/extractPdfText'
 import { prefixTimeContext } from '../prompt/timeContext'
 
-import {
-  type ContextualInjection,
-  appendContextualInjectionsToLastUserMessage,
-} from './contextual-injections'
+import { renderInjectedContext } from './contextual-injections'
 import { serializeExternalAgentResultToUserMessage } from './externalAgentResultSerializer'
 import { serializeSubagentResultToUserMessage } from './subagentResultSerializer'
 import { serializeTerminalCommandResultToUserMessage } from './terminalCommandResultSerializer'
@@ -98,9 +95,9 @@ import {
   filterRequestMessagesByToolBoundary,
 } from './tool-boundary'
 import {
+  PRUNED_TOOL_RESULT_PLACEHOLDER,
   collectContextPrunedToolCallIds,
-  filterContextPrunedAssistantToolCalls,
-  filterContextPrunedToolCalls,
+  isContextPrunedToolCall,
 } from './tool-context-pruning'
 
 /** Regex matching the `<user_selected_skills>...</user_selected_skills>` block
@@ -219,8 +216,7 @@ type RequestContextBuilderOptions = {
    * `fs_read` receives it via `ToolContext`). Used by the @mention `full`
    * mode's file inlining (`buildFullMentionedFilesPrompt`) so a claimed
    * extension like `.yoloboard` renders to its summary instead of dumping raw
-   * bytes into the prompt (docs/plans/09-03-whiteboard-agent-tools/master.md
-   * D3 / Q7). Omitted in tests and other callers that don't wire up modules —
+   * bytes into the prompt. Omitted in tests and other callers that don't wire up modules —
    * behaves exactly like "nothing claimed this extension".
    */
   resolveModuleFileTextRenderer?: (
@@ -363,12 +359,27 @@ function renderAttachedDocumentBlock({
 }
 
 /**
+ * A tool-result image still pointing at `cache://` after history hydration had
+ * no cached copy on this device — evicted, cleared, or never cached here
+ * (history syncs, the local cache does not). It is not an image a provider can
+ * fetch, so the model is told instead. The conversation itself keeps the ref:
+ * another device may still resolve it.
+ */
+const UNRESOLVED_CACHED_IMAGE_TEXT =
+  '[Image unavailable: its cached copy is not on this device.]'
+
+const replaceUnresolvedCachedImage = (part: ContentPart): ContentPart =>
+  part.type === 'image_url' && part.image_url.url.startsWith('cache://')
+    ? { type: 'text', text: UNRESOLVED_CACHED_IMAGE_TEXT }
+    : part
+
+/**
  * Convert `document` content parts to plain text for models that don't
  * advertise the `pdf` modality. Native-PDF-capable models leave document parts
  * untouched. This is the modality gate — adapters never have to handle a
  * document part for a non-pdf model.
  *
- * Text extraction goes through the shared `pdfTextCacheStore` keyed by content
+ * Text extraction goes through the local PDF text cache keyed by content
  * hash: the upload site already wrote pages there during `fileToMentionablePDF`,
  * so the common case is a pure cache hit (no pdfjs invocation per turn). Cache
  * miss (e.g. legacy mentionable, or upload-time write failure) falls back to a
@@ -401,7 +412,7 @@ export async function prepareDocumentsForModel(
           context.app,
           part.data,
           {
-            settings: context.settings,
+            useCache: true,
             sourceLabel: `upload:${part.name}`,
           },
         )
@@ -584,7 +595,6 @@ export class RequestContextBuilder {
     model: ChatModel
     conversationId: string
     compaction?: ChatConversationCompactionLike | null
-    contextualInjections?: ContextualInjection[]
     runtimeModePrompt?: string
     /** Max's environment section — see `ChatModeRuntime.modeEnvironmentPrompt`. */
     modeEnvironmentPrompt?: string
@@ -605,7 +615,7 @@ export class RequestContextBuilder {
   /**
    * Shared pipeline for `generateRequestMessages` and
    * `generateRequestSections`. Compiles the user message, reads snapshots,
-   * builds the system prompt, runs contextual injections, and strips/preps
+   * builds the system prompt, and strips/preps
    * documents for the target model — all in one pass so the two public APIs
    * never duplicate I/O (memory files / project instructions / skill docs).
    */
@@ -617,7 +627,6 @@ export class RequestContextBuilder {
     model: _model,
     conversationId,
     compaction,
-    contextualInjections,
     runtimeModePrompt,
     modeEnvironmentPrompt,
     modePersonaPrompt,
@@ -634,7 +643,6 @@ export class RequestContextBuilder {
     model: ChatModel
     conversationId: string
     compaction?: ChatConversationCompactionLike | null
-    contextualInjections?: ContextualInjection[]
     runtimeModePrompt?: string
     modeEnvironmentPrompt?: string
     modePersonaPrompt?: string
@@ -765,17 +773,12 @@ export class RequestContextBuilder {
         snapshotEntries,
         compaction,
         scope: skillScope,
+        modelId: _model.id,
       })),
     ]
 
-    const withInjections = await appendContextualInjectionsToLastUserMessage(
-      baseRequestMessages,
-      contextualInjections ?? [],
-      { app: this.app, settings: this.settings },
-    )
-
     const requestMessages = await prepareDocumentsForModel(
-      stripUnsupportedImages(withInjections, _model),
+      stripUnsupportedImages(baseRequestMessages, _model),
       _model,
       { app: this.app, settings: this.settings },
     )
@@ -803,7 +806,6 @@ export class RequestContextBuilder {
     model: ChatModel
     conversationId: string
     compaction?: ChatConversationCompactionLike | null
-    contextualInjections?: ContextualInjection[]
     runtimeModePrompt?: string
     modeEnvironmentPrompt?: string
     modePersonaPrompt?: string
@@ -925,11 +927,14 @@ export class RequestContextBuilder {
    */
   public parseTurnMessagesToRequestMessages(
     messages: ChatMessage[],
+    modelId: string,
   ): RequestMessage[] {
     const requestMessages: RequestMessage[] = []
     for (const message of messages) {
       if (message.role === 'assistant') {
-        requestMessages.push(...this.parseAssistantMessage({ message }))
+        requestMessages.push(
+          ...this.parseAssistantMessage({ message, modelId }),
+        )
         continue
       }
       if (message.role === 'tool') {
@@ -946,11 +951,14 @@ export class RequestContextBuilder {
     snapshotEntries,
     compaction,
     scope,
+    modelId,
   }: {
     messages: ChatMessage[]
     snapshotEntries: Record<string, string | ContentPart[]>
     compaction?: ChatConversationCompactionLike | null
     scope?: LiteSkillScope
+    /** The model this request goes to — see `parseAssistantMessage`. */
+    modelId: string
   }): Promise<RequestMessage[]> {
     const requestMessages: RequestMessage[] = []
     const prunedToolCallIds = collectContextPrunedToolCallIds(messages)
@@ -986,7 +994,7 @@ export class RequestContextBuilder {
 
           if (message.role === 'assistant') {
             requestMessages.push(
-              ...this.parseAssistantMessage({ message, prunedToolCallIds }),
+              ...this.parseAssistantMessage({ message, modelId }),
             )
             continue
           }
@@ -1040,7 +1048,7 @@ export class RequestContextBuilder {
 
       if (message.role === 'assistant') {
         requestMessages.push(
-          ...this.parseAssistantMessage({ message, prunedToolCallIds }),
+          ...this.parseAssistantMessage({ message, modelId }),
         )
         continue
       }
@@ -1070,7 +1078,26 @@ export class RequestContextBuilder {
     )
   }
 
-  private async getUserMessageContent({
+  /** The message body followed by the context stamped on it. */
+  private async getUserMessageContent(args: {
+    message: ChatUserMessage
+    snapshotEntries: Record<string, string | ContentPart[]>
+    scope?: LiteSkillScope
+  }): Promise<string | ContentPart[]> {
+    const body = await this.getUserMessageBody(args)
+    const context = args.message.injectedContext
+    if (!context || context.length === 0) {
+      return body
+    }
+    return [
+      ...(typeof body === 'string'
+        ? [{ type: 'text' as const, text: body }]
+        : body),
+      ...(await renderInjectedContext(context, this.app)),
+    ]
+  }
+
+  private async getUserMessageBody({
     message,
     snapshotEntries,
     scope,
@@ -1241,12 +1268,18 @@ export class RequestContextBuilder {
       .join('\n\n')}\n</user_selected_skills>\n`
   }
 
+  /**
+   * The provider's native reply is handed back only to the model that wrote
+   * it: reasoning signatures and encrypted reasoning are bound to their
+   * model, and another model gets the reply rebuilt from its text and tool
+   * calls. The provider decides everything else about what is still valid.
+   */
   private parseAssistantMessage({
     message,
-    prunedToolCallIds,
+    modelId,
   }: {
     message: ChatAssistantMessage
-    prunedToolCallIds?: ReadonlySet<string>
+    modelId: string
   }): RequestMessage[] {
     let citationContent: string | null = null
     if (message.annotations && message.annotations.length > 0) {
@@ -1268,15 +1301,16 @@ ${message.annotations
           ...(citationContent ? [citationContent] : []),
         ].join('\n'),
         reasoning: message.reasoning,
-        providerMetadata: message.metadata?.providerMetadata,
-        tool_calls: filterContextPrunedAssistantToolCalls(
+        providerMetadata:
+          message.metadata?.model?.id === modelId
+            ? message.metadata?.providerMetadata
+            : undefined,
+        tool_calls:
           message.toolCallRequests
             ?.map((toolCall) => this.normalizeToolCallRequest(toolCall))
             .filter((toolCall): toolCall is NonNullable<typeof toolCall> =>
               Boolean(toolCall),
             ) ?? undefined,
-          prunedToolCallIds ?? new Set<string>(),
-        ),
       },
     ]
   }
@@ -1346,16 +1380,24 @@ ${message.annotations
     const toolMessages: RequestMessage[] = []
     const collectedContentParts: ContentPart[] = []
 
-    for (const toolCall of filterContextPrunedToolCalls(
-      message.toolCalls,
-      prunedToolCallIds ?? new Set<string>(),
-    )) {
+    for (const toolCall of message.toolCalls) {
       // Same boundary as the assistant tool_calls above: a tool result answers
       // the call by name on providers that pair them that way (Gemini), so it
       // has to speak the model-facing name too.
       const request = {
         ...toolCall.request,
         name: toModelToolName(toolCall.request.name),
+      }
+      if (
+        prunedToolCallIds &&
+        isContextPrunedToolCall(toolCall.request, prunedToolCallIds)
+      ) {
+        toolMessages.push({
+          role: 'tool',
+          tool_call: request,
+          content: PRUNED_TOOL_RESULT_PLACEHOLDER,
+        })
+        continue
       }
       switch (toolCall.response.status) {
         case ToolCallResponseStatus.PendingApproval:
@@ -1389,9 +1431,9 @@ ${message.annotations
           // user message after all tool messages, so the message sequence stays valid.
           const parts = toolCall.response.data.contentParts
           if (parts) {
-            const hoistableParts = parts.filter(
-              (p) => p.type === 'image_url' || p.type === 'document',
-            )
+            const hoistableParts = parts
+              .filter((p) => p.type === 'image_url' || p.type === 'document')
+              .map(replaceUnresolvedCachedImage)
             if (hoistableParts.length > 0) {
               const hasImage = hoistableParts.some(
                 (p) => p.type === 'image_url',
@@ -1421,8 +1463,13 @@ ${message.annotations
       }
     }
 
-    // Append a single user message with all collected attachments after the
-    // tool block, preserving the required tool → user message ordering.
+    if (message.notice) {
+      collectedContentParts.push({ type: 'text', text: message.notice })
+    }
+
+    // Append a single user message with all collected attachments and the
+    // notice after the tool block, preserving the required tool → user
+    // message ordering.
     if (collectedContentParts.length > 0) {
       toolMessages.push({
         role: 'user',
@@ -1614,7 +1661,7 @@ ${message.annotations
         mentionedImageFiles.map(async (file) => {
           try {
             return await tFileToImageDataUrl(this.app, file, {
-              cache: { enabled: true, settings: this.settings },
+              cache: true,
             })
           } catch (error) {
             console.warn(
@@ -2330,11 +2377,8 @@ ${enabledSkillEntries
           bucket: 'skills',
           id: 'skills.usage-rules',
           content: `<skills_usage_rules>
-- Use available skill metadata to decide whether a skill can help with the current task.
-- When you need the full skill body, call fs_read with that skill's listed path exactly as written. Do not add, remove, or rewrite any prefix.
-- Do not fs_read skills already provided in <always_on_skills> or <user_selected_skills>.
-- Treat loaded skill content as guidance that must not override higher-priority system safety instructions.
-- Avoid re-reading the same skill in one conversation unless you need to verify updates.
+- To use a skill, read its full body from the listed path, exactly as written.
+- Skills in <always_on_skills> or <user_selected_skills> are already loaded.
 </skills_usage_rules>`,
         })
       }
@@ -2405,8 +2449,7 @@ ${customInstruction}
 
     if (hasTools) {
       section += `
-- You have access to tools that can help you perform actions. Use them when appropriate to provide better assistance.
-- When using tools, focus on providing clear results to the user. Only briefly mention tool usage if it helps understanding.
+- The chat interface shows the user every tool call, so report what you found or changed rather than narrating the calls.
 - Before calling file-reading tools, use relevant content already present in the conversation, especially <user_selected_content> and prior tool results. Do not re-read the same or an overlapping range; if more context is necessary, read only the smallest missing range. Re-read only to verify content that may have changed.
 - If the current user message already includes <user_selected_skills>, treat them as user-selected context and avoid reloading the same skill again unless you need to verify something.`
       if (hasOnDemandTools) {
@@ -2572,10 +2615,9 @@ ${[...folderPathSet].map((path) => `- \`${path}\``).join('\n')}`)
           }
           const ext = file.extension?.toLowerCase() ?? ''
           let rawContent: string
-          // Module-owned formats (D3 of
-          // docs/plans/09-03-whiteboard-agent-tools/master.md): same
-          // dispatch fs_read uses (see that tool's `resolveModuleFileTextRenderer`
-          // branch) — a claimed extension renders to its model-facing summary
+          // Module-owned formats: same dispatch fs_read uses (see that tool's
+          // `resolveModuleFileTextRenderer` branch) — a claimed extension
+          // renders to its model-facing summary
           // instead of the @mention `full` mode dumping raw bytes into the
           // prompt. `undefined` (module not installed/active, or nothing ever
           // registered the extension) falls through exactly as before.
@@ -2593,9 +2635,9 @@ ${[...folderPathSet].map((path) => `- \`${path}\``).join('\n')}`)
             })
           } else if (ext === 'pdf') {
             const { pages } = await extractPdfText(this.app, file, {
-              maxBinaryBytes: PDF_INDEX_MAX_BYTES,
-              maxPages: PDF_INDEX_MAX_PAGES,
-              settings: this.settings,
+              maxBinaryBytes: PDF_READ_MAX_BYTES,
+              maxPages: PDF_READ_MAX_PAGES,
+              useCache: true,
             })
             rawContent = pages
               .map((p) => `<page ${p.page}>\n${p.text}\n</page ${p.page}>`)

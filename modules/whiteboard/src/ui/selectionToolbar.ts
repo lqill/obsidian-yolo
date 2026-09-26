@@ -1,5 +1,5 @@
-// The floating toolbar that appears over the current selection (P3 batch 3's
-// interaction surface ①/②), and the colour popover it opens.
+// The floating toolbar that appears over the current selection, and the
+// colour popover it opens.
 //
 // Modelled on Obsidian Canvas's `.canvas-menu`, measured in a running
 // Obsidian: a row of `clickable-icon` buttons in a screen-space container that
@@ -37,6 +37,10 @@ import { TOOLBAR_MARGIN_PX } from './constants'
 const OVERLAY_CLASS = 'yolo-whiteboard-overlay'
 const TOOLBAR_CLASS = 'yolo-whiteboard-toolbar'
 const TOOLBAR_HIDDEN_CLASS = 'yolo-whiteboard-toolbar-hidden'
+/** The host's feedback duration and ease-out curve, mirrored (constants.ts's
+ * ARRANGE_ANIMATION_* explains why a Web Animation needs the numbers). */
+const TOOLBAR_REVEAL_MS = 120
+const TOOLBAR_REVEAL_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)'
 const TOOLBAR_BUTTON_CLASS = 'yolo-whiteboard-toolbar-button'
 /** The popover's chrome (position, panel, shadow); the class beside it says
  * what is inside. */
@@ -49,6 +53,12 @@ const SWATCH_CLASS = 'yolo-whiteboard-color-swatch'
 const SWATCH_DEFAULT_CLASS = 'yolo-whiteboard-color-swatch-default'
 const SWATCH_CUSTOM_CLASS = 'yolo-whiteboard-color-swatch-custom'
 const SWATCH_ACTIVE_CLASS = 'yolo-whiteboard-color-swatch-active'
+const SWATCH_DOT_CLASS = 'yolo-whiteboard-toolbar-swatch-dot'
+const SPLIT_CLASS = 'yolo-whiteboard-toolbar-split'
+const SPLIT_BODY_CLASS = 'yolo-whiteboard-toolbar-split-body'
+const SPLIT_ARROW_CLASS = 'yolo-whiteboard-toolbar-split-arrow'
+/** On the toolbar: its popovers open above it rather than below. */
+const POPOVERS_ABOVE_CLASS = 'yolo-whiteboard-toolbar-popovers-above'
 
 /** Applied to anything that should paint in a node/edge colour; sets
  * `--yolo-whiteboard-color` (style.css). Shared by cards, edge paths and the
@@ -111,11 +121,25 @@ export type ToolbarIconName =
   | 'align-end-horizontal'
   | 'align-horizontal-distribute-center'
   | 'align-vertical-distribute-center'
+  | 'book-open'
+  | 'maximize-2'
+  | 'minimize-2'
+  | 'highlighter'
+  | 'message-square'
+  | 'message-square-quote'
+  | 'link'
+  | 'chevron-down'
+  | 'text-quote'
+  | 'image-plus'
 
 export type ToolbarAction = Readonly<{
   kind?: 'action'
   label: string
   icon: ToolbarIconName
+  /** Added to the button's own classes — for a button that has to look like
+   * the state it acts in (the highlight button drawn in the colour it will
+   * highlight with). */
+  className?: string
   onSelect: (event: MouseEvent) => void
 }>
 
@@ -170,6 +194,38 @@ export type ToolbarMenuControl = Readonly<{
   groups: readonly (readonly ToolbarMenuEntry[])[]
 }>
 
+/**
+ * A row of fixed swatches — a palette that is not the board's (the PDF
+ * highlight colours), with no "no colour" and no custom colour, because every
+ * value in it has to be one of those listed.
+ *
+ * Drawn one of two ways. With a `primary` action it is a split button, Word's
+ * highlight button: one control whose body does the action in the current
+ * swatch and whose narrow arrow opens the row — two targets that read as one
+ * thing, because they are one choice (highlight, and in what). Without, it is
+ * a single button showing the current swatch, which opens the row.
+ */
+export type ToolbarSwatchControl = Readonly<{
+  kind: 'swatches'
+  /** The arrow's tooltip, or the single button's. */
+  label: string
+  primary?: Readonly<{
+    label: string
+    icon: ToolbarIconName
+    /** Paints the body in the current swatch (the caller's colour class). */
+    className?: string
+    onSelect: () => void
+  }>
+  swatches: readonly Readonly<{
+    value: string
+    label: string
+    /** What paints the swatch (the caller's colour class). */
+    className: string
+  }>[]
+  current: string | undefined
+  onPick: (value: string) => void
+}>
+
 /** One button in the row. The controls that open something are items like any
  * other so their place in the row is the caller's decision, not this class's —
  * the delete button has to be able to sit before them. */
@@ -177,6 +233,7 @@ export type ToolbarItem =
   | ToolbarAction
   | ToolbarColorControl
   | ToolbarMenuControl
+  | ToolbarSwatchControl
 
 export type ToolbarModel = Readonly<{
   /** Drawn left to right. A control the selection cannot use is simply
@@ -304,6 +361,73 @@ const ICONS: Readonly<Record<ToolbarIconName, readonly IconShape[]>> = {
     { kind: 'ring', cx: 12, cy: 12, r: 3 },
     { kind: 'path', d: 'm16 16-1.9-1.9' },
   ],
+  'book-open': [
+    { kind: 'path', d: 'M12 7v14' },
+    {
+      kind: 'path',
+      d: 'M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z',
+    },
+  ],
+  'maximize-2': [
+    { kind: 'path', d: 'M15 3h6v6' },
+    { kind: 'path', d: 'M9 21H3v-6' },
+    { kind: 'path', d: 'm21 3-7 7' },
+    { kind: 'path', d: 'm3 21 7-7' },
+  ],
+  'minimize-2': [
+    { kind: 'path', d: 'M4 14h6v6' },
+    { kind: 'path', d: 'M20 10h-6V4' },
+    { kind: 'path', d: 'm14 10 7-7' },
+    { kind: 'path', d: 'm3 21 7-7' },
+  ],
+  highlighter: [
+    { kind: 'path', d: 'm9 11-6 6v3h9l3-3' },
+    {
+      kind: 'path',
+      d: 'm22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4',
+    },
+  ],
+  'message-square': [
+    {
+      kind: 'path',
+      d: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+    },
+  ],
+  'message-square-quote': [
+    {
+      kind: 'path',
+      d: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+    },
+    { kind: 'path', d: 'M8 12a2 2 0 0 0 2-2V8H8' },
+    { kind: 'path', d: 'M14 12a2 2 0 0 0 2-2V8h-2' },
+  ],
+  'text-quote': [
+    { kind: 'path', d: 'M17 6H3' },
+    { kind: 'path', d: 'M21 12H8' },
+    { kind: 'path', d: 'M21 18H8' },
+    { kind: 'path', d: 'M3 12v6' },
+  ],
+  'image-plus': [
+    { kind: 'path', d: 'M16 5h6' },
+    { kind: 'path', d: 'M19 2v6' },
+    {
+      kind: 'path',
+      d: 'M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5',
+    },
+    { kind: 'path', d: 'm21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21' },
+    { kind: 'ring', cx: 9, cy: 9, r: 2 },
+  ],
+  link: [
+    {
+      kind: 'path',
+      d: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71',
+    },
+    {
+      kind: 'path',
+      d: 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+    },
+  ],
+  'chevron-down': [{ kind: 'path', d: 'm6 9 6 6 6-6' }],
   trash: [
     { kind: 'path', d: 'M3 6h18' },
     { kind: 'path', d: 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6' },
@@ -345,6 +469,16 @@ export class SelectionToolbar {
   /** The colour item out of `model.items`, kept aside because the popover and
    * `setCurrentColor` reach for it on every interaction. */
   private color: ToolbarColorControl | null = null
+  /** The swatch control whose popover is open, if one is. */
+  private swatches: ToolbarSwatchControl | null = null
+  /** Set by `hide` and cleared a microtask later: a toolbar hidden and shown
+   * again before then was never painted hidden, so `show` has nothing to
+   * reveal. */
+  private hiddenUnpainted = false
+  /** `size`'s answer for the current model. */
+  private measured: ToolbarSize | null = null
+  /** Where `place` last put the toolbar. */
+  private placed: ScreenPoint | null = null
 
   constructor(
     private readonly doc: Document,
@@ -354,6 +488,15 @@ export class SelectionToolbar {
     this.overlayEl.className = OVERLAY_CLASS
     this.el = doc.createElement('div')
     this.el.className = `${TOOLBAR_CLASS} ${TOOLBAR_HIDDEN_CLASS}`
+    // A press on the toolbar must not take focus from the card being edited:
+    // the toolbar stays up while a card is typed into, and a press that blurred
+    // the editor would end the edit — and rebuild this toolbar out from under
+    // the click it was in the middle of. A field in a popover (the custom
+    // colour) still takes focus as a field should.
+    this.el.addEventListener('mousedown', (event) => {
+      const target = event.target as Element | null
+      if (target?.closest('input, textarea') == null) event.preventDefault()
+    })
     this.overlayEl.appendChild(this.el)
     parent.appendChild(this.overlayEl)
   }
@@ -376,10 +519,11 @@ export class SelectionToolbar {
   setModel(model: ToolbarModel | null): void {
     this.closePopover()
     this.model = model
+    this.measured = null
     this.el.replaceChildren()
     this.color = null
     if (!model || model.items.length === 0) {
-      this.el.classList.add(TOOLBAR_HIDDEN_CLASS)
+      this.hide()
       return
     }
     for (const item of model.items) {
@@ -401,11 +545,54 @@ export class SelectionToolbar {
           })
           break
         }
+        case 'swatches':
+          this.appendSwatchControl(item)
+          break
         default:
           this.appendButton(item)
       }
     }
+    this.show()
+  }
+
+  /**
+   * Takes the toolbar off `TOOLBAR_HIDDEN_CLASS`, and — when it was hidden —
+   * lets it arrive rather than blink in: a short fade up from a few pixels
+   * below. It appears after every drag, every selection, every pan; appearing
+   * abruptly at that rate is the flicker a board's chrome is most often
+   * accused of. `opacity` and the standalone `translate` property, which
+   * composes with the `transform` its placement is written in.
+   *
+   * Only when the hidden state was ever on screen. A hand-off between two
+   * owners of the toolbar's target — the selection clearing as a card's
+   * editor opens, and back as it closes — passes through an empty model in
+   * the same synchronous call; replaying the arrival there would make a
+   * toolbar that never left blink.
+   */
+  private show(): void {
+    if (!this.el.classList.contains(TOOLBAR_HIDDEN_CLASS)) return
     this.el.classList.remove(TOOLBAR_HIDDEN_CLASS)
+    if (this.hiddenUnpainted) return
+    const win = this.el.ownerDocument.defaultView
+    if (!win || win.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return
+    }
+    this.el.animate(
+      [
+        { opacity: 0, translate: '0 4px' },
+        { opacity: 1, translate: '0 0' },
+      ],
+      { duration: TOOLBAR_REVEAL_MS, easing: TOOLBAR_REVEAL_EASING },
+    )
+  }
+
+  private hide(): void {
+    if (this.el.classList.contains(TOOLBAR_HIDDEN_CLASS)) return
+    this.el.classList.add(TOOLBAR_HIDDEN_CLASS)
+    this.hiddenUnpainted = true
+    queueMicrotask(() => {
+      this.hiddenUnpainted = false
+    })
   }
 
   /** Reflects a colour the caller just applied, without rebuilding the
@@ -416,15 +603,31 @@ export class SelectionToolbar {
     if (this.popover) this.markActiveSwatch()
   }
 
-  /** Measured only while shown — a hidden toolbar has no size, and the caller
-   * needs the real one to centre it. */
+  /** Measured once for what the toolbar holds (`setModel`), and only while
+   * shown — a hidden toolbar has no size, and the caller needs the real one
+   * to centre it. Asked every frame the toolbar is placed, where measuring
+   * would lay the page out each time. */
   size(): ToolbarSize {
+    if (this.measured) return this.measured
     const rect = this.el.getBoundingClientRect()
-    return { width: rect.width, height: rect.height }
+    const size = { width: rect.width, height: rect.height }
+    if (size.width > 0) this.measured = size
+    return size
   }
 
+  /** Writes only a place that differs from the last, since it is asked
+   * every frame. */
   place(point: ScreenPoint): void {
+    if (this.placed?.x === point.x && this.placed.y === point.y) return
+    this.placed = point
     this.el.style.transform = `translate(${point.x}px, ${point.y}px)`
+  }
+
+  /** Opens popovers above the row instead of under it — for a toolbar
+   * sitting above what it acts on, where a popover hanging down would cover
+   * the very thing it is about to change. */
+  setPopoversAbove(above: boolean): void {
+    this.el.classList.toggle(POPOVERS_ABOVE_CLASS, above)
   }
 
   /** Hides the toolbar without forgetting what is in it — what a drag or a
@@ -432,11 +635,16 @@ export class SelectionToolbar {
    * duration. */
   setSuppressed(suppressed: boolean): void {
     if (!this.model) return
-    if (suppressed) this.closePopover()
-    this.el.classList.toggle(TOOLBAR_HIDDEN_CLASS, suppressed)
+    if (suppressed) {
+      this.closePopover()
+      this.hide()
+      return
+    }
+    this.show()
   }
 
   closePopover(): void {
+    this.swatches = null
     if (!this.popover) return
     this.popover.el.remove()
     this.popover.button.classList.remove('is-active')
@@ -455,11 +663,55 @@ export class SelectionToolbar {
   // -- internals ----------------------------------------------------------
 
   private appendButton(action: ToolbarAction): HTMLElement {
+    const button = this.createButton(action)
+    this.el.appendChild(button)
+    return button
+  }
+
+  private appendSwatchControl(control: ToolbarSwatchControl): void {
+    const primary = control.primary
+    if (!primary) {
+      const button = this.doc.createElement('button')
+      button.className = `clickable-icon ${TOOLBAR_BUTTON_CLASS}`
+      button.type = 'button'
+      button.setAttribute('aria-label', control.label)
+      const dot = this.doc.createElement('span')
+      const current = control.swatches.find(
+        (swatch) => swatch.value === control.current,
+      )
+      dot.className = `${SWATCH_DOT_CLASS}${current ? ` ${current.className}` : ''}`
+      button.appendChild(dot)
+      button.addEventListener('click', (event) => {
+        event.preventDefault()
+        this.togglePopover(button, control)
+      })
+      this.el.appendChild(button)
+      return
+    }
+    const group = this.doc.createElement('div')
+    group.className = SPLIT_CLASS
+    group.appendChild(
+      this.createButton({
+        ...primary,
+        className: `${SPLIT_BODY_CLASS}${primary.className ? ` ${primary.className}` : ''}`,
+      }),
+    )
+    const arrow = this.createButton({
+      label: control.label,
+      icon: 'chevron-down',
+      className: SPLIT_ARROW_CLASS,
+      onSelect: () => this.togglePopover(arrow, control, group),
+    })
+    group.appendChild(arrow)
+    this.el.appendChild(group)
+  }
+
+  private createButton(action: ToolbarAction): HTMLElement {
     const button = this.doc.createElement('button')
     // `clickable-icon` is Obsidian's own icon-button treatment (hover, active
     // and focus states, icon sizing) — the same class its Canvas menu uses.
     // The yolo- class beside it is what this stylesheet is allowed to target.
-    button.className = `clickable-icon ${TOOLBAR_BUTTON_CLASS}`
+    button.className = `clickable-icon ${TOOLBAR_BUTTON_CLASS}${action.className ? ` ${action.className}` : ''}`
     button.type = 'button'
     button.setAttribute('aria-label', action.label)
     button.appendChild(this.createIcon(action.icon))
@@ -467,7 +719,6 @@ export class SelectionToolbar {
       event.preventDefault()
       action.onSelect(event)
     })
-    this.el.appendChild(button)
     return button
   }
 
@@ -512,21 +763,44 @@ export class SelectionToolbar {
    * time is the whole rule: a second click on the same button closes it, and a
    * click on a different one replaces it.
    */
-  private togglePopover(button: HTMLElement, menu?: ToolbarMenuControl): void {
+  private togglePopover(
+    button: HTMLElement,
+    control?: ToolbarMenuControl | ToolbarSwatchControl,
+    /** What the popover hangs from, when that is more than the button — a
+     * split button's row belongs to the whole control, not its arrow. */
+    anchor: HTMLElement = button,
+  ): void {
     const wasOpen = this.popover?.button === button
     this.closePopover()
     if (wasOpen) return
 
+    const menu = control?.kind === 'menu' ? control : undefined
     const popover = this.doc.createElement('div')
     popover.className = `${POPOVER_CLASS} ${menu ? MENU_POPOVER_CLASS : COLOR_POPOVER_CLASS}`
     if (menu) this.fillMenuPopover(popover, menu)
-    else if (!this.fillColorPopover(popover)) return
+    else if (control?.kind === 'swatches') {
+      this.fillSwatchPopover(popover, control)
+    } else if (!this.fillColorPopover(popover)) return
 
     this.el.appendChild(popover)
-    this.positionPopover(popover, button)
+    this.positionPopover(popover, anchor)
     this.popover = { el: popover, button }
     button.classList.add('is-active')
     if (!menu) this.markActiveSwatch()
+  }
+
+  private fillSwatchPopover(
+    popover: HTMLElement,
+    control: ToolbarSwatchControl,
+  ): void {
+    this.swatches = control
+    for (const swatch of control.swatches) {
+      this.appendSwatch(popover, {
+        label: swatch.label,
+        extraClass: swatch.className,
+        value: swatch.value,
+      })
+    }
   }
 
   /**
@@ -627,6 +901,10 @@ export class SelectionToolbar {
     swatch.dataset.color = options.value ?? ''
     swatch.addEventListener('click', (event) => {
       event.preventDefault()
+      if (this.swatches) {
+        if (options.value !== undefined) this.swatches.onPick(options.value)
+        return
+      }
       this.color?.onPick(options.value)
     })
     popover.appendChild(swatch)
@@ -663,8 +941,18 @@ export class SelectionToolbar {
 
   private markActiveSwatch(): void {
     const popover = this.popover?.el
-    const current = this.color?.current
     if (!popover) return
+    if (this.swatches) {
+      const current = this.swatches.current
+      for (const swatch of Array.from(popover.children)) {
+        swatch.classList.toggle(
+          SWATCH_ACTIVE_CLASS,
+          (swatch as HTMLElement).dataset.color === current,
+        )
+      }
+      return
+    }
+    const current = this.color?.current
     const resolved = resolveColor(current)
     // `null` = no plain swatch can match, which is the custom case: the empty
     // string belongs to the "no colour" swatch alone.

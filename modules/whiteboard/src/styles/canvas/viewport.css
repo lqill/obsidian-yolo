@@ -1,0 +1,213 @@
+/* --- camera / viewport -------------------------------------------------- */
+
+.yolo-whiteboard-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* A left-drag from empty canvas is marquee-select, not pan — pan
+   * is middle-drag or Space+left-drag (anywhere) or Alt+left-drag from empty canvas, so the
+   * base cursor no longer implies "grab to pan"; the grabbing cursor of an
+   * actual pan comes from .yolo-whiteboard-pan-capture below. */
+  cursor: default;
+  touch-action: none;
+  /* Dot grid. This rule owns the dot's size and colour only — its spacing
+   * (background-size) and origin (background-position) are written every
+   * frame by canvas.ts's applyGrid(), which is what keeps the lattice
+   * anchored to world coordinates through pan and zoom. --canvas-dot-pattern
+   * is Obsidian's own canvas dot colour, so a theme that restyles Canvas
+   * restyles this too. The 0.7px radius is likewise Obsidian Canvas's, read
+   * off the <circle> in its svg.canvas-background pattern. */
+  background-image: radial-gradient(
+    circle at 0.7px 0.7px,
+    var(--canvas-dot-pattern, var(--background-modifier-border)) 0.7px,
+    transparent 0
+  );
+}
+
+/* Focusable so copy and paste reach the board (ui/canvas/clipboardController.ts);
+ * a press focuses it, and being focused has no look of its own. */
+.yolo-whiteboard-viewport:focus {
+  outline: none;
+}
+
+/* What a pan captures the pointer on, and the only place its cursor lives.
+ * Blink takes the cursor from the capturing element for as long as the
+ * capture lasts, so an empty, pointer-transparent box with this one rule *is*
+ * the gesture's cursor — and because it never changes, a pan changes no style
+ * at all. The rule used to be a class on the viewport; `cursor` is inherited,
+ * and flipping it there restyled every card and every edge path and label on
+ * the board, ~130ms each way on a 3000-edge board (see
+ * cameraController.ts's beginPan). */
+.yolo-whiteboard-pan-capture {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  cursor: grabbing;
+}
+
+/* Space held (interactionController.ts's armSpacePan): the same box takes the pointer over
+ * the whole viewport, so hovering anywhere shows the hand and a press
+ * anywhere — a card included — lands on it and pans. Only this childless
+ * element changes, for the same reason the pan's cursor lives here. */
+.yolo-whiteboard-pan-capture.yolo-whiteboard-pan-capture-armed {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.yolo-whiteboard-pan-capture.yolo-whiteboard-pan-capture-armed:active {
+  cursor: grabbing;
+}
+
+.yolo-whiteboard-viewport.yolo-whiteboard-viewport-hidden {
+  display: none;
+}
+
+/* Drop target hint: an inset ring rather than a border, so acquiring it
+ * cannot reflow the canvas underneath. */
+.yolo-whiteboard-viewport.yolo-whiteboard-viewport-drop-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
+  background-color: var(--interactive-accent);
+  opacity: 0.06;
+}
+
+.yolo-whiteboard-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  /* Owns its own stacking context, so the group layer's negative z-index
+   * (see .yolo-whiteboard-group) stays inside the world rather than sinking
+   * behind the viewport's dot grid. The camera transform already creates one,
+   * but only once it has been written — stating it here makes the group
+   * layer's contract independent of that. */
+  isolation: isolate;
+}
+
+/* No `will-change: transform` on the world, at rest or while panning: a
+ * composited world flashes the whole window white whenever a pan exposes a
+ * tile the raster threads have not finished — see
+ * CameraController.markInteracting for the measurement. */
+
+/* The overview tier's canvas. A sibling of the world layer, not a child
+ * of it: inside the world the camera's CSS scale would blur the bitmap and
+ * force a re-raster on every zoom frame, so it is drawn in screen space and
+ * redrawn per camera change instead (ui/canvas/overviewLayer.ts). It sits
+ * *before* the world in the document, so the groups, resize handles, snap
+ * guides and in-flight connection curve the world still holds paint over it.
+ * Never a pointer target — the tier's hit testing is geometric. */
+.yolo-whiteboard-overview {
+  position: absolute;
+  inset: 0;
+  /* Stated, not left to `inset`: a canvas is a replaced element, and an
+   * absolutely positioned replaced element with `width: auto` takes its
+   * *intrinsic* width (the backing store's) however over-constrained the
+   * offsets are. Without these it renders at devicePixelRatio times its box
+   * and spills out of the viewport. */
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.yolo-whiteboard-overview.yolo-whiteboard-overview-hidden {
+  display: none;
+}
+
+/* In the overview tier the canvas draws the edges too, so their DOM comes out
+ * of the document entirely — which is the point of the tier: what an element
+ * costs at this zoom is that it exists, not what it holds. The in-flight
+ * connection preview is a sibling of the edges group, not a child, so it
+ * survives this and a connection can still be drawn down here.
+ *
+ * `display` rather than `visibility`: measured on the 3000-card fixture,
+ * hiding them with `visibility` instead cost 206ms/s of style recalculation
+ * across a zoom that crosses the threshold (against 59) and dropped the sweep
+ * from 57 to 50fps — the retained layout is not free when the subtree is this
+ * large. */
+.yolo-whiteboard-world.yolo-whiteboard-world-overview
+  .yolo-whiteboard-edges-group,
+.yolo-whiteboard-world.yolo-whiteboard-world-overview
+  .yolo-whiteboard-edge-labels {
+  display: none;
+}
+
+/* The one label the canvas cannot draw: the one being typed into. A canvas
+ * holds no caret, so for the length of an edge rename the label layer comes
+ * back and every label but that one is taken out individually — the expensive
+ * shape (a style recalculation over every label on the board) for the one
+ * moment it is the only shape that works. Naming a relation is exactly what
+ * this zoom is for, so declining the rename here was not an option. */
+.yolo-whiteboard-world.yolo-whiteboard-world-overview.yolo-whiteboard-world-edge-rename
+  .yolo-whiteboard-edge-labels {
+  display: block;
+}
+
+.yolo-whiteboard-world.yolo-whiteboard-world-overview.yolo-whiteboard-world-edge-rename
+  .yolo-whiteboard-edge-label:not([contenteditable]) {
+  display: none;
+}
+
+/* Where an excerpt dragged out of a PDF will land (dropImport.ts's
+ * `showLandingSlot`): the text it will be, drawn as it will read, inside a
+ * faint outline of the room it takes — in the world layer, so the camera
+ * sizes it as it sizes the text. Fades in and out; follows the pointer
+ * without easing, as the text under it would. */
+.yolo-whiteboard-landing-slot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 1px dashed var(--background-modifier-border-hover);
+  border-radius: var(--radius-s, 4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--yolo-anim-duration-exit, 160ms)
+    var(--yolo-anim-ease-in, ease-in);
+}
+
+/* The text as a bare text excerpt reads (styles/cards/text.css): its inset,
+ * the card type size, the quote, and the small citation under it — a little
+ * faded, being not yet made. */
+.yolo-whiteboard-landing-body {
+  padding: 2px 4px;
+  color: var(--text-normal);
+  font-size: 13px;
+  line-height: var(--line-height-normal);
+  overflow-wrap: anywhere;
+  opacity: 0.8;
+}
+
+.yolo-whiteboard-landing-body > * {
+  margin: 0;
+}
+
+.yolo-whiteboard-landing-body > * + * {
+  margin-top: var(--p-spacing, 1rem);
+}
+
+.yolo-whiteboard-landing-body > blockquote {
+  padding-inline-start: var(--size-4-6, 24px);
+  border-inline-start: var(--blockquote-border-thickness, 2px) solid
+    var(--blockquote-border-color, var(--interactive-accent));
+}
+
+.yolo-whiteboard-landing-body > p {
+  white-space: pre-wrap;
+}
+
+.yolo-whiteboard-landing-body > canvas {
+  display: block;
+}
+
+.yolo-whiteboard-landing-body > p.yolo-whiteboard-landing-citation {
+  color: var(--link-color);
+  font-size: 12px;
+}
+
+.yolo-whiteboard-landing-slot.yolo-whiteboard-landing-slot-shown {
+  opacity: 1;
+  transition: opacity var(--yolo-anim-duration-feedback, 120ms)
+    var(--yolo-anim-ease-out, ease-out);
+}

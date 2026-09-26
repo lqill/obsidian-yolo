@@ -7,7 +7,7 @@
 // ever changes.
 
 import type { BoardNode } from '../domain/fileFormat'
-import { basenameWithoutExtension } from '../domain/naming'
+import { basenameWithoutExtension, fileNodeKind } from '../domain/naming'
 
 import {
   CARD_CONTENT_EXTRA_LINES,
@@ -48,7 +48,7 @@ function truncate(text: string, maxLength: number): string {
  * card wears until its content is built, and the line the overview canvas
  * draws for a card that has no element at all. A file node shows its backing
  * file's basename, a link node its URL, a text node its first line (trimmed
- * and truncated) — p1-design §3's "note 卡显示文件名、text 卡显示首行截断". A
+ * and truncated) — "note 卡显示文件名、text 卡显示首行截断". A
  * group node never shows one: its label is chrome, drawn at every zoom, so
  * this returns it unchanged for the callers that ask.
  *
@@ -57,15 +57,40 @@ function truncate(text: string, maxLength: number): string {
  * common way to title one — would otherwise wear its syntax in the one place
  * the syntax is never rendered. Only the heading marker goes; a first line
  * that starts with a bullet or a quote is prose the user wrote that way.
+ *
+ * A PDF card read past its first page also says which page it is on
+ * (`pageLabels.card`, the caller's localized "name · p. N"), because below
+ * the threshold that is all a card has to say about where its reader was —
+ * and a board of papers is exactly the board zoomed out to find one. A
+ * spread's sheet says only its page (`pageLabels.sheet`): the spread's title
+ * names the document, and the name on every sheet would bury the numbers.
  */
-export function nodeTitleText(node: BoardNode): string {
+export type PdfPageLabels = Readonly<{
+  /** "name · p. N": a PDF card read past its first page. */
+  card: (name: string, page: number) => string
+  /** "p. N": a spread's sheet, whose document its title already names. */
+  sheet: (page: number) => string
+}>
+
+export function nodeTitleText(
+  node: BoardNode,
+  pageLabels?: PdfPageLabels,
+): string {
   switch (node.type) {
-    case 'file':
-      return basenameWithoutExtension(node.file)
+    case 'file': {
+      const name = basenameWithoutExtension(node.file)
+      const page = Math.floor(node.startPage ?? 1)
+      if (!pageLabels || page <= 1 || fileNodeKind(node.file) !== 'pdf') {
+        return name
+      }
+      return pageLabels.card(name, page)
+    }
     case 'link':
       return truncate(node.url, MAX_TITLE_LENGTH)
     case 'group':
       return truncate(node.label ?? '', MAX_TITLE_LENGTH)
+    case 'pdf-page':
+      return pageLabels ? pageLabels.sheet(node.page) : String(node.page)
     case 'text': {
       const newlineIndex = node.text.indexOf('\n')
       const firstLine =
@@ -76,12 +101,111 @@ export function nodeTitleText(node: BoardNode): string {
   }
 }
 
+/** Where a title may break: after a run of spaces, or on either side of a
+ * CJK character — the opportunities the title block's text gets from CSS. */
+const TITLE_SEGMENT = /\s+|[⺀-鿿가-힯豈-﫿＀-￯]|[^\s⺀-鿿가-힯豈-﫿＀-￯]+/g
+
+/**
+ * A title laid out in lines no wider than `maxWidth`, at most `maxLines` of
+ * them — what the title block does with its text (style.css's
+ * `.yolo-whiteboard-card-title-block`), for the overview canvas, which has
+ * only `fillText` and must break lines itself so a card's face does not change
+ * as it crosses the tier.
+ *
+ * Breaks where the element would: at spaces and around CJK characters, and
+ * inside a word only when the word alone is wider than the line
+ * (`overflow-wrap: anywhere`). A title that needs more lines than there are
+ * ends its last one with an ellipsis rather than being cut mid-glyph.
+ *
+ * `measure` is the width of a string in the same unit as `maxWidth`.
+ */
+export function wrapTitleLines(
+  text: string,
+  maxWidth: number,
+  maxLines: number,
+  measure: (text: string) => number,
+): string[] {
+  if (maxLines < 1 || maxWidth <= 0) return []
+  const lines: string[] = []
+  let line = ''
+  // The last line is kept as it stands, trailing space and all, until the
+  // title is known to go past it: it is where the ellipsis goes.
+  let last = ''
+  const push = (): boolean => {
+    if (lines.length === maxLines - 1) {
+      last = line
+      return false
+    }
+    lines.push(line.trimEnd())
+    line = ''
+    return true
+  }
+  const segments = text.match(TITLE_SEGMENT) ?? []
+  let rest = ''
+  outer: for (let i = 0; i < segments.length; i += 1) {
+    let segment = segments[i]
+    if (line === '' && /^\s/.test(segment)) continue
+    if (measure(line + segment) <= maxWidth) {
+      line += segment
+      continue
+    }
+    if (line !== '' && measure(segment.trimEnd()) <= maxWidth) {
+      if (!push()) {
+        rest = segments.slice(i).join('')
+        break
+      }
+      if (!/^\s/.test(segment)) line = segment
+      continue
+    }
+    // Wider than a line on its own: cut it wherever it stops fitting.
+    while (segment !== '') {
+      const fit = longestFit(line, segment, maxWidth, measure)
+      line += segment.slice(0, fit)
+      segment = segment.slice(fit)
+      if (segment === '') break
+      if (!push()) {
+        rest = segment + segments.slice(i + 1).join('')
+        break outer
+      }
+    }
+  }
+  if (rest.trim() !== '') {
+    const tail = `${last}${rest}`
+    const cut = longestFit('', tail, maxWidth, (candidate) =>
+      measure(`${candidate}…`),
+    )
+    lines.push(`${tail.slice(0, cut).trimEnd()}…`)
+  } else if (line !== '') {
+    lines.push(line.trimEnd())
+  }
+  return lines
+}
+
+/** How many leading characters of `segment` fit after `line`, at least one
+ * when `line` is empty so a line always makes progress. Binary search:
+ * `measure` is the cost. */
+function longestFit(
+  line: string,
+  segment: string,
+  maxWidth: number,
+  measure: (text: string) => number,
+): number {
+  let low = 0
+  let high = segment.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (measure(line + segment.slice(0, mid)) <= maxWidth) low = mid
+    else high = mid - 1
+  }
+  return line === '' ? Math.max(low, 1) : low
+}
+
 /**
  * The slice of a card's markdown that its body can actually show.
  *
  * A card is a window onto its document: `startLine` says where the window
  * sits, and the card's height says how much fits. An unfocused card clips and
- * does not scroll (style.css's content mask, D7), so the renderer only ever
+ * does not scroll (style.css's content mask), so the renderer only ever
  * needs that much source — see constants.ts's CARD_CONTENT_MIN_LINE_WORLD_PX
  * for why a line budget derived from the height cannot come up short.
  * Everything outside the window is parsed, post-processed and laid out for a

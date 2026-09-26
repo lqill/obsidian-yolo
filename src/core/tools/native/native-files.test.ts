@@ -1,4 +1,7 @@
 jest.mock('obsidian')
+jest.mock('../../skills/liteSkills', () => ({
+  getLiteSkillDocumentByPath: jest.fn(),
+}))
 
 /* eslint-disable import/no-nodejs-modules -- real filesystem round-trip against a temp directory, see the file note below */
 import * as fs from 'node:fs/promises'
@@ -15,11 +18,14 @@ import type { App } from 'obsidian'
 import { readEditReviewSnapshot } from '../../../database/edit-review/editReviewSnapshotStore'
 import { ToolCallResponseStatus } from '../../../types/tool-call.types'
 import { editUndoSnapshotStore } from '../../../utils/chat/editUndoSnapshotStore'
+import { getLiteSkillDocumentByPath } from '../../skills/liteSkills'
 import { executeBuiltinTool } from '../dispatcher'
 import type { ToolContext } from '../types'
 
 // Real filesystem, real temp directory: these three tools exist precisely to
 // bypass every Obsidian abstraction, so a mocked fs would test nothing.
+
+const getLiteSkillDocumentByPathMock = jest.mocked(getLiteSkillDocumentByPath)
 
 let vaultRoot: string
 let outsideRoot: string
@@ -168,20 +174,47 @@ describe('read_file', () => {
     )
     await fs.writeFile(path.join(vaultRoot, 'pixel.png'), png)
 
-    const result = await run('read_file', { path: 'pixel.png' })
-    if (result.status !== ToolCallResponseStatus.Success) {
-      throw new Error('expected success')
+    // Compression needs a real canvas; jsdom has none.
+    ctx.settings = {
+      chatOptions: { imageCompressionEnabled: false },
+    } as unknown as ToolContext['settings']
+
+    const read = async () => {
+      const result = await run('read_file', { path: 'pixel.png' })
+      if (result.status !== ToolCallResponseStatus.Success) {
+        throw new Error('expected success')
+      }
+      return result
     }
-    expect(JSON.parse(result.text)).toMatchObject({
+
+    const first = await read()
+    expect(JSON.parse(first.text)).toMatchObject({
       kind: 'image',
       mimeType: 'image/png',
     })
-    expect(result.contentParts).toEqual([
+    // The cache key is what lets the saved conversation keep a `cache://`
+    // reference instead of the whole data URL.
+    expect(first.contentParts).toEqual([
       {
         type: 'image_url',
-        image_url: { url: `data:image/png;base64,${png.toString('base64')}` },
+        image_url: {
+          url: `data:image/png;base64,${png.toString('base64')}`,
+          cacheKey: expect.any(String),
+        },
       },
     ])
+
+    // Served from the local cache: rewrite the file with different bytes but
+    // the same identity (path, size, mtime) and the first encoding comes back.
+    const pixelPath = path.join(vaultRoot, 'pixel.png')
+    const pinnedMtime = new Date(1_700_000_000_000)
+    await fs.writeFile(pixelPath, Buffer.alloc(png.length, 0x41))
+    await fs.utimes(pixelPath, pinnedMtime, pinnedMtime)
+    expect((await read()).contentParts).not.toEqual(first.contentParts)
+    const cachedParts = (await read()).contentParts
+    await fs.writeFile(pixelPath, Buffer.alloc(png.length, 0x42))
+    await fs.utimes(pixelPath, pinnedMtime, pinnedMtime)
+    expect((await read()).contentParts).toEqual(cachedParts)
   })
 
   it('refuses a binary file rather than emitting replacement characters', async () => {
@@ -203,6 +236,70 @@ describe('read_file', () => {
     expect(await expectError('read_file', { path: 'dir' })).toContain(
       'Not a file',
     )
+  })
+
+  it('reads a listed skill path through the skill registry', async () => {
+    getLiteSkillDocumentByPathMock.mockResolvedValueOnce({
+      entry: {
+        name: 'demo',
+        description: 'Demo skill',
+        mode: 'lazy',
+        path: 'builtin://skills/demo.md',
+        isReadOnly: true,
+      },
+      content: 'line 1\nline 2',
+    })
+    ctx = { ...ctx, allowedSkillPaths: ['builtin://skills/demo.md'] }
+
+    const payload = await expectSuccessPayload('read_file', {
+      path: 'builtin://skills/demo.md',
+    })
+    expect(payload).toMatchObject({
+      path: 'builtin://skills/demo.md',
+      totalLines: 2,
+    })
+    expect(payload.content).toContain('line 2')
+  })
+
+  it('reads a module-owned format as its module renders it', async () => {
+    await fs.writeFile(path.join(vaultRoot, 'plan.yoloboard'), '{"raw":1}')
+    const render = jest.fn(
+      async ({
+        path: boardPath,
+        fragment,
+      }: {
+        path: string
+        fragment?: string
+      }) => `rendered ${boardPath}${fragment ? ` card ${fragment}` : ''}`,
+    )
+    ctx = {
+      ...ctx,
+      resolveModuleFileTextRenderer: (extension) =>
+        extension === 'yoloboard'
+          ? { extensions: ['yoloboard'], render }
+          : null,
+    }
+
+    expect(
+      await expectSuccessPayload('read_file', { path: 'plan.yoloboard' }),
+    ).toMatchObject({
+      path: 'plan.yoloboard',
+      content: expect.stringContaining('rendered plan.yoloboard'),
+    })
+    expect(
+      await expectSuccessPayload('read_file', { path: 'plan.yoloboard#c-1' }),
+    ).toMatchObject({ content: expect.stringContaining('card c-1') })
+    expect(render).toHaveBeenLastCalledWith({
+      path: 'plan.yoloboard',
+      content: '{"raw":1}',
+      fragment: 'c-1',
+    })
+  })
+
+  it('reads a file whose name contains # as itself', async () => {
+    await fs.writeFile(path.join(vaultRoot, 'a#b.txt'), 'hash')
+    const payload = await expectSuccessPayload('read_file', { path: 'a#b.txt' })
+    expect(payload.content).toContain('hash')
   })
 
   it('rejects endLine without startLine and an inverted range', async () => {

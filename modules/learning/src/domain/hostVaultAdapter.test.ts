@@ -69,6 +69,8 @@ function createHostVault() {
     readBinary: async () => new ArrayBuffer(0),
     getResourceUrl: (path) => `app://vault/${path}`,
     resolveLink: () => null,
+    generateLink: () => null,
+    getAvailableAttachmentPath: async (name) => name,
     ensureFolder: async () => undefined,
     createFolder: async () => undefined,
     createText: async (path) => ({ path, mtime: 1 }),

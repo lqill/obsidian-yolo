@@ -3,6 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import { Notice } from 'obsidian'
 import {
+  type ReactNode,
   memo,
   useCallback,
   useEffect,
@@ -30,6 +31,7 @@ import {
   parseLocalFsActionFromToolArgs,
 } from '../../core/mcp/localFileTools'
 import { parseToolName } from '../../core/mcp/tool-name-utils'
+import { resolveFileChangeRows } from '../../core/tools/file-change-resolver'
 import { INVOKE_TOOL_NAME } from '../../core/tools/internal/invoke_tool/definition'
 import {
   LOAD_TOOL_SCHEMAS_CHAT_LABEL,
@@ -74,6 +76,7 @@ import {
   handleRuntimeToolRejection,
 } from './runtime-action-handlers'
 import { CliSubagentCard } from './tool-cards/CliSubagentCard'
+import { FileChangeList } from './tool-cards/EditDiffView'
 import { LiveTaskCard } from './tool-cards/LiveTaskCard'
 import { type ToolRenderer, getToolRenderer } from './tool-renderers'
 import {
@@ -152,10 +155,10 @@ const DEFAULT_WRITE_ACTION_LABELS: Record<string, string> = {
  *      (see `AgentToolGateway.attachChatModeSnapshot` and
  *      `AgentSessionService.approveToolCall`).
  *   3. The running mode's own override, if it stated one — Max opens "always
- *      allow" on the terminal (master.md §4 Q8). Snapshotted, so a call
+ *      allow" on the terminal. Snapshotted, so a call
  *      already on screen keeps the option it was created with.
  *   4. The owning capability's static `approval.allowAlwaysAllow`
- *      declaration (D7). Tools no capability owns — third-party MCP tools,
+ *      declaration. Tools no capability owns — third-party MCP tools,
  *      retired local names — resolve to `undefined`, i.e. not disabled.
  */
 export const isAlwaysAllowDisabledForRequest = (
@@ -220,9 +223,9 @@ export const getToolLabels = (t?: TranslateFn): ToolLabels => {
     // fs_create_dir, fs_move, and their even older fs_create_file /
     // fs_delete_file / fs_delete_dir aliases) used to get their own explicit
     // overrides here purely to keep historical conversations rendering a
-    // friendly label. D8/D10 (master.md decision 10) deliberately drop that:
-    // they now fall through to the `?? toolName` default just below, same as
-    // any other retired or third-party tool name — self-consistent with how
+    // friendly label. That was deliberately dropped: they now fall through to
+    // the `?? toolName` default just below, same as any other retired or
+    // third-party tool name — self-consistent with how
     // module tools and remote MCP tools have always rendered, and with how
     // this same map already treats every OTHER retired tool. The only
     // user-visible effect is on conversations from before 2026-08-08 (schema
@@ -379,8 +382,8 @@ const isVirtualBashRequest = (request: ToolRequestLike): boolean => {
 /**
  * Looks up this request's `TOOL_RENDERERS` entry — but only for local
  * built-in tools, mirroring the `serverName === localServerName` gate
- * `getToolDisplayInfo` already uses (D8: "内置工具查 TOOL_RENDERERS，其余走
- * generic", master.md's own framing for this gate after D8). Returns `null`
+ * `getToolDisplayInfo` already uses ("内置工具查 TOOL_RENDERERS，其余走
+ * generic"). Returns `null`
  * for remote MCP tools, retired local tool names, and any request whose name
  * doesn't parse — `getToolRenderer` itself already degrades unknown names to
  * `genericRenderer`, but that's the wrong answer here: a *remote* tool that
@@ -402,6 +405,31 @@ const getLocalBuiltinToolRenderer = (
     }
     return null
   }
+}
+
+/**
+ * The expanded body of a CLI `file_change` call: the rows its runtime's
+ * mapping layer built, through the same `resolveFileChangeRows` the native
+ * file tools' card uses — so which statuses draw a change is decided in one
+ * place for both. Like a `kind: 'content'` renderer it owns the whole content
+ * area; `null` (not a file change, or nothing pre-built) leaves the default
+ * sections.
+ *
+ * An inline capability branch rather than a `TOOL_RENDERERS` entry for the
+ * same reason as `LiveTaskCard` below: CLI calls carry provider-native names
+ * that never pass `getLocalBuiltinToolRenderer`'s server gate. Read-only in
+ * every status, approval included — the agent executes the write and hears
+ * only approve or reject, so per-hunk choices here would reach no one.
+ */
+const renderCliFileChange = (
+  request: ToolCallRequest,
+  response: ToolCallResponse,
+): ReactNode => {
+  if (!isCliToolCallCapability(request, 'file_change')) return null
+  const resolution = resolveFileChangeRows(request, response)
+  return resolution?.type === 'rows' ? (
+    <FileChangeList files={resolution.files} />
+  ) : null
 }
 
 const extractLegacyExternalAgentArgs = (
@@ -700,7 +728,7 @@ const getDelegateSubagentSummary = ({
 }
 
 /**
- * By-name summary dispatch (D8, phase2-migration.md). Replaced a ~12-branch
+ * By-name summary dispatch. Replaced a ~12-branch
  * `if (toolName === 'x')` chain with a lookup into `TOOL_RENDERERS`
  * (`getToolRenderer(toolName).summary`) — the same exhaustive wiring table
  * `ToolMessage.tsx` uses below for custom card rendering.
@@ -709,8 +737,7 @@ const getDelegateSubagentSummary = ({
  * `fs_move`, and their even older `fs_create_file`/`fs_delete_file`/
  * `fs_delete_dir` aliases) have no registry entry, so they fall straight
  * through to the final dead-but-harmless fallback below and render with no
- * summary text at all (master.md decision 10 — deliberately not preserved;
- * see that decision's argument for why).
+ * summary text at all (deliberately not preserved).
  */
 const getLocalToolSummaryText = ({
   toolName,
@@ -1257,7 +1284,7 @@ function ToolCallItem({
   // `kind: 'replace'` renderers (currently: only `delegate_subagent`'s
   // `SubagentCard`) take over the entire tool-call block — see
   // `tool-renderers/types.ts`'s doc comment. `render()` returns `null` while
-  // pending approval (matching the pre-D8 `effectiveStatus !==
+  // pending approval (matching the former `effectiveStatus !==
   // PendingApproval` guard this replaced — see `delegate_subagent/ui.tsx`'s
   // own doc comment), in which case we fall through to the normal
   // header/approval-footer rendering below exactly as before.
@@ -1402,7 +1429,7 @@ function ToolCallItem({
                     void handleAbort()
                   },
                 })
-              : null
+              : renderCliFileChange(request, response)
 
           return (
             <div
@@ -1433,7 +1460,7 @@ function ToolCallItem({
                     // `delegate_external_agent` tool name also render through
                     // `LiveTaskCard`, but neither is tool-name-indexed, so both
                     // stay as this inline branch rather than a `TOOL_RENDERERS`
-                    // entry (D8: non-tool-name branches stay as-is).
+                    // entry.
                     <LiveTaskCard
                       toolCallId={request.id}
                       response={effectiveTerminalResponse}

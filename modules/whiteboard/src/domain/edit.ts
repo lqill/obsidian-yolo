@@ -1,5 +1,4 @@
-// One agent edit, applied to a board (docs/plans/09-03-whiteboard-agent-tools
-// master.md D2).
+// One agent edit, applied to a board.
 //
 // `edit_board` takes six arrays — delete, create, update, connect, group,
 // arrange — and this is what they mean. Three properties hold it together.
@@ -94,8 +93,10 @@ export type BoardEditContext = Readonly<{
   newEdgeId(board: Board): EdgeId
   /** Snap step for `arrange: "tidy"` — the canvas's `GRID_WORLD_STEP_PX`. */
   gridStep: number
-  /** Default size of a text card, and of a card that embeds something. */
+  /** Default size of a text card, of a card showing a vault file, and of a
+   * web card. */
   textCardSize: Size
+  fileCardSize: (path: string) => Size
   embedCardSize: Size
 }>
 
@@ -261,7 +262,11 @@ function applyCreates(
     }
     const kind = kinds[0]
     const defaultSize =
-      kind === 'text' ? context.textCardSize : context.embedCardSize
+      kind === 'text'
+        ? context.textCardSize
+        : kind === 'file'
+          ? context.fileCardSize(op.file ?? '')
+          : context.embedCardSize
     const size: Size = {
       w: positiveSize(op.w, defaultSize.w, `create[${index}].w`),
       h: positiveSize(op.h, defaultSize.h, `create[${index}].h`),

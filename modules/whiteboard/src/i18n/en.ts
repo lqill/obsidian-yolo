@@ -18,7 +18,10 @@ export const en = {
     newWhiteboard: 'New YOLO whiteboard',
     importCanvas: 'Import as YOLO whiteboard',
     newCard: 'New card',
+    newText: 'New text',
     convertToNote: 'Convert to note',
+    convertToText: 'Convert to text',
+    convertToCard: 'Convert to card',
     deleteCard: 'Delete',
     deleteEdge: 'Delete connection',
     arrowNone: 'No arrow',
@@ -39,9 +42,27 @@ export const en = {
     distributeHorizontal: 'Distribute horizontally',
     distributeVertical: 'Distribute vertically',
     tidy: 'Tidy up',
+    openReader: 'Open in reader',
+    exportAnnotatedPdf: 'Export PDF with annotations',
+    openSpread: 'Spread out pages',
+    closeSpread: 'Collapse to reader',
   },
-  // The creation bar along the bottom of the canvas (P3 batch 3, surface 3).
+  // The creation bar along the bottom of the canvas.
+  controls: {
+    zoomIn: 'Zoom in',
+    resetZoom: 'Reset zoom',
+    zoomToFit: 'Zoom to fit',
+    zoomOut: 'Zoom out',
+    undo: 'Undo',
+    redo: 'Redo',
+  },
+  emptyBoard: {
+    title: 'Double-click anywhere to write, or drag a card off the bar below',
+    desktopHint: 'Drop notes, images or PDFs here · Hold Space and drag to pan',
+    touchHint: 'Drag with one finger to pan · Pinch to zoom',
+  },
   cardMenu: {
+    addText: 'Add text',
     newCard: 'Add card',
     addNote: 'Add note',
     addMedia: 'Add media file',
@@ -55,15 +76,18 @@ export const en = {
     urlPlaceholder: 'https://example.com',
     webDropHint: 'or drop an HTML file here',
     noMatches: 'No matching file.',
-    noMedia: 'This vault has no images, audio or video.',
+    createNote: 'Create note "{name}"',
+    noMedia: 'This vault has no images, audio, video or PDFs.',
   },
-  // Floating toolbar over the current selection (P3 batch 3).
+  // Floating toolbar over the current selection.
   toolbar: {
     color: 'Set colour',
-    edit: 'Edit',
     tidy: 'Tidy up',
     arrows: 'Arrows',
     edgeLabel: 'Label',
+    openReader: 'Open in reader',
+    openSpread: 'Spread out pages',
+    closeSpread: 'Collapse to reader',
   },
   // The six preset names are Obsidian's own canvas palette.
   color: {
@@ -82,7 +106,7 @@ export const en = {
   file: {
     newWhiteboardBaseName: 'Whiteboard',
     newNoteBaseName: 'Untitled',
-    newHtmlBaseName: 'Web page',
+    importedBaseName: 'Untitled',
   },
   confirm: {
     importAllTitle: 'Import Canvas files',
@@ -93,14 +117,17 @@ export const en = {
   notice: {
     convertedToNote: 'Card saved as {path}',
     dropUnsupported:
-      'Only notes, images, audio, video and HTML files can be dropped onto a whiteboard.',
+      'Only notes, PDFs, images, audio, video and HTML files can be dropped onto a whiteboard.',
     imported: 'Imported as {path}',
     importedAll:
       'Imported {imported} Canvas file(s); {failed} could not be read.',
     importNoneFound: 'No Canvas files found in this vault.',
     invalidUrl: 'Only http and https addresses can be added.',
+    exportNoAnnotations: 'This PDF has no annotations to export.',
+    exportedAnnotatedPdf: 'Exported with annotations to {path}',
   },
   cardAi: {
+    hint: 'Type, or ask AI: ',
     instruction: {
       expand: 'Expand',
       ideas: 'Ideas',
@@ -124,12 +151,63 @@ export const en = {
     linkNotWebHint:
       'Only http and https pages can be shown. This card points at "{url}".',
   },
+  pdf: {
+    loading: 'Opening PDF…',
+    openFailed: 'Could not open this PDF',
+    pageInput: 'Page',
+    pageTitle: '{name} · p. {page}',
+    sheetTitle: 'p. {page}',
+    search: 'Find in document',
+    searchPlaceholder: 'Find…',
+    searchPrevious: 'Previous (Shift+Enter)',
+    searchNext: 'Next (Enter)',
+    searchClose: 'Close find (Esc)',
+    searchNoResults: 'No results',
+    closePanel: 'Close reader',
+    panelMenu: 'More options',
+    areaMode: 'Frame an area',
+    linkAlias: '{name}, p.{page}',
+    excerpt: {
+      addedOutOfView: 'Excerpt added beside the PDF card, out of view.',
+      failed: 'Could not excerpt this area.',
+    },
+    annotate: {
+      highlight: 'Highlight',
+      colors: 'Highlight colour',
+      color: {
+        yellow: 'Yellow',
+        green: 'Green',
+        blue: 'Blue',
+        pink: 'Pink',
+        purple: 'Purple',
+      },
+      frame: 'Annotate area',
+      comment: 'Comment',
+      editComment: 'Edit comment',
+      commentPlaceholder: 'Write a comment…',
+      saveComment: 'Save comment',
+      deleteComment: 'Delete comment',
+      quoteToChat: 'Quote in chat',
+      excerpt: 'Excerpt to board',
+      copyLink: 'Copy link',
+      linkCopied: 'Link copied',
+      linkUnavailable:
+        'This text is no longer where it was on the page, so it has no link.',
+      delete: 'Delete annotation',
+      readOnly:
+        'The annotations of this PDF were saved by a newer version and can only be viewed.',
+    },
+  },
   error: {
     title: 'Could not read this whiteboard',
     hint: 'The file could not be parsed. It has not been modified — fix it outside the whiteboard and reopen.',
     createFailed: 'Could not create a new whiteboard.',
     convertFailed: 'Could not convert this card into a note.',
+    createNoteFailed: 'Could not create the note.',
     dropFailed: 'Could not add the dropped file to this whiteboard.',
+    pasteFailed: 'Could not add the pasted file to this whiteboard.',
     importFailed: 'Could not import this Canvas file.',
+    exportAnnotatedPdfFailed:
+      'Could not export the PDF with its annotations. It may be encrypted or damaged.',
   },
 }

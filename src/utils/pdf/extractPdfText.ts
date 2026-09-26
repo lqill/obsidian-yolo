@@ -3,37 +3,29 @@ import type { App, TFile } from 'obsidian'
 import {
   buildPdfTextCacheKey,
   buildPdfTextCacheKeyFromContent,
-  lookupPdfTextCache,
-  writePdfTextCacheEntry,
-} from '../../database/json/chat/pdfTextCacheStore'
+  lookupPdfText,
+  writePdfText,
+} from '../../database/local-cache/localCacheStore'
 import { base64ToUint8Array } from '../base64'
 import { createYieldController } from '../common/yield-to-main'
 
 import { loadPdfPages } from './pdfPages'
 
-/** Hard cap for vault PDF indexing (binary size). */
-export const PDF_INDEX_MAX_BYTES = 50 * 1024 * 1024
+/** Default binary-size cap when chat reads a PDF's text (knowledge base indexing is uncapped). */
+export const PDF_READ_MAX_BYTES = 50 * 1024 * 1024
 
-/** Hard cap for vault PDF indexing (page count). */
-export const PDF_INDEX_MAX_PAGES = 500
-
-type YoloSettingsLike = {
-  yolo?: {
-    baseDir?: string
-  }
-}
+/** Default page cap when chat reads a PDF's text (knowledge base indexing is uncapped). */
+export const PDF_READ_MAX_PAGES = 500
 
 export type ExtractPdfTextOptions = {
   signal?: AbortSignal
   maxBinaryBytes?: number
   maxPages?: number
   /**
-   * When provided, results are read from / written to the shared PDF text cache
-   * (keyed by path:mtime:size). Omit to force a fresh extraction without touching
-   * the cache — useful for callers with no settings handle (tests, tools that
-   * opt out). Same YoloSettingsLike shape as imageCacheStore.
+   * Read from / write to the local PDF text cache (keyed by path:mtime:size).
+   * Off by default: knowledge-base indexing deliberately bypasses it.
    */
-  settings?: YoloSettingsLike | null
+  useCache?: boolean
 }
 
 export async function extractPdfText(
@@ -41,8 +33,8 @@ export async function extractPdfText(
   file: TFile,
   options: ExtractPdfTextOptions = {},
 ): Promise<{ pages: { page: number; text: string }[] }> {
-  const maxBinaryBytes = options.maxBinaryBytes ?? PDF_INDEX_MAX_BYTES
-  const maxPages = options.maxPages ?? PDF_INDEX_MAX_PAGES
+  const maxBinaryBytes = options.maxBinaryBytes ?? PDF_READ_MAX_BYTES
+  const maxPages = options.maxPages ?? PDF_READ_MAX_PAGES
 
   if (file.stat.size > maxBinaryBytes) {
     throw new Error(
@@ -52,21 +44,13 @@ export async function extractPdfText(
 
   // Cache hit fast-path: avoid the expensive pdfjs pipeline entirely when
   // path:mtime:size matches a previously extracted entry.
-  const cacheKey =
-    options.settings !== undefined
-      ? buildPdfTextCacheKey(file.path, file.stat.mtime, file.stat.size)
-      : null
+  const cacheKey = options.useCache
+    ? buildPdfTextCacheKey(file.path, file.stat.mtime, file.stat.size)
+    : null
   if (cacheKey) {
-    try {
-      const cached = await lookupPdfTextCache(app, cacheKey, options.settings)
-      if (cached) {
-        return { pages: cached }
-      }
-    } catch (error) {
-      console.warn(
-        `[YOLO] PDF text cache lookup failed for ${file.path}; falling back to fresh extraction:`,
-        error instanceof Error ? error.message : error,
-      )
+    const cached = await lookupPdfText(app, cacheKey)
+    if (cached) {
+      return { pages: cached }
     }
   }
 
@@ -86,18 +70,7 @@ export async function extractPdfText(
   }
 
   if (cacheKey) {
-    try {
-      await writePdfTextCacheEntry(
-        app,
-        { hash: cacheKey, sourcePath: file.path, pages },
-        options.settings,
-      )
-    } catch (error) {
-      console.warn(
-        `[YOLO] Failed to persist PDF text cache for ${file.path}:`,
-        error instanceof Error ? error.message : error,
-      )
-    }
+    await writePdfText(app, { key: cacheKey, sourcePath: file.path, pages })
   }
 
   return { pages }
@@ -107,10 +80,10 @@ export type ExtractPdfTextFromBase64Options = {
   signal?: AbortSignal
   maxPages?: number
   /**
-   * When provided, the cache is consulted (read-on-lookup, write-on-miss),
-   * keyed by content hash. Omit to force a fresh extraction without caching.
+   * Consult the local PDF text cache (read-on-lookup, write-on-miss), keyed
+   * by content hash. Off by default.
    */
-  settings?: YoloSettingsLike | null
+  useCache?: boolean
   /**
    * Optional precomputed content-hash cache key. Skip recomputing fnv1a over
    * a multi-MB base64 string when the caller already has it (e.g. upload site).
@@ -118,7 +91,7 @@ export type ExtractPdfTextFromBase64Options = {
   precomputedCacheKey?: string
   /**
    * Diagnostic source label persisted into the cache entry (e.g. `upload:foo.pdf`).
-   * Has no effect on lookup; helps when inspecting the cache JSON manually.
+   * Has no effect on lookup; helps when inspecting the cache database manually.
    */
   sourceLabel?: string
 }
@@ -134,26 +107,16 @@ export async function extractPdfTextFromBase64(
   base64: string,
   options: ExtractPdfTextFromBase64Options = {},
 ): Promise<{ pages: { page: number; text: string }[] }> {
-  const maxPages = options.maxPages ?? PDF_INDEX_MAX_PAGES
+  const maxPages = options.maxPages ?? PDF_READ_MAX_PAGES
 
-  const cacheKey =
-    options.settings !== undefined
-      ? (options.precomputedCacheKey ??
-        (await buildPdfTextCacheKeyFromContent(base64)))
-      : null
+  const cacheKey = options.useCache
+    ? (options.precomputedCacheKey ??
+      (await buildPdfTextCacheKeyFromContent(base64)))
+    : null
   if (cacheKey) {
-    // Lookup is best-effort: a failed read (corrupt JSON, IO error) must not
-    // poison the whole call — fall through to fresh extraction.
-    try {
-      const cached = await lookupPdfTextCache(app, cacheKey, options.settings)
-      if (cached) {
-        return { pages: cached }
-      }
-    } catch (error) {
-      console.warn(
-        `[YOLO] PDF text cache lookup failed (${options.sourceLabel ?? 'upload'}); falling back to fresh extraction:`,
-        error instanceof Error ? error.message : error,
-      )
+    const cached = await lookupPdfText(app, cacheKey)
+    if (cached) {
+      return { pages: cached }
     }
   }
 
@@ -173,22 +136,11 @@ export async function extractPdfTextFromBase64(
   }
 
   if (cacheKey) {
-    try {
-      await writePdfTextCacheEntry(
-        app,
-        {
-          hash: cacheKey,
-          sourcePath: options.sourceLabel ?? 'upload:unknown',
-          pages,
-        },
-        options.settings,
-      )
-    } catch (error) {
-      console.warn(
-        `[YOLO] Failed to persist PDF text cache for ${options.sourceLabel ?? 'upload'}:`,
-        error instanceof Error ? error.message : error,
-      )
-    }
+    await writePdfText(app, {
+      key: cacheKey,
+      sourcePath: options.sourceLabel ?? 'upload:unknown',
+      pages,
+    })
   }
 
   return { pages }

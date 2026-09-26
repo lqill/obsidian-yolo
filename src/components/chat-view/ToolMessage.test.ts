@@ -44,6 +44,7 @@ jest.mock('./tool-cards/CliSubagentCard', () => ({
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
+import { buildFileChangeRowsFromTexts } from '../../core/tools/file-change-rows'
 import type { ChatTerminalCommandResultMessage } from '../../types/chat'
 import {
   type ToolCallResponse,
@@ -184,6 +185,54 @@ describe('ToolMessage rendering', () => {
         }),
       }),
     )
+  })
+
+  it('draws a CLI file_change call from its pre-built rows instead of the arguments JSON', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ToolMessage, {
+        message: {
+          role: 'tool',
+          id: 'tool-message-1',
+          toolCalls: [
+            {
+              request: {
+                id: 'edit-approval-1',
+                name: 'Approve edit: test.md',
+                arguments: createCompleteToolCallArguments({
+                  value: { tool: 'patch', arguments: { path: 'test.md' } },
+                }),
+                metadata: {
+                  cliToolCall: {
+                    runtimeId: 'hermes',
+                    eventType: 'requestPermission',
+                    name: 'Approve edit: test.md',
+                    capability: 'file_change',
+                  },
+                  fileChangeRows: [
+                    buildFileChangeRowsFromTexts(
+                      '/vault/test.md',
+                      'kept\nold line\n',
+                      'kept\nnew line\n',
+                    ),
+                  ],
+                },
+              },
+              response: { status: ToolCallResponseStatus.PendingApproval },
+            },
+          ],
+        },
+        conversationId: 'conversation-1',
+        onMessageUpdate: () => {},
+      }),
+    )
+
+    expect(markup).toContain('/vault/test.md')
+    expect(markup).toContain('yolo-edit-diff-row--removed')
+    expect(markup).toContain('old line')
+    expect(markup).toContain('yolo-edit-diff-row--added')
+    expect(markup).toContain('new line')
+    // The rows own the content area: no parameters / result code blocks.
+    expect(mockedObsidianCodeBlock).not.toHaveBeenCalled()
   })
 
   it('renders approval actions for pending delegate_subagent calls', () => {
@@ -910,14 +959,12 @@ describe('ToolMessage headline helpers', () => {
   })
 
   // fs_delete/fs_create_dir/fs_move retired with the virtual bash tool
-  // (master.md decision 10, schema v79). D8/D10 deliberately drop their
-  // `getLocalToolSummaryText` branches along with the rest of the retired
-  // `if` chain: retired tool names no longer get a special-cased summary,
+  // (schema v79). Their `getLocalToolSummaryText` branches were deliberately
+  // dropped along with the rest of the retired `if` chain: retired tool names no longer get a special-cased summary,
   // only whatever `displayName` this test's own `labels` fixture still
   // happens to carry (a real `getToolLabels()` call — unlike this hand-built
   // fixture — no longer carries one either, so real historical conversations
-  // show the bare tool name; see D10's checklist for `ToolMessage.tsx`'s
-  // `displayNames` map).
+  // show the bare tool name; see `ToolMessage.tsx`'s `displayNames` map).
   it('has no summary for retired delete headlines (only whatever displayName this fixture supplies)', () => {
     expect(
       getHeadlineDisplayInfo({
@@ -1165,7 +1212,7 @@ describe('isAlwaysAllowDisabledForRequest', () => {
   })
 
   it("prefers the running mode's snapshot over the capability declaration", () => {
-    // Max opens always-allow on the terminal (master.md §4 Q8) ...
+    // Max opens always-allow on the terminal ...
     expect(
       isAlwaysAllowDisabledForRequest({
         name: 'yolo_local__terminal_command',

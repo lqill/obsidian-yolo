@@ -11,6 +11,7 @@ import {
   cardMarkdownWindow,
   nextOverviewState,
   nodeTitleText,
+  wrapTitleLines,
 } from './lod'
 
 describe('nextOverviewState', () => {
@@ -80,6 +81,23 @@ describe('nodeTitleText', () => {
 
   it('shows any other file node basename the same way', () => {
     expect(nodeTitleText(fileNode('papers/foo.pdf'))).toBe('foo')
+  })
+
+  it('adds the page a PDF card is on once it is past the first', () => {
+    const label = {
+      card: (name: string, page: number) => `${name} · p. ${page}`,
+      sheet: (page: number) => `p. ${page}`,
+    }
+    const pdf = (startPage?: number): FileNode => ({
+      ...fileNode('papers/foo.pdf'),
+      ...(startPage === undefined ? {} : { startPage }),
+    })
+    expect(nodeTitleText(pdf(), label)).toBe('foo')
+    expect(nodeTitleText(pdf(3.75), label)).toBe('foo · p. 3')
+    // Only a PDF has pages; a note's window is a line, not a page.
+    expect(
+      nodeTitleText({ ...fileNode('Cards/a.md'), startPage: 4 }, label),
+    ).toBe('a')
   })
 
   it('shows a group label, and nothing for an unlabelled group', () => {
@@ -259,5 +277,45 @@ describe('blockStartLine', () => {
 
   it('clamps a line past the end of the note to its last block', () => {
     expect(blockStartLine(markdown, 999)).toBe(10)
+  })
+})
+
+describe('wrapTitleLines', () => {
+  // One unit per character, so widths read as character counts.
+  const measure = (text: string) => text.length
+
+  it('keeps a title that fits on one line', () => {
+    expect(wrapTitleLines('short title', 20, 3, measure)).toEqual([
+      'short title',
+    ])
+  })
+
+  it('breaks at spaces', () => {
+    expect(wrapTitleLines('alpha beta gamma', 11, 3, measure)).toEqual([
+      'alpha beta',
+      'gamma',
+    ])
+  })
+
+  it('breaks inside a word only when the word alone is wider than a line', () => {
+    expect(wrapTitleLines('Thinking_with_Visual', 8, 3, measure)).toEqual([
+      'Thinking',
+      '_with_Vi',
+      'sual',
+    ])
+  })
+
+  it('breaks between CJK characters', () => {
+    expect(wrapTitleLines('名字 · 第 12 页', 6, 3, measure)).toEqual([
+      '名字 · 第',
+      '12 页',
+    ])
+  })
+
+  it('ends the last line with an ellipsis when there are more lines than room', () => {
+    expect(wrapTitleLines('one two three four', 8, 2, measure)).toEqual([
+      'one two',
+      'three f…',
+    ])
   })
 })

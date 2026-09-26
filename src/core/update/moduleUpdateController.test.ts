@@ -132,4 +132,95 @@ describe('module update controller', () => {
     await controller.refresh()
     expect(controller.getSnapshot()).toEqual([])
   })
+
+  it('installs every unmuted update without offering it', async () => {
+    const moduleService = service()
+    const controller = new ModuleUpdateController({
+      service: moduleService,
+      getAutoDownloadEnabled: () => false,
+      getMutedVersions: () => ({}),
+      muteVersion: jest.fn(async () => undefined),
+    })
+
+    await expect(controller.installAll()).resolves.toEqual([
+      { name: 'Learning', version: '1.1.0' },
+    ])
+    expect(moduleService.install).toHaveBeenCalledTimes(1)
+    expect(controller.getSnapshot()).toEqual([])
+  })
+
+  it('leaves a muted version and a failed install out of the follow-up', async () => {
+    const muted = service()
+    await expect(
+      new ModuleUpdateController({
+        service: muted,
+        getAutoDownloadEnabled: () => false,
+        getMutedVersions: () => ({ learning: '1.1.0' }),
+        muteVersion: jest.fn(async () => undefined),
+      }).installAll(),
+    ).resolves.toEqual([])
+    expect(muted.install).not.toHaveBeenCalled()
+
+    const failing = service()
+    failing.install.mockRejectedValueOnce(new Error('network'))
+    const consoleError = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+    await expect(
+      new ModuleUpdateController({
+        service: failing,
+        getAutoDownloadEnabled: () => false,
+        getMutedVersions: () => ({}),
+        muteVersion: jest.fn(async () => undefined),
+      }).installAll(),
+    ).resolves.toEqual([])
+    consoleError.mockRestore()
+  })
+
+  it('offers an update awaiting the core without preparing or installing it', async () => {
+    const moduleService = service()
+    moduleService.getSnapshot.mockReturnValue({
+      status: 'ready',
+      errors: {},
+      modules: [
+        {
+          id: 'learning',
+          name: 'Learning',
+          description: '',
+          version: '1.0.0',
+          status: 'active',
+          enabled: true,
+          desiredInstalled: true,
+          installed: { id: 'learning', version: '1.0.0', active: true },
+          catalog: {
+            id: 'learning',
+            version: '1.0.0',
+            compatibilityIssues: [{ kind: 'host-api' }],
+            awaitingCoreUpdate: { version: '1.1.0', releaseNotes: descriptor },
+          },
+        },
+      ],
+    })
+    const controller = new ModuleUpdateController({
+      service: moduleService,
+      getAutoDownloadEnabled: () => true,
+      getMutedVersions: () => ({}),
+      muteVersion: jest.fn(async () => undefined),
+      request: jest.fn(async () => response(noteBytes)),
+      subtleCrypto: webcrypto.subtle as unknown as SubtleCrypto,
+    })
+
+    await controller.refresh()
+    expect(controller.getSnapshot()).toMatchObject([
+      {
+        key: 'learning@1.1.0',
+        awaitingCoreUpdate: true,
+        releaseNotes: { en: '## 1.1.0 Learning update\n\n- Better reviews' },
+      },
+    ])
+    await controller.updateAll()
+    expect(moduleService.prepare).not.toHaveBeenCalled()
+    expect(moduleService.install).not.toHaveBeenCalled()
+    await expect(controller.installAll()).resolves.toEqual([])
+  })
 })

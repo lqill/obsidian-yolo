@@ -1,6 +1,5 @@
 // Pure-logic viewport virtualization engine, migrated from the S1/S2 spikes
-// (docs/plans/08-25-yolo-whiteboard/p1-design.md §3; algorithm ported
-// unchanged from `git show
+// (algorithm ported unchanged from `git show
 // spike/s2-editor-lifecycle:src/features/whiteboard-spike/virtualization.ts`
 // per that spike's "对正式实现的架构建议" #1 and #3):
 //   - input is {cards, viewportRect, pinnedIds}, output is a
@@ -11,7 +10,7 @@
 //     exempted from the unload decision via a generic `pinnedIds` set rather
 //     than a one-off drag special-case.
 //
-// Recompute throttling (~70ms per p1-design §3) and per-frame drain quotas
+// Recompute throttling (~70ms) and per-frame drain quotas
 // are *not* this module's job — those are host-loop concerns owned by the
 // (not-yet-built) canvas UI, which calls `recompute()` on a debounce and
 // `drain()` once per animation frame.
@@ -60,7 +59,7 @@ export function computeWorldViewportRect(
 /** Whether a card's footprint overlaps a world rectangle — the viewport test
  * both virtualization and the canvas's alignment candidates are asking. */
 export function intersectsViewport(
-  card: VirtualCardRect,
+  card: Omit<VirtualCardRect, 'id'>,
   rect: WorldRect,
 ): boolean {
   return (
@@ -72,20 +71,39 @@ export function intersectsViewport(
 }
 
 /**
+ * Whether a card is on screen: at least half of it in the viewport — or,
+ * zoomed in past the viewport's size, covering at least half of the
+ * viewport. `view` is the viewport in world coordinates (no buffer).
+ */
+export function isMostlyInView(
+  card: VirtualCardRect,
+  view: WorldRect,
+): boolean {
+  const w = Math.min(card.x + card.w, view.right) - Math.max(card.x, view.left)
+  const h = Math.min(card.y + card.h, view.bottom) - Math.max(card.y, view.top)
+  if (!(w > 0 && h > 0)) return false
+  const shown = w * h
+  const viewArea = (view.right - view.left) * (view.bottom - view.top)
+  return shown >= (card.w * card.h) / 2 || shown >= viewArea / 2
+}
+
+/**
  * A card counts as "should be visible" if it geometrically intersects the
- * (buffered) viewport, OR it is pinned (currently being interacted with —
- * dragged, edited, selected). This single `vis` value feeds both the mount
- * and unmount branches in `recompute()` below, so a pinned off-screen card
- * does get queued for mount, not just protected from unmount — in practice
- * this rarely matters since a card is normally pinned only once it is
- * already on screen and being interacted with.
+ * (buffered) viewport where it is seen — its place in `moved` while a
+ * gesture carries it — OR it is pinned (being edited or resized). This
+ * single `vis` value feeds both the mount and unmount branches in
+ * `recompute()` below, so a pinned off-screen card does get queued for
+ * mount, not just protected from unmount. That is why a drag does not pin
+ * what it carries, and reports where it has carried it instead.
  */
 function wantsVisible(
   card: VirtualCardRect,
   rect: WorldRect,
   pinnedIds: ReadonlySet<string>,
+  moved: ReadonlyMap<string, Omit<VirtualCardRect, 'id'>> | null,
 ): boolean {
-  return pinnedIds.has(card.id) || intersectsViewport(card, rect)
+  if (pinnedIds.has(card.id)) return true
+  return intersectsViewport(moved?.get(card.id) ?? card, rect)
 }
 
 export class VirtualizationEngine {
@@ -134,14 +152,21 @@ export class VirtualizationEngine {
    * viewport rect and pinned set, and queues the diff. Call this on a
    * debounce (not every frame) — recompute throttling and drain-quota
    * throttling are two independent knobs, both owned by the caller.
+   *
+   * `moved` is where a gesture in progress has put the cards it moves,
+   * before the board is told: those are asked about where they are seen,
+   * not where the board last had them. A drag carries its cards across the
+   * viewport, and one that carries three hundred — a PDF spread under its
+   * title — must mount the ones that come into view, not all of them.
    */
   recompute(
     cards: readonly VirtualCardRect[],
     viewportRect: WorldRect,
     pinnedIds: ReadonlySet<string>,
+    moved: ReadonlyMap<string, Omit<VirtualCardRect, 'id'>> | null = null,
   ): void {
     for (const card of cards) {
-      const vis = wantsVisible(card, viewportRect, pinnedIds)
+      const vis = wantsVisible(card, viewportRect, pinnedIds, moved)
       const isMounted = this.mountedIds.has(card.id)
       if (vis && !isMounted) {
         if (!this.mountQueueSet.has(card.id)) {

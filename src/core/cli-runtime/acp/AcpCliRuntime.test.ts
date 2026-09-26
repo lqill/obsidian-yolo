@@ -1,13 +1,20 @@
-/* eslint-disable import/no-nodejs-modules -- exercises the desktop-only ACP transport boundary */
+/* eslint-disable import/no-nodejs-modules -- exercises the desktop-only ACP transport boundary, and reads real files for disk settlement */
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 /* eslint-enable import/no-nodejs-modules */
 
 import type { InitializeResponse } from '@agentclientprotocol/sdk'
 
+import type { ChatToolMessage } from '../../../types/chat'
 import { ToolCallResponseStatus } from '../../../types/tool-call.types'
+import { buildFileChangeRowsFromTexts } from '../../tools/file-change-rows'
+import { recordCliEditReviewSnapshot } from '../edit-review'
 import type { CliRuntimeEvent } from '../types'
 
 import { AcpCliRuntime } from './AcpCliRuntime'
+import type { AcpAgentProfile } from './agent-profile'
 import { AcpHost } from './host'
 import type { AcpProcessExitListener, AcpProcessLike } from './process'
 
@@ -20,6 +27,11 @@ jest.mock('../../../utils/platform/desktopNodeModule', () => ({
   loadDesktopNodeModule: async (specifier: string) =>
     jest.requireActual(specifier) as unknown,
 }))
+
+jest.mock('../edit-review', () => ({
+  recordCliEditReviewSnapshot: jest.fn(async () => undefined),
+}))
+const mockedRecordSnapshot = jest.mocked(recordCliEditReviewSnapshot)
 
 type RpcMessage = {
   id?: string | number
@@ -172,11 +184,23 @@ const wireServerRequestReplies = (agent: FakeAcpAgent): void => {
   })
 }
 
-const createRuntime = (agent: FakeAcpAgent, compactCommand?: string) =>
+const createProfile = (
+  overrides: Partial<AcpAgentProfile>,
+): AcpAgentProfile => ({
+  runtimeId: 'hermes',
+  displayName: 'Hermes',
+  resolveCommand: async () => null,
+  ...overrides,
+})
+
+const createRuntime = (
+  agent: FakeAcpAgent,
+  profileOverrides?: Partial<AcpAgentProfile>,
+) =>
   new AcpCliRuntime('hermes', {
     cwd: '/vault',
     createProcess: async () => agent,
-    ...(compactCommand ? { compactCommand } : {}),
+    ...(profileOverrides ? { profile: createProfile(profileOverrides) } : {}),
   })
 
 /** Grok is the runtime whose capabilities declare `supportsImageAttachments: false`. */
@@ -689,6 +713,396 @@ describe('AcpCliRuntime', () => {
     await runtime.dispose()
   })
 
+  describe('settling a completed file change against disk', () => {
+    let vault: string
+
+    beforeEach(async () => {
+      vault = await mkdtemp(join(tmpdir(), 'yolo-acp-disk-'))
+      mockedRecordSnapshot.mockClear()
+    })
+
+    afterEach(async () => {
+      await rm(vault, { recursive: true, force: true })
+    })
+
+    const runEditTurn = async (diff: {
+      path: string
+      oldText: string
+      newText: string
+    }) => {
+      const agent = new FakeAcpAgent()
+      agent.on('session/new', () => ({ sessionId: 'sess-1' }))
+      agent.on('session/prompt', (message) => {
+        const { sessionId } = message.params as { sessionId: string }
+        agent.notify('session/update', {
+          sessionId,
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'edit-1',
+            title: 'Edit a.md',
+            kind: 'edit',
+            status: 'pending',
+            content: [{ type: 'diff', ...diff }],
+          },
+        })
+        agent.notify('session/update', {
+          sessionId,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'edit-1',
+            status: 'completed',
+            content: [
+              { type: 'content', content: { type: 'text', text: 'Done.' } },
+            ],
+          },
+        })
+        return { stopReason: 'end_turn' }
+      })
+      const runtime = new AcpCliRuntime('codebuddy', {
+        cwd: vault,
+        createProcess: async () => agent,
+        app: {} as never,
+      })
+      const events = collectEvents(runtime)
+      await runtime.ensureReady({})
+      await runtime.sendTurn({ content: 'edit a.md' })
+      await runtime.dispose()
+      const cards = events.flatMap((event) =>
+        event.type === 'message_upsert' &&
+        event.message.id === 'acp-result-edit-1'
+          ? [event.message as ChatToolMessage]
+          : [],
+      )
+      return cards.at(-1)?.toolCalls[0].request.metadata?.fileChangeRows
+    }
+
+    it('redraws a span diff from the whole file, with its real line numbers, before the turn ends', async () => {
+      await writeFile(join(vault, 'a.md'), '1\n2\nnew 3\n4\n')
+      const rows = await runEditTurn({
+        path: join(vault, 'a.md'),
+        oldText: 'old 3\n',
+        newText: 'new 3\n',
+      })
+      expect(rows).toEqual([
+        buildFileChangeRowsFromTexts(
+          'a.md',
+          '1\n2\nold 3\n4\n',
+          '1\n2\nnew 3\n4\n',
+        ),
+      ])
+      // …and records the whole-file texts for the review overlay, under the
+      // round the call's editSummary names.
+      expect(mockedRecordSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionRef: { runtimeId: 'codebuddy', nativeSessionId: 'sess-1' },
+          roundId: 'acp-result-edit-1',
+          path: 'a.md',
+          beforeContent: '1\n2\nold 3\n4\n',
+          afterContent: '1\n2\nnew 3\n4\n',
+        }),
+      )
+    })
+
+    it('leaves the rows unnumbered when the disk does not bear the diff out', async () => {
+      await writeFile(join(vault, 'a.md'), 'changed again\n')
+      const rows = await runEditTurn({
+        path: 'a.md',
+        oldText: 'old\n',
+        newText: 'new\n',
+      })
+      expect(rows?.[0].rows).toEqual([
+        { type: 'line', change: 'removed', text: 'old' },
+        { type: 'line', change: 'added', text: 'new' },
+      ])
+      expect(mockedRecordSnapshot).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('settling cards at the end of a turn', () => {
+    // Hermes' shape: the approval request carries a toolCallId of its own, so
+    // nothing the agent sends afterwards ever addresses the approval card.
+    const startApprovedTurn = (
+      stopReason: 'end_turn' | 'cancelled',
+    ): FakeAcpAgent => {
+      const agent = new FakeAcpAgent()
+      wireServerRequestReplies(agent)
+      agent.on('session/new', () => ({ sessionId: 'sess-1' }))
+      agent.on('session/prompt', async (message) => {
+        const params = message.params as { sessionId: string }
+        await agent.request('session/request_permission', {
+          sessionId: params.sessionId,
+          toolCall: {
+            toolCallId: 'edit-approval-1',
+            title: 'Approve edit: a.md',
+            kind: 'edit',
+          },
+          options: [
+            { optionId: 'once', name: 'Allow once', kind: 'allow_once' },
+            { optionId: 'deny', name: 'Reject', kind: 'reject_once' },
+          ],
+        })
+        return { stopReason }
+      })
+      return agent
+    }
+
+    const lastCardStatus = (events: CliRuntimeEvent[], messageId: string) => {
+      const upserts = events.filter(
+        (event) =>
+          event.type === 'message_upsert' && event.message.id === messageId,
+      )
+      const last = upserts.at(-1)
+      return last?.type === 'message_upsert' && last.message.role === 'tool'
+        ? last.message.toolCalls[0].response.status
+        : undefined
+    }
+
+    it('settles an approved card nothing reported back on to success before the turn completes', async () => {
+      const agent = startApprovedTurn('end_turn')
+      const runtime = createRuntime(agent)
+      const events = collectEvents(runtime)
+      await runtime.ensureReady({})
+      const turn = runtime.sendTurn({ content: 'edit a.md' })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      await expect(
+        runtime.respondApproval({
+          requestId: 'edit-approval-1',
+          decision: 'approve_once',
+        }),
+      ).resolves.toEqual({ status: ToolCallResponseStatus.Running })
+      await turn
+
+      expect(lastCardStatus(events, 'acp-result-edit-approval-1')).toBe(
+        ToolCallResponseStatus.Success,
+      )
+      const settledIndex = events.findLastIndex(
+        (event) =>
+          event.type === 'message_upsert' &&
+          event.message.id === 'acp-result-edit-approval-1',
+      )
+      const completedIndex = events.findIndex(
+        (event) => event.type === 'run_state' && event.state === 'completed',
+      )
+      expect(settledIndex).toBeLessThan(completedIndex)
+      await runtime.dispose()
+    })
+
+    it('settles it to aborted when the turn was cancelled', async () => {
+      const agent = startApprovedTurn('cancelled')
+      const runtime = createRuntime(agent)
+      const events = collectEvents(runtime)
+      await runtime.ensureReady({})
+      const turn = runtime.sendTurn({ content: 'edit a.md' })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      await runtime.respondApproval({
+        requestId: 'edit-approval-1',
+        decision: 'approve_once',
+      })
+      await turn
+
+      expect(lastCardStatus(events, 'acp-result-edit-approval-1')).toBe(
+        ToolCallResponseStatus.Aborted,
+      )
+      await runtime.dispose()
+    })
+
+    it('reports a declined request as rejected and leaves it alone', async () => {
+      const agent = startApprovedTurn('end_turn')
+      const runtime = createRuntime(agent)
+      const events = collectEvents(runtime)
+      await runtime.ensureReady({})
+      const turn = runtime.sendTurn({ content: 'edit a.md' })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      await expect(
+        runtime.respondApproval({
+          requestId: 'edit-approval-1',
+          decision: 'reject',
+        }),
+      ).resolves.toEqual({ status: ToolCallResponseStatus.Rejected })
+      await turn
+
+      // The only upsert is the pending card: the host publishes `Rejected`.
+      expect(lastCardStatus(events, 'acp-result-edit-approval-1')).toBe(
+        ToolCallResponseStatus.PendingApproval,
+      )
+      await runtime.dispose()
+    })
+  })
+
+  /**
+   * Session modes are how an ACP agent exposes its own approval policy, and
+   * they are the only lever that stops it from asking in the first place.
+   * The mode ids are agent-defined, so the mapping comes from the profile.
+   */
+  const MODES = {
+    currentModeId: 'tame',
+    availableModes: [{ id: 'tame' }, { id: 'wild' }],
+  }
+
+  const yoloAwareProfile: Partial<AcpAgentProfile> = {
+    resolveSessionModeId: ({ yoloEnabled }) => (yoloEnabled ? 'wild' : 'tame'),
+  }
+
+  const collectModeRequests = (agent: FakeAcpAgent): string[] => {
+    const applied: string[] = []
+    agent.on('session/set_mode', (message) => {
+      applied.push((message.params as { modeId: string }).modeId)
+      return {}
+    })
+    return applied
+  }
+
+  it('applies the profile-mapped session mode to the agent once a session binds', async () => {
+    const agent = new FakeAcpAgent()
+    agent.on('session/new', () => ({ sessionId: 'sess-1', modes: MODES }))
+    const applied = collectModeRequests(agent)
+
+    const runtime = createRuntime(agent, yoloAwareProfile)
+    // Deliberately before ensureReady: the toggle can be flipped while no
+    // session is bound yet, and the profile still has to reach the agent.
+    await runtime.updatePermissionProfile({ mode: 'agent', yoloEnabled: true })
+    await runtime.ensureReady({})
+
+    expect(applied).toEqual(['wild'])
+    await runtime.dispose()
+  })
+
+  it('re-applies the session mode when another session binds', async () => {
+    const agent = new FakeAcpAgent()
+    agent.on('session/new', () => ({ sessionId: 'sess-1', modes: MODES }))
+    // A freshly loaded session carries its own mode — the one the agent
+    // actually has it on, not whatever the previously bound session was set
+    // to. Skipping the re-apply here is what would silently strand the new
+    // session on the agent's default policy.
+    agent.on('session/load', () => ({ modes: MODES }))
+    const applied = collectModeRequests(agent)
+
+    const runtime = createRuntime(agent, yoloAwareProfile)
+    await runtime.updatePermissionProfile({ mode: 'agent', yoloEnabled: true })
+    await runtime.ensureReady({})
+    await runtime.ensureReady({
+      sessionRef: { runtimeId: 'hermes', nativeSessionId: 'sess-2' },
+    })
+
+    expect(applied).toEqual(['wild', 'wild'])
+    await runtime.dispose()
+  })
+
+  it('leaves the agent alone when it never advertised the mapped mode', async () => {
+    const agent = new FakeAcpAgent()
+    agent.on('session/new', () => ({
+      sessionId: 'sess-1',
+      modes: { currentModeId: 'tame', availableModes: [{ id: 'tame' }] },
+    }))
+    const applied = collectModeRequests(agent)
+
+    const runtime = createRuntime(agent, yoloAwareProfile)
+    await runtime.updatePermissionProfile({ mode: 'agent', yoloEnabled: true })
+    await runtime.ensureReady({})
+
+    expect(applied).toEqual([])
+    await runtime.dispose()
+  })
+
+  it('answers permission requests itself while YOLO is on, raising no card', async () => {
+    const agent = new FakeAcpAgent()
+    wireServerRequestReplies(agent)
+    agent.on('session/new', () => ({ sessionId: 'sess-1', modes: MODES }))
+    collectModeRequests(agent)
+    let permissionOutcome: unknown
+    agent.on('session/prompt', async (message) => {
+      const params = message.params as { sessionId: string }
+      permissionOutcome = await agent.request('session/request_permission', {
+        sessionId: params.sessionId,
+        toolCall: {
+          toolCallId: 'call-1',
+          title: 'Run rm -rf',
+          kind: 'execute',
+        },
+        // Hermes's real list: a session-scoped and a permanent option, both
+        // reported under ACP's single `allow_always` kind, session first.
+        options: [
+          { optionId: 'once', name: 'Allow once', kind: 'allow_once' },
+          {
+            optionId: 'session',
+            name: 'Allow for session',
+            kind: 'allow_always',
+          },
+          {
+            optionId: 'permanent',
+            name: 'Allow always',
+            kind: 'allow_always',
+          },
+          { optionId: 'deny', name: 'Reject once', kind: 'reject_once' },
+        ],
+      })
+      return { stopReason: 'end_turn' }
+    })
+
+    const runtime = createRuntime(agent, yoloAwareProfile)
+    const events = collectEvents(runtime)
+    await runtime.updatePermissionProfile({ mode: 'agent', yoloEnabled: true })
+    await runtime.ensureReady({})
+    await runtime.sendTurn({ content: 'clean up' })
+
+    // Session-scoped, not permanent: YOLO authorizes this conversation, so
+    // it must not leave a standing allow-list entry in the agent.
+    expect(permissionOutcome).toEqual({
+      outcome: { outcome: 'selected', optionId: 'session' },
+    })
+    // Nothing was ever surfaced for the user to act on.
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'message_upsert' &&
+          event.message.id === 'acp-result-call-1',
+      ),
+    ).toBe(false)
+    await runtime.dispose()
+  })
+
+  it('still raises an approval card once YOLO is turned back off', async () => {
+    const agent = new FakeAcpAgent()
+    wireServerRequestReplies(agent)
+    agent.on('session/new', () => ({ sessionId: 'sess-1', modes: MODES }))
+    collectModeRequests(agent)
+    agent.on('session/prompt', async (message) => {
+      const params = message.params as { sessionId: string }
+      await agent.request('session/request_permission', {
+        sessionId: params.sessionId,
+        toolCall: {
+          toolCallId: 'call-1',
+          title: 'Run rm -rf',
+          kind: 'execute',
+        },
+        options: [{ optionId: 'once', name: 'Allow once', kind: 'allow_once' }],
+      })
+      return { stopReason: 'end_turn' }
+    })
+
+    const runtime = createRuntime(agent, yoloAwareProfile)
+    const events = collectEvents(runtime)
+    await runtime.updatePermissionProfile({ mode: 'agent', yoloEnabled: true })
+    await runtime.ensureReady({})
+    await runtime.updatePermissionProfile({ mode: 'agent', yoloEnabled: false })
+    const turnPromise = runtime.sendTurn({ content: 'clean up' })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'message_upsert' &&
+          event.message.id === 'acp-result-call-1',
+      ),
+    ).toBe(true)
+    await runtime.respondApproval({
+      requestId: 'call-1',
+      decision: 'approve_once',
+    })
+    await turnPromise
+    await runtime.dispose()
+  })
+
   it('answers an approval with the state its card becomes, not by republishing it', async () => {
     const agent = new FakeAcpAgent()
     wireServerRequestReplies(agent)
@@ -965,7 +1379,7 @@ describe('AcpCliRuntime', () => {
         return { stopReason: 'end_turn' }
       })
 
-      const runtime = createRuntime(agent, '/compress')
+      const runtime = createRuntime(agent, { compactCommand: '/compress' })
       const events = collectEvents(runtime)
       await runtime.ensureReady({})
 
@@ -1346,5 +1760,134 @@ describe('AcpCliRuntime', () => {
 
       await runtime.dispose()
     })
+  })
+})
+
+describe('AcpCliRuntime thought level', () => {
+  const THOUGHT_LEVEL = {
+    type: 'select',
+    id: 'thought_level',
+    name: 'Deep Thinking',
+    category: 'thought_level',
+    currentValue: 'enabled',
+    options: [
+      { value: 'low', name: 'Low' },
+      { value: 'high', name: 'High' },
+      { value: 'enabled', name: 'On (default)' },
+    ],
+  }
+
+  const autoAwareProfile: Partial<AcpAgentProfile> = {
+    autoThoughtLevelValueId: 'enabled',
+  }
+
+  const collectConfigWrites = (
+    agent: FakeAcpAgent,
+  ): { configId: string; value: unknown }[] => {
+    const applied: { configId: string; value: unknown }[] = []
+    agent.on('session/set_config_option', (message) => {
+      const params = message.params as { configId: string; value: unknown }
+      applied.push({ configId: params.configId, value: params.value })
+      return {
+        configOptions: [{ ...THOUGHT_LEVEL, currentValue: params.value }],
+      }
+    })
+    return applied
+  }
+
+  const readyRuntime = async (agent: FakeAcpAgent) => {
+    agent.on('session/new', () => ({
+      sessionId: 'sess-1',
+      configOptions: [THOUGHT_LEVEL],
+    }))
+    const runtime = createRuntime(agent, autoAwareProfile)
+    await runtime.ensureReady({})
+    return runtime
+  }
+
+  it('publishes the agent’s levels and current value onto the configuration', async () => {
+    const agent = new FakeAcpAgent()
+    const runtime = await readyRuntime(agent)
+
+    const configuration = await runtime.getConfiguration([
+      { id: 'm1', label: 'Model One', reasoningEfforts: [] },
+    ])
+
+    expect(configuration.reasoningEffort).toBe('enabled')
+    expect(configuration.models[0].reasoningEfforts).toEqual([
+      { id: 'low' },
+      { id: 'high' },
+      { id: 'enabled' },
+    ])
+    await runtime.dispose()
+  })
+
+  it('writes a picked level through session/set_config_option', async () => {
+    const agent = new FakeAcpAgent()
+    const applied = collectConfigWrites(agent)
+    const runtime = await readyRuntime(agent)
+
+    const configuration = await runtime.updateConfiguration({
+      reasoningEffort: 'high',
+    })
+
+    expect(applied).toEqual([{ configId: 'thought_level', value: 'high' }])
+    // The agent's reply is what updates local state, not the requested value.
+    expect(configuration.reasoningEffort).toBe('high')
+    await runtime.dispose()
+  })
+
+  /**
+   * `auto` is the product's word for "let the agent decide"; the agent spells
+   * it with its own value id, which only the profile knows.
+   */
+  it('translates the product’s auto level to the profile-declared value', async () => {
+    const agent = new FakeAcpAgent()
+    const applied = collectConfigWrites(agent)
+    const runtime = await readyRuntime(agent)
+
+    await runtime.updateConfiguration({ reasoningEffort: 'high' })
+    await runtime.updateConfiguration({ reasoningEffort: 'auto' })
+
+    expect(applied.map((write) => write.value)).toEqual(['high', 'enabled'])
+    await runtime.dispose()
+  })
+
+  it('drops a level the agent never advertised instead of erroring', async () => {
+    const agent = new FakeAcpAgent()
+    const applied = collectConfigWrites(agent)
+    const runtime = await readyRuntime(agent)
+
+    await runtime.updateConfiguration({ reasoningEffort: 'xhigh' })
+
+    expect(applied).toEqual([])
+    await runtime.dispose()
+  })
+
+  it('sends nothing when the picked level is already current', async () => {
+    const agent = new FakeAcpAgent()
+    const applied = collectConfigWrites(agent)
+    const runtime = await readyRuntime(agent)
+
+    await runtime.updateConfiguration({ reasoningEffort: 'enabled' })
+
+    expect(applied).toEqual([])
+    await runtime.dispose()
+  })
+
+  it('reports no reasoning surface for an agent without config options', async () => {
+    const agent = new FakeAcpAgent()
+    agent.on('session/new', () => ({ sessionId: 'sess-1' }))
+    const applied = collectConfigWrites(agent)
+    const runtime = createRuntime(agent, autoAwareProfile)
+    await runtime.ensureReady({})
+
+    const configuration = await runtime.updateConfiguration({
+      reasoningEffort: 'high',
+    })
+
+    expect(applied).toEqual([])
+    expect(configuration.reasoningEffort).toBeNull()
+    await runtime.dispose()
   })
 })

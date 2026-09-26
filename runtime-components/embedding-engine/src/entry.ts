@@ -21,15 +21,6 @@ type EmbeddingEngineSpec = Readonly<{
   maxTokens: number
   dtype?: 'q8' | 'fp16'
 }>
-/**
- * The type stays a union for forward compatibility with the host's public
- * `EmbeddingEngineCreateSessionOptions.device` contract, but `createSession`
- * below only supports `'wasm'` in this release — a `'webgpu'` request is
- * rejected rather than silently downgraded, since this component doesn't
- * ship the JSEP/WebGPU wasm variant as a declared asset (see
- * `WASM_ASSET_NAMES` in `protocol.ts`). `dtype` is independent of device —
- * WebGPU support is what's planned to return in a future release.
- */
 type EmbeddingEngineDevice = 'wasm' | 'webgpu'
 type EmbeddingEngineEnvironmentProbe =
   | Readonly<{ ok: true; webgpu: boolean; threads: number }>
@@ -93,7 +84,21 @@ function probeEnvironment(): EmbeddingEngineEnvironmentProbe {
   return { ok: true, webgpu, threads }
 }
 
+/**
+ * Returns a standalone buffer suitable for the transfer list. When `bytes`
+ * already spans its whole buffer (the common case for model files read off
+ * disk) the buffer is reused as-is: slicing would momentarily hold a second
+ * full copy, which for a ~1 GB fp16 weight file is enough to exhaust the
+ * renderer heap.
+ */
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  if (
+    bytes.byteOffset === 0 &&
+    bytes.byteLength === bytes.buffer.byteLength &&
+    bytes.buffer instanceof ArrayBuffer
+  ) {
+    return bytes.buffer
+  }
   return bytes.buffer.slice(
     bytes.byteOffset,
     bytes.byteOffset + bytes.byteLength,
@@ -342,11 +347,6 @@ globalThis.__yolo_register_runtime_component__({
         }
 
         const requestedDevice: EmbeddingEngineDevice = options.device ?? 'wasm'
-        if (requestedDevice !== 'wasm') {
-          throw new Error(
-            `Embedding engine device "${requestedDevice}" is not supported in this release; only "wasm" is available (WebGPU support is planned for a future release)`,
-          )
-        }
 
         const abort = abortSignal(
           options.signal,

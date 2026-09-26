@@ -1,0 +1,227 @@
+/* --- creation bar ---------------------------------------------------------
+ * Obsidian Canvas's `.canvas-card-menu`: a raised pill of icon buttons pinned
+ * to the bottom centre of the viewport. Screen-space chrome like the selection
+ * toolbar, and in the same overlay so one `contains` check covers both. */
+
+.yolo-whiteboard-card-menu {
+  position: absolute;
+  left: 50%;
+  /* The safe area keeps it off a phone's home indicator, now the board runs
+   * to the bottom of the window (root.css); the lift clears Obsidian's
+   * status bar when it floats over this spot
+   * (ui/cardMenu.ts's `syncPlacement`). */
+  bottom: calc(
+    16px + var(--safe-area-inset-bottom, 0px) + var(--yolo-card-menu-lift, 0px)
+  );
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  width: fit-content;
+  line-height: 1;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 12%);
+  /* The overlay is pointer-transparent; its children take events back. The
+   * second translate is the horizontal centring, written here rather than with
+   * a margin so the whole placement is one composited transform. */
+  transform: translateX(-50%);
+  pointer-events: auto;
+  /* Coming back out of the handle (see the collapsed rule below for the way
+   * in): the grip stretches back into the bar's shell straight away, and the
+   * icons arrive once it has room for them. */
+  transform-origin: 50% 100%;
+  transition:
+    transform var(--yolo-anim-duration-enter, 220ms)
+      var(--yolo-anim-ease-out, ease-out),
+    opacity calc(var(--yolo-anim-duration-enter, 220ms) / 2)
+      var(--yolo-anim-ease-out, ease-out);
+}
+
+/*
+ * Tucked away (ui/cardMenu.ts's `setAutoCollapse`): the bar folds itself into
+ * the handle it leaves behind, so the handle reads as the bar put away rather
+ * than as a second control. The icons go first, from the ends inwards; then
+ * the empty shell narrows, flattens and sinks until it is exactly the grip's
+ * line — the scale and the drop are measured (`syncPlacement`) — and hands
+ * over to the grip in the last half of the fold. Handing over there also
+ * hides the one ugly moment of a non-uniform scale: a border and a corner
+ * radius squashed flat.
+ *
+ * A fold rather than a slide off the bottom edge, because the status bar may
+ * be sitting there. A keyboard that tabs onto a button brings it back.
+ */
+.yolo-whiteboard-card-menu.yolo-whiteboard-card-menu-collapsed:not(
+    :has(:focus-visible)
+  ) {
+  transform: translateX(-50%) translateY(var(--yolo-card-menu-drop, 0px))
+    scale(var(--yolo-card-menu-fold-x, 0.2), var(--yolo-card-menu-fold-y, 0.1));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--yolo-anim-duration-enter, 220ms)
+      var(--yolo-anim-ease-in, ease-in)
+      calc(var(--yolo-anim-duration-feedback, 120ms) / 2),
+    opacity calc(var(--yolo-anim-duration-enter, 220ms) / 2)
+      var(--yolo-anim-ease-in, ease-in)
+      calc(
+        var(--yolo-anim-duration-feedback, 120ms) / 2 +
+          var(--yolo-anim-duration-enter, 220ms) / 2
+      );
+}
+
+/* The icons' part of the fold. `--yolo-card-menu-rank` is a button's distance
+ * from the nearer end (0 at the ends), `--yolo-card-menu-ranks` the largest
+ * one (cardMenu.ts): out from the ends inwards, back from the middle outwards,
+ * each a quarter of a feedback beat after the last. */
+button.yolo-whiteboard-card-menu-button {
+  transition: opacity var(--yolo-anim-duration-feedback, 120ms)
+    var(--yolo-anim-ease-out, ease-out)
+    calc(
+      var(--yolo-anim-duration-enter, 220ms) / 2 +
+        (var(--yolo-card-menu-ranks, 0) - var(--yolo-card-menu-rank, 0)) *
+        var(--yolo-anim-duration-feedback, 120ms) / 4
+    );
+}
+
+.yolo-whiteboard-card-menu.yolo-whiteboard-card-menu-collapsed:not(
+    :has(:focus-visible)
+  )
+  button.yolo-whiteboard-card-menu-button {
+  opacity: 0;
+  transition: opacity var(--yolo-anim-duration-feedback, 120ms)
+    var(--yolo-anim-ease-in, ease-in)
+    calc(
+      var(--yolo-card-menu-rank, 0) * var(--yolo-anim-duration-feedback, 120ms) /
+        4
+    );
+}
+
+/* What a tucked-away bar leaves: a short grip line resting on the board's
+ * bottom edge — tucked *into* that edge, not hovering where the bar's own
+ * bottom was. The element is wider and taller than the line — it is where a
+ * pointer brings the bar back, and a 4px target is not one. */
+.yolo-whiteboard-card-menu-handle {
+  position: absolute;
+  left: 50%;
+  bottom: calc(
+    var(--safe-area-inset-bottom, 0px) + var(--yolo-card-menu-lift, 0px)
+  );
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 160px;
+  height: 24px;
+  padding-bottom: 6px;
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+  /* Gone the moment the bar starts back out of it. */
+  transition: opacity calc(var(--yolo-anim-duration-enter, 220ms) / 2)
+    var(--yolo-anim-ease-out, ease-out);
+}
+
+/* Takes over from the folding bar in the fold's last half — the same moment
+ * and the same length as the bar's own fade. */
+.yolo-whiteboard-card-menu-handle.yolo-whiteboard-card-menu-collapsed {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity calc(var(--yolo-anim-duration-enter, 220ms) / 2)
+    var(--yolo-anim-ease-in, ease-in)
+    calc(
+      var(--yolo-anim-duration-feedback, 120ms) / 2 +
+        var(--yolo-anim-duration-enter, 220ms) / 2
+    );
+}
+
+.yolo-whiteboard-card-menu-handle::before {
+  content: '';
+  /* cardMenu.ts's HANDLE_GRIP_HALF_WIDTH_PX is half of this, and
+   * GRIP_HEIGHT_PX / GRIP_INSET_PX its height and the padding under it. */
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background-color: var(--text-muted);
+  opacity: 0.45;
+  transition:
+    transform var(--yolo-anim-duration-feedback, 120ms)
+      var(--yolo-anim-ease-out, ease-out),
+    opacity var(--yolo-anim-duration-feedback, 120ms)
+      var(--yolo-anim-ease-out, ease-out);
+}
+
+/* A pointer on its way (cardMenu.ts's `onProximityMove`): the grip widens and
+ * darkens a little — "here" — before it is reached. It does not open the bar;
+ * only reaching the grip does. */
+.yolo-whiteboard-card-menu-handle.yolo-whiteboard-card-menu-handle-near::before {
+  transform: scale(1.5, 1.25);
+  opacity: 0.9;
+}
+
+/* Sized like Canvas's own `.canvas-card-menu-button`, not like the selection
+ * toolbar's: that row is transient chrome next to a selection, this one is
+ * permanent and is also the thing a card gets dragged off, so the icon is the
+ * grab target and wants to be one, not `clickable-icon`'s default.
+ *
+ * One step under Canvas's `--icon-xl`: 24px reads as a handle on a board this
+ * light without the 48px button pressing on it. Obsidian has no token at that
+ * size — `--icon-l` is 18 and `--icon-xl` is 32 — so the size and the stroke
+ * that goes with it are stated here, the stroke interpolated between the two
+ * (1.75 at 18, 1.25 at 32) so the weight still reads as one family. */
+button.yolo-whiteboard-card-menu-button {
+  padding: var(--size-4-2, 8px);
+  --icon-size: 24px;
+  --icon-stroke: 1.5px;
+  /* Every button is also a handle: a card can be dragged off it onto the
+   * board (ui/canvas/dragGestures.ts's beginCreate). */
+  cursor: grab;
+}
+
+button.yolo-whiteboard-card-menu-button:active {
+  cursor: grabbing;
+}
+
+/* The icon lifts on hover, which is how the bar says a button can be picked
+ * up at all — Canvas's own tell for the same gesture. Transform only, at the
+ * feedback duration; reduced motion is handled globally for yolo- classes. */
+.yolo-whiteboard-card-menu-button .svg-icon {
+  transition: transform var(--yolo-anim-duration-feedback, 120ms) ease-out;
+}
+
+@media (hover: hover) {
+  button.yolo-whiteboard-card-menu-button:hover .svg-icon {
+    transform: translateY(-3px);
+  }
+}
+
+/* The card a creation-bar drag is about to make: its outline, at its real
+ * size, in the world layer so it is stated in the same world coordinates the
+ * snapping thought in. An outline rather than a card, because it is not one
+ * yet — what it shows is where and how big, which is all that is known before
+ * the note or the URL has been chosen. */
+.yolo-whiteboard-create-ghost {
+  position: absolute;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--radius-m, 6px);
+  /* The wash is mixed into the fill rather than applied as `opacity` to the
+   * whole element: enough of a solid to read over the dot grid and not enough
+   * to hide a card it passes over, while the outline stays at full strength —
+   * where the edges land is the thing this is showing. */
+  background-color: color-mix(
+    in oklch,
+    var(--interactive-accent) 14%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* Hidden while the board cannot take a new card — zoomed out past the point
+ * where a card's content is built at all. `display: none` rather than a
+ * disabled state: a bar of four dead buttons is worse than no bar, and the
+ * reason it is gone (the whole board is a field of title blocks) is visible
+ * on the canvas itself. */
+.yolo-whiteboard-card-menu.yolo-whiteboard-card-menu-hidden,
+.yolo-whiteboard-card-menu-handle.yolo-whiteboard-card-menu-hidden {
+  display: none;
+}

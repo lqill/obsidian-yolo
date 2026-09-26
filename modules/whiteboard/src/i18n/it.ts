@@ -16,7 +16,10 @@ export const it = {
     newWhiteboard: 'Nuova lavagna YOLO',
     importCanvas: 'Importa come lavagna YOLO',
     newCard: 'Nuova scheda',
+    newText: 'Nuovo testo',
     convertToNote: 'Converti in nota',
+    convertToText: 'Converti in testo',
+    convertToCard: 'Converti in scheda',
     deleteCard: 'Elimina',
     deleteEdge: 'Elimina collegamento',
     arrowNone: 'Nessuna freccia',
@@ -37,8 +40,28 @@ export const it = {
     distributeHorizontal: 'Distribuisci orizzontalmente',
     distributeVertical: 'Distribuisci verticalmente',
     tidy: 'Riordina',
+    openReader: 'Apri nel lettore',
+    exportAnnotatedPdf: 'Esporta PDF con annotazioni',
+    openSpread: 'Distribuisci le pagine',
+    closeSpread: 'Riduci a lettore',
+  },
+  controls: {
+    zoomIn: 'Ingrandisci',
+    resetZoom: 'Reimposta zoom',
+    zoomToFit: 'Adatta alla vista',
+    zoomOut: 'Riduci',
+    undo: 'Annulla',
+    redo: 'Ripeti',
+  },
+  emptyBoard: {
+    title:
+      'Fai doppio clic in un punto vuoto per scrivere, o trascina una scheda dalla barra qui sotto',
+    desktopHint:
+      'Trascina qui note, immagini o PDF · Tieni premuto Spazio e trascina per spostarti',
+    touchHint: 'Trascina con un dito per spostarti · Pizzica per lo zoom',
   },
   cardMenu: {
+    addText: 'Aggiungi testo',
     newCard: 'Aggiungi scheda',
     addNote: 'Aggiungi nota',
     addMedia: 'Aggiungi file multimediale',
@@ -52,14 +75,17 @@ export const it = {
     urlPlaceholder: 'https://example.com',
     webDropHint: 'oppure trascina qui un file HTML',
     noMatches: 'Nessun file corrispondente.',
-    noMedia: 'Questo vault non contiene immagini, audio o video.',
+    createNote: 'Crea la nota "{name}"',
+    noMedia: 'Questo vault non contiene immagini, audio, video o PDF.',
   },
   toolbar: {
     color: 'Imposta colore',
-    edit: 'Modifica',
     tidy: 'Riordina',
     arrows: 'Frecce',
     edgeLabel: 'Etichetta',
+    openReader: 'Apri nel lettore',
+    openSpread: 'Distribuisci le pagine',
+    closeSpread: 'Riduci a lettore',
   },
   color: {
     default: 'Nessun colore',
@@ -77,7 +103,7 @@ export const it = {
   file: {
     newWhiteboardBaseName: 'Lavagna',
     newNoteBaseName: 'Senza titolo',
-    newHtmlBaseName: 'Pagina web',
+    importedBaseName: 'Senza titolo',
   },
   confirm: {
     importAllTitle: 'Importa i file Canvas',
@@ -88,14 +114,17 @@ export const it = {
   notice: {
     convertedToNote: 'Scheda salvata come {path}',
     dropUnsupported:
-      'Su una lavagna si possono trascinare solo note, immagini, audio, video e file HTML.',
+      'Su una lavagna si possono trascinare solo note, PDF, immagini, audio, video e file HTML.',
     imported: 'Importato come {path}',
     importedAll:
       'Importati {imported} file Canvas; {failed} non sono stati letti.',
     importNoneFound: 'Nessun file Canvas trovato in questo vault.',
     invalidUrl: 'Si possono aggiungere solo indirizzi http e https.',
+    exportNoAnnotations: 'Questo PDF non ha annotazioni da esportare.',
+    exportedAnnotatedPdf: 'Esportato con le annotazioni in {path}',
   },
   cardAi: {
+    hint: "Scrivi, oppure chiedi all'AI: ",
     instruction: {
       expand: 'Approfondisci',
       ideas: 'Idee',
@@ -120,12 +149,63 @@ export const it = {
     linkNotWebHint:
       'Si possono mostrare solo pagine http e https. Questa scheda punta a "{url}".',
   },
+  pdf: {
+    loading: 'Apertura del PDF…',
+    openFailed: 'Impossibile aprire questo PDF',
+    pageInput: 'Pagina',
+    pageTitle: '{name} · p. {page}',
+    sheetTitle: 'p. {page}',
+    search: 'Trova nel documento',
+    searchPlaceholder: 'Trova…',
+    searchPrevious: 'Precedente (Maiusc+Invio)',
+    searchNext: 'Successivo (Invio)',
+    searchClose: 'Chiudi ricerca (Esc)',
+    searchNoResults: 'Nessun risultato',
+    closePanel: 'Chiudi il lettore',
+    panelMenu: 'Altre opzioni',
+    areaMode: "Seleziona un'area",
+    linkAlias: '{name}, p.{page}',
+    excerpt: {
+      addedOutOfView: 'Estratto aggiunto accanto alla scheda PDF, fuori vista.',
+      failed: "Impossibile estrarre quest'area.",
+    },
+    annotate: {
+      highlight: 'Evidenzia',
+      colors: 'Colore evidenziazione',
+      color: {
+        yellow: 'Giallo',
+        green: 'Verde',
+        blue: 'Blu',
+        pink: 'Rosa',
+        purple: 'Viola',
+      },
+      frame: 'Annota area',
+      comment: 'Commento',
+      editComment: 'Modifica commento',
+      commentPlaceholder: 'Scrivi un commento…',
+      saveComment: 'Salva commento',
+      deleteComment: 'Elimina commento',
+      quoteToChat: 'Cita nella chat',
+      excerpt: 'Estrai sulla lavagna',
+      copyLink: 'Copia link',
+      linkCopied: 'Link copiato',
+      linkUnavailable:
+        'Questo testo non è più dove si trovava nella pagina, quindi non ha un link.',
+      delete: 'Elimina annotazione',
+      readOnly:
+        'Le annotazioni di questo PDF sono state salvate da una versione più recente e si possono solo visualizzare.',
+    },
+  },
   error: {
     title: 'Impossibile leggere questa lavagna',
     hint: 'Il file non è stato interpretato correttamente. Non è stato modificato: correggilo fuori dalla lavagna e riaprilo.',
     createFailed: 'Impossibile creare una nuova lavagna.',
     convertFailed: 'Impossibile convertire questa scheda in una nota.',
+    createNoteFailed: 'Impossibile creare la nota.',
     dropFailed: 'Impossibile aggiungere alla lavagna il file trascinato.',
+    pasteFailed: 'Impossibile aggiungere alla lavagna il file incollato.',
     importFailed: 'Impossibile importare questo file Canvas.',
+    exportAnnotatedPdfFailed:
+      'Impossibile esportare il PDF con le annotazioni. Potrebbe essere protetto o danneggiato.',
   },
 }

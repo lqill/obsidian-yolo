@@ -3,9 +3,10 @@ import {
   cardNoteContent,
   fileNodeKind,
   folderPathOf,
+  generateAnnotatedPdfFileName,
   generateBoardFileName,
   generateCardNoteFileName,
-  generateDroppedHtmlFileName,
+  importedFileName,
   isCanvasPath,
   isMarkdownPath,
 } from './naming'
@@ -30,8 +31,12 @@ describe('fileNodeKind', () => {
     expect(fileNodeKind('Board/legacy.HTM')).toBe('html')
   })
 
-  it('leaves everything else unsupported, PDF included (its card is M2)', () => {
-    expect(fileNodeKind('papers/foo.pdf')).toBe('unsupported')
+  it('reads a PDF as its own kind, whatever the case of its extension', () => {
+    expect(fileNodeKind('papers/foo.pdf')).toBe('pdf')
+    expect(fileNodeKind('papers/SCAN.PDF')).toBe('pdf')
+  })
+
+  it('leaves everything else unsupported', () => {
     expect(fileNodeKind('data/table.csv')).toBe('unsupported')
     expect(fileNodeKind('Assets/README')).toBe('unsupported')
     expect(fileNodeKind('.gitignore')).toBe('unsupported')
@@ -186,35 +191,31 @@ describe('generateCardNoteFileName', () => {
   })
 })
 
-describe('generateDroppedHtmlFileName', () => {
-  it('keeps the name the document arrived with', () => {
+describe('generateAnnotatedPdfFileName', () => {
+  it('names the copy beside the original, never over a taken name', () => {
+    expect(generateAnnotatedPdfFileName('Paper', new Set(['Paper.pdf']))).toBe(
+      'Paper (annotated).pdf',
+    )
     expect(
-      generateDroppedHtmlFileName('Quarterly report.html', '网页', new Set()),
-    ).toBe('Quarterly report.html')
+      generateAnnotatedPdfFileName(
+        '论文',
+        new Set(['论文.pdf', '论文 (annotated).pdf']),
+      ),
+    ).toBe('论文 (annotated) 1.pdf')
   })
+})
 
-  it('normalizes .htm to .html — one spelling in the vault', () => {
-    expect(generateDroppedHtmlFileName('legacy.HTM', '网页', new Set())).toBe(
-      'legacy.html',
+describe('importedFileName', () => {
+  it('keeps the name the file arrived with', () => {
+    expect(importedFileName('Quarterly report.pdf', '未命名')).toBe(
+      'Quarterly report.pdf',
     )
   })
 
   it('sanitizes a name the vault could not hold, and falls back when nothing survives', () => {
-    expect(
-      generateDroppedHtmlFileName('Q3: "final"?.html', '网页', new Set()),
-    ).toBe('Q3 final.html')
-    expect(generateDroppedHtmlFileName('<>.html', '网页', new Set())).toBe(
-      '网页.html',
+    expect(importedFileName('Q3: "final"?.html', '未命名')).toBe(
+      'Q3 final.html',
     )
-  })
-
-  it('shares the whiteboard conflict rule', () => {
-    expect(
-      generateDroppedHtmlFileName(
-        'report.html',
-        '网页',
-        new Set(['report.html', 'report 1.html']),
-      ),
-    ).toBe('report 2.html')
+    expect(importedFileName('<>.png', '未命名')).toBe('未命名.png')
   })
 })
