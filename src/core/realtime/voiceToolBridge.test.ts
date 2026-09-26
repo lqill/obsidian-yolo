@@ -3,6 +3,7 @@ import {
   type ToolCallRequest,
   ToolCallResponseStatus,
 } from '../../types/tool-call.types'
+import { AgentToolGateway } from '../agent/tool-gateway'
 import {
   LOAD_TOOL_SCHEMAS_LOCAL_TOOL_NAME,
   getLocalFileToolServerName,
@@ -10,11 +11,11 @@ import {
 import { INVOKE_TOOL_NAME } from '../tools/internal/invoke_tool/definition'
 import { getToolNamesForCapability } from '../tools/registry'
 
-import {
-  type VoiceToolGatewayLike,
-  buildVoiceToolBridge,
-} from './voiceToolBridge'
+import { buildVoiceToolBridge } from './voiceToolBridge'
 
+// The bridge builds a real gateway; these tests observe the options it was
+// built with, and drive what it returns.
+jest.mock('../agent/tool-gateway', () => ({ AgentToolGateway: jest.fn() }))
 // The skill-path lookup reads the vault through `app`, which these tests do not
 // have; what matters here is that its result reaches the gateway.
 jest.mock('../agent/agent-api', () => ({
@@ -25,6 +26,21 @@ jest.mock('../agent/agent-api', () => ({
 const localServer = getLocalFileToolServerName()
 const invokeFqn = `${localServer}__${INVOKE_TOOL_NAME}`
 const loadFqn = `${localServer}__${LOAD_TOOL_SCHEMAS_LOCAL_TOOL_NAME}`
+
+type FakeGateway = {
+  createToolMessage: jest.Mock
+  executeAutoToolCalls: jest.Mock
+}
+
+const gatewayConstructor = AgentToolGateway as unknown as jest.Mock
+
+const installGateway = (gateway: FakeGateway): void => {
+  gatewayConstructor.mockImplementation(() => gateway)
+}
+
+/** The options the bridge handed the gateway it constructed. */
+const gatewayOptions = (): Record<string, unknown> =>
+  gatewayConstructor.mock.calls.at(-1)?.[1]
 
 const fsReadTool = {
   name: `${localServer}__fs_read`,
@@ -87,50 +103,61 @@ const makeMcpManager = () =>
 
 const makeGateway = (
   initialResponses: Record<string, any> = {},
-): VoiceToolGatewayLike =>
-  ({
-    createToolMessage: jest.fn(
-      ({ toolCallRequests }: { toolCallRequests: ToolCallRequest[] }) => ({
-        role: 'tool',
-        id: 'tm1',
-        toolCalls: toolCallRequests.map((request) => ({
-          request,
-          response: initialResponses[request.name] ?? {
-            status: ToolCallResponseStatus.Running,
-          },
-        })),
-      }),
-    ),
-    executeAutoToolCalls: jest.fn(async ({ toolMessage }: any) => ({
-      ...toolMessage,
-      toolCalls: toolMessage.toolCalls.map(({ request, response }: any) => ({
+): FakeGateway => ({
+  createToolMessage: jest.fn(
+    ({ toolCallRequests }: { toolCallRequests: ToolCallRequest[] }) => ({
+      role: 'tool',
+      id: 'tm1',
+      toolCalls: toolCallRequests.map((request) => ({
         request,
-        response:
-          response.status === ToolCallResponseStatus.Running
-            ? {
-                status: ToolCallResponseStatus.Success,
-                data: { type: 'text', text: `ok:${request.name}` },
-              }
-            : response,
+        response: initialResponses[request.name] ?? {
+          status: ToolCallResponseStatus.Running,
+        },
       })),
+    }),
+  ),
+  executeAutoToolCalls: jest.fn(async ({ toolMessage }: any) => ({
+    ...toolMessage,
+    toolCalls: toolMessage.toolCalls.map(({ request, response }: any) => ({
+      request,
+      response:
+        response.status === ToolCallResponseStatus.Running
+          ? {
+              status: ToolCallResponseStatus.Success,
+              data: { type: 'text', text: `ok:${request.name}` },
+            }
+          : response,
     })),
-  }) as unknown as VoiceToolGatewayLike
+  })),
+})
+
+/**
+ * No assistant unless a test needs one: the skill-path lookup then
+ * short-circuits and the `app` stub is never touched.
+ */
+const buildBridge = (
+  overrides: {
+    mcpManager?: unknown
+    chatModeRuntime?: unknown
+    settings?: unknown
+    assistant?: unknown
+  } = {},
+) =>
+  buildVoiceToolBridge({
+    mcpManager: (overrides.mcpManager ?? makeMcpManager()) as never,
+    conversationId: 'c1',
+    app: {} as never,
+    assistant: (overrides.assistant ?? null) as never,
+    chatModeRuntime: (overrides.chatModeRuntime ?? makeRuntime()) as never,
+    settings: (overrides.settings ?? makeSettings()) as never,
+  })
 
 describe('buildVoiceToolBridge', () => {
+  beforeEach(() => gatewayConstructor.mockReset())
+
   it('advertises enabled tools under model names, drops protocol wrappers, and sanitizes schemas', async () => {
-    const mcpManager = makeMcpManager()
-    const gateway = makeGateway()
-    const bridge = await buildVoiceToolBridge({
-      mcpManager,
-      conversationId: 'c1',
-      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
-      // never touched.
-      app: {} as any,
-      assistant: null,
-      chatModeRuntime: makeRuntime(),
-      settings: makeSettings(),
-      createGateway: () => gateway,
-    })
+    installGateway(makeGateway())
+    const bridge = await buildBridge()
 
     const names = bridge.declarations.map((declaration) => declaration.name)
     expect(names).toEqual(['fs_read', 'srv__search'])
@@ -145,25 +172,14 @@ describe('buildVoiceToolBridge', () => {
   })
 
   it('executes calls through the gateway and maps results back to model names', async () => {
-    const mcpManager = makeMcpManager()
     const gateway = makeGateway()
-    const bridge = await buildVoiceToolBridge({
-      mcpManager,
-      conversationId: 'c1',
-      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
-      // never touched.
-      app: {} as any,
-      assistant: null,
-      chatModeRuntime: makeRuntime(),
-      settings: makeSettings(),
-      createGateway: () => gateway,
-    })
+    installGateway(gateway)
+    const bridge = await buildBridge()
 
     const responses = await bridge.handleFunctionCalls([
       { id: 'call1', name: 'fs_read', args: { path: 'a.md' } },
     ])
 
-    // eslint-disable-next-line @typescript-eslint/unbound-method -- jest mock on a plain fake object; it is never invoked detached from `gateway`
     expect(gateway.createToolMessage).toHaveBeenCalledWith({
       toolCallRequests: [
         {
@@ -188,55 +204,35 @@ describe('buildVoiceToolBridge', () => {
   })
 
   it('rejects calls that would require interactive approval', async () => {
-    const mcpManager = makeMcpManager()
     const gateway = makeGateway({
       [`${localServer}__fs_read`]: {
         status: ToolCallResponseStatus.PendingApproval,
       },
     })
-    const bridge = await buildVoiceToolBridge({
-      mcpManager,
-      conversationId: 'c1',
-      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
-      // never touched.
-      app: {} as any,
-      assistant: null,
-      chatModeRuntime: makeRuntime(),
-      settings: makeSettings(),
-      createGateway: () => gateway,
-    })
+    installGateway(gateway)
+    const bridge = await buildBridge()
 
     const responses = await bridge.handleFunctionCalls([
       { id: 'call1', name: 'fs_read', args: {} },
     ])
 
     expect(String(responses[0].response.error)).toMatch(/approval/i)
-    const passedMessage = (gateway.executeAutoToolCalls as jest.Mock).mock
-      .calls[0][0].toolMessage
+    const passedMessage =
+      gateway.executeAutoToolCalls.mock.calls[0][0].toolMessage
     expect(passedMessage.toolCalls[0].response.status).toBe(
       ToolCallResponseStatus.Rejected,
     )
   })
 
   it('returns a response for every incoming call when the gateway merges entries', async () => {
-    const mcpManager = makeMcpManager()
     const gateway = makeGateway()
-    ;(gateway.executeAutoToolCalls as jest.Mock).mockResolvedValueOnce({
+    gateway.executeAutoToolCalls.mockResolvedValueOnce({
       role: 'tool',
       id: 'tm1',
       toolCalls: [],
     })
-    const bridge = await buildVoiceToolBridge({
-      mcpManager,
-      conversationId: 'c1',
-      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
-      // never touched.
-      app: {} as any,
-      assistant: null,
-      chatModeRuntime: makeRuntime(),
-      settings: makeSettings(),
-      createGateway: () => gateway,
-    })
+    installGateway(gateway)
+    const bridge = await buildBridge()
 
     const responses = await bridge.handleFunctionCalls([
       { id: 'call1', name: 'fs_read', args: {} },
@@ -250,19 +246,8 @@ describe('buildVoiceToolBridge', () => {
   })
 
   it('answers each call with its own result even when two calls share an id', async () => {
-    const mcpManager = makeMcpManager()
-    const gateway = makeGateway()
-    const bridge = await buildVoiceToolBridge({
-      mcpManager,
-      conversationId: 'c1',
-      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
-      // never touched.
-      app: {} as any,
-      assistant: null,
-      chatModeRuntime: makeRuntime(),
-      settings: makeSettings(),
-      createGateway: () => gateway,
-    })
+    installGateway(makeGateway())
+    const bridge = await buildBridge()
 
     const responses = await bridge.handleFunctionCalls([
       { id: 'dup', name: 'fs_read', args: {} },
@@ -283,54 +268,18 @@ describe('buildVoiceToolBridge', () => {
     ])
   })
 
-  it('forces server disclosure to always so on-demand MCP tools are directly callable', async () => {
-    const mcpManager = makeMcpManager()
-    const gateway = makeGateway()
-    const createGateway = jest.fn(() => gateway)
-    await buildVoiceToolBridge({
-      mcpManager,
-      conversationId: 'c1',
-      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
-      // never touched.
-      app: {} as any,
-      assistant: null,
-      chatModeRuntime: makeRuntime(),
-      settings: makeSettings(),
-      createGateway,
-    })
-
-    expect(createGateway).toHaveBeenCalledWith(
-      mcpManager,
-      expect.objectContaining({
-        toolServerPreferences: { srv: { disclosureMode: 'always' } },
-      }),
-    )
-  })
-
-  it('preserves an existing server approvalMode while forcing always disclosure', async () => {
-    const mcpManager = makeMcpManager()
-    const gateway = makeGateway()
-    const createGateway = jest.fn(() => gateway)
-    await buildVoiceToolBridge({
-      mcpManager,
-      conversationId: 'c1',
-      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
-      // never touched.
-      app: {} as any,
-      assistant: null,
+  it('tells the gateway every schema went out, and passes preferences through unchanged', async () => {
+    installGateway(makeGateway())
+    await buildBridge({
       chatModeRuntime: makeRuntime({
         toolServerPreferences: { srv: { approvalMode: 'full_access' } },
       }),
-      settings: makeSettings(),
-      createGateway,
     })
 
-    expect(createGateway).toHaveBeenCalledWith(
-      mcpManager,
+    expect(gatewayOptions()).toEqual(
       expect.objectContaining({
-        toolServerPreferences: {
-          srv: { approvalMode: 'full_access', disclosureMode: 'always' },
-        },
+        advertisesAllToolSchemas: true,
+        toolServerPreferences: { srv: { approvalMode: 'full_access' } },
       }),
     )
   })
@@ -338,7 +287,7 @@ describe('buildVoiceToolBridge', () => {
   it('drops conversation-dependent built-ins from the declarations', async () => {
     const excludedFqn = getToolNamesForCapability('context_compaction')[0]
     const mcpManager = makeMcpManager()
-    ;(mcpManager.listAvailableTools as jest.Mock).mockResolvedValue([
+    mcpManager.listAvailableTools.mockResolvedValue([
       fsReadTool,
       {
         name: excludedFqn,
@@ -346,18 +295,12 @@ describe('buildVoiceToolBridge', () => {
         inputSchema: { type: 'object' },
       },
     ])
-    const bridge = await buildVoiceToolBridge({
+    installGateway(makeGateway())
+    const bridge = await buildBridge({
       mcpManager,
-      conversationId: 'c1',
-      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
-      // never touched.
-      app: {} as any,
-      assistant: null,
       chatModeRuntime: makeRuntime({
         allowedToolNames: [fsReadTool.name, excludedFqn],
       }),
-      settings: makeSettings(),
-      createGateway: () => makeGateway(),
     })
 
     expect(bridge.declarations.map((declaration) => declaration.name)).toEqual([
@@ -365,52 +308,13 @@ describe('buildVoiceToolBridge', () => {
     ])
   })
 
-  it('promotes configured-but-offline servers as well as connected ones', async () => {
-    const mcpManager = makeMcpManager()
-    const gateway = makeGateway()
-    const createGateway = jest.fn(() => gateway)
-    await buildVoiceToolBridge({
-      mcpManager,
-      conversationId: 'c1',
-      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
-      // never touched.
-      app: {} as any,
-      assistant: null,
-      chatModeRuntime: makeRuntime(),
-      settings: {
-        ...makeSettings(),
-        mcp: {
-          servers: [{ id: 'offline' }],
-          discoveredCatalogs: {},
-          builtinCapabilityOptions: {},
-        },
-      },
-      createGateway,
-    })
-
-    expect(createGateway).toHaveBeenCalledWith(
-      mcpManager,
-      expect.objectContaining({
-        toolServerPreferences: expect.objectContaining({
-          srv: { disclosureMode: 'always' },
-          offline: { disclosureMode: 'always' },
-        }),
-      }),
-    )
-  })
-
   it('hands the gateway the same boundary the text agent runs under', async () => {
-    const mcpManager = makeMcpManager()
-    const createGateway = jest.fn(() => makeGateway())
-    await buildVoiceToolBridge({
-      mcpManager,
-      conversationId: 'c1',
-      app: {} as any,
+    installGateway(makeGateway())
+    await buildBridge({
       assistant: {
         id: 'a1',
         workspaceScope: { enabled: true, include: ['ref/'], exclude: [] },
-      } as any,
-      chatModeRuntime: makeRuntime(),
+      },
       settings: {
         ...makeSettings(),
         mcp: {
@@ -421,11 +325,9 @@ describe('buildVoiceToolBridge', () => {
           },
         },
       },
-      createGateway,
     })
 
-    expect(createGateway).toHaveBeenCalledWith(
-      mcpManager,
+    expect(gatewayOptions()).toEqual(
       expect.objectContaining({
         workspaceScope: { enabled: true, include: ['ref/'], exclude: [] },
         allowedSkillPaths: ['Skills/pkg/SKILL.md'],
@@ -435,23 +337,16 @@ describe('buildVoiceToolBridge', () => {
   })
 
   it('drops the assistant boundary in a module chat mode', async () => {
-    const mcpManager = makeMcpManager()
-    const createGateway = jest.fn(() => makeGateway())
-    await buildVoiceToolBridge({
-      mcpManager,
-      conversationId: 'c1',
-      app: {} as any,
+    installGateway(makeGateway())
+    await buildBridge({
       assistant: {
         id: 'a1',
         workspaceScope: { enabled: true, include: ['ref/'], exclude: [] },
-      } as any,
+      },
       chatModeRuntime: makeRuntime({ moduleChatModeId: 'mod:mode' }),
-      settings: makeSettings(),
-      createGateway,
     })
 
-    expect(createGateway).toHaveBeenCalledWith(
-      mcpManager,
+    expect(gatewayOptions()).toEqual(
       expect.objectContaining({
         workspaceScope: undefined,
         allowedSkillPaths: [],
@@ -460,22 +355,16 @@ describe('buildVoiceToolBridge', () => {
   })
 
   it('is inert when voice tools are disabled', async () => {
+    installGateway(makeGateway())
     const mcpManager = makeMcpManager()
-    const gateway = makeGateway()
-    const bridge = await buildVoiceToolBridge({
+    const bridge = await buildBridge({
       mcpManager,
-      conversationId: 'c1',
-      // No assistant ⇒ the skill-path lookup short-circuits, so the app stub is
-      // never touched.
-      app: {} as any,
-      assistant: null,
-      chatModeRuntime: makeRuntime(),
       settings: makeSettings(false),
-      createGateway: () => gateway,
     })
 
     expect(bridge.declarations).toEqual([])
     expect(await bridge.handleFunctionCalls([{ name: 'fs_read' }])).toEqual([])
     expect(mcpManager.listAvailableTools).not.toHaveBeenCalled()
+    expect(gatewayConstructor).not.toHaveBeenCalled()
   })
 })

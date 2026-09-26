@@ -1149,19 +1149,29 @@ export function useChatStreamManager({
         ) || null
       : null
     const mcpManager = await getMcpManager()
-    const { buildVoiceToolBridgeFromChat } = await import(
+    const { buildVoiceToolBridge } = await import(
       '../../core/realtime/voiceToolBridge'
     )
-    return buildVoiceToolBridgeFromChat({
+    return buildVoiceToolBridge({
       mcpManager,
       conversationId: currentConversationId,
+      // Same resolution as the run path above, so a voice session inherits
+      // exactly the tool grant the current mode and assistant describe.
+      chatModeRuntime: resolveChatModeRuntime({
+        mode: chatMode,
+        yoloEnabled,
+        app,
+        assistant: selectedAssistant,
+        assistantEnabledToolNames: getEnabledAssistantToolNames(
+          selectedAssistant,
+          moduleToolSetEnablement,
+        ),
+        moduleChatMode: resolveModuleChatMode(),
+      }),
       settings,
-      chatMode,
-      yoloEnabled,
       app,
-      selectedAssistant,
-      moduleToolSets: moduleToolSetSnapshot,
-      moduleChatMode: resolveModuleChatMode(),
+      assistant: selectedAssistant,
+      apiType: 'gemini',
     })
   }, [
     app,
@@ -1169,7 +1179,7 @@ export function useChatStreamManager({
     chatMode,
     currentConversationId,
     getMcpManager,
-    moduleToolSetSnapshot,
+    moduleToolSetEnablement,
     resolveModuleChatMode,
     settings,
     yoloEnabled,

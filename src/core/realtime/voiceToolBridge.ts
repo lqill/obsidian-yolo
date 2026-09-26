@@ -2,11 +2,8 @@
 import type { App } from 'obsidian'
 
 import type { YoloSettings } from '../../settings/schema/setting.types'
-import type {
-  Assistant,
-  AssistantToolServerPreference,
-} from '../../types/assistant.types'
-import type { ChatMessage, ChatToolMessage } from '../../types/chat'
+import type { Assistant } from '../../types/assistant.types'
+import type { ChatToolMessage } from '../../types/chat'
 import type { RequestTool } from '../../types/llm/request'
 import type { LLMProviderApiType } from '../../types/provider.types'
 import {
@@ -16,17 +13,12 @@ import {
   createCompleteToolCallArguments,
 } from '../../types/tool-call.types'
 import { resolveAllowedSkillPaths } from '../agent/agent-api'
-import type { ChatMode } from '../agent/chat-mode'
 import {
   resolveBlockedCommandPrefixes,
   resolveWorkspaceScopeForRuntimeInput,
 } from '../agent/chat-runtime-inputs'
-import {
-  type ChatModeRuntime,
-  resolveChatModeRuntime,
-} from '../agent/chat-runtime-profiles'
+import type { ChatModeRuntime } from '../agent/chat-runtime-profiles'
 import { AgentToolGateway } from '../agent/tool-gateway'
-import { getEnabledAssistantToolNames } from '../agent/tool-preferences'
 import {
   buildRequestTools,
   isInvokeToolName,
@@ -34,17 +26,8 @@ import {
   selectAllowedTools,
 } from '../agent/tool-selection'
 import { GeminiProvider } from '../llm/gemini'
-import {
-  fromModelToolName,
-  getLocalFileToolServerName,
-} from '../mcp/localFileTools'
+import { fromModelToolName } from '../mcp/localFileTools'
 import type { McpManager } from '../mcp/mcpManager'
-import { parseToolName } from '../mcp/tool-name-utils'
-import type { RegisteredModuleChatModeV1 } from '../modules/moduleChatModeRegistry'
-import {
-  type RegisteredModuleToolSetV1,
-  toModuleToolSetEnablement,
-} from '../modules/moduleToolSetRegistry'
 import { getToolNamesForCapability } from '../tools/registry'
 
 import type {
@@ -52,23 +35,6 @@ import type {
   GeminiLiveFunctionDeclaration,
   GeminiLiveFunctionResponse,
 } from './geminiLiveProtocol'
-
-type AgentToolGatewayOptions = NonNullable<
-  ConstructorParameters<typeof AgentToolGateway>[1]
->
-
-export type VoiceToolGatewayLike = {
-  createToolMessage(input: {
-    toolCallRequests: ToolCallRequest[]
-    conversationId: string
-  }): ChatToolMessage
-  executeAutoToolCalls(input: {
-    toolMessage: ChatToolMessage
-    conversationId: string
-    conversationMessages?: ChatMessage[]
-    signal?: AbortSignal
-  }): Promise<ChatToolMessage>
-}
 
 export type VoiceToolBridge = {
   declarations: GeminiLiveFunctionDeclaration[]
@@ -81,39 +47,19 @@ export type VoiceToolBridge = {
 export type BuildVoiceToolBridgeOptions = {
   mcpManager: McpManager
   conversationId: string
+  /** The current mode's runtime, resolved by the caller (`resolveChatModeRuntime`). */
   chatModeRuntime: ChatModeRuntime
   settings: YoloSettings
   /** Needed for the skill-path boundary; the assistant owns the allowed set. */
   app: App
   assistant: Assistant | null
   apiType?: LLMProviderApiType | null
-  createGateway?: (
-    mcpManager: McpManager,
-    options: AgentToolGatewayOptions,
-  ) => VoiceToolGatewayLike
-}
-
-export type BuildVoiceToolBridgeFromChatOptions = {
-  mcpManager: McpManager
-  conversationId: string
-  settings: YoloSettings
-  chatMode: ChatMode
-  yoloEnabled: boolean
-  app: App
-  selectedAssistant: Assistant | null
-  moduleToolSets: readonly RegisteredModuleToolSetV1[]
-  moduleChatMode?: RegisteredModuleChatModeV1
 }
 
 const INERT_BRIDGE: VoiceToolBridge = {
   declarations: [],
   handleFunctionCalls: async () => [],
 }
-
-const defaultCreateGateway = (
-  mcpManager: McpManager,
-  options: AgentToolGatewayOptions,
-): VoiceToolGatewayLike => new AgentToolGateway(mcpManager, options)
 
 const toToolResponsePayload = (
   response: ToolCallResponse,
@@ -162,36 +108,6 @@ export async function buildVoiceToolBridge(
     capabilityOverrides: chatModeRuntime.capabilityOverrides,
   })
 
-  // Voice advertises every enabled tool directly, so promote each server from
-  // the text agent's default `on_demand` tier to `always`. The gateway reads the
-  // same map, otherwise `isOnDemandToolName` would still classify these as
-  // on-demand and reject the direct call as "schema not loaded". Configured
-  // (possibly offline) servers matter too: an offline server still contributes a
-  // deferred catalog entry, so promote from `settings.mcp.servers` as well.
-  const serverIds = new Set<string>()
-  for (const tool of availableTools) {
-    try {
-      serverIds.add(parseToolName(tool.name).serverName)
-    } catch {
-      // Names without a server prefix are never on-demand.
-    }
-  }
-  for (const server of settings.mcp.servers ?? []) {
-    if (server.id) serverIds.add(server.id)
-  }
-  serverIds.delete(getLocalFileToolServerName())
-
-  const voiceToolServerPreferences: Record<
-    string,
-    AssistantToolServerPreference
-  > = { ...(chatModeRuntime.toolServerPreferences ?? {}) }
-  for (const serverId of serverIds) {
-    voiceToolServerPreferences[serverId] = {
-      ...voiceToolServerPreferences[serverId],
-      disclosureMode: 'always',
-    }
-  }
-
   // These built-ins operate on the chat transcript or on a UI voice does not
   // have; `handleFunctionCalls` passes `conversationMessages: []`.
   const voiceExcludedToolNames = new Set(
@@ -204,7 +120,7 @@ export async function buildVoiceToolBridge(
     availableTools,
     allowedToolNames: chatModeRuntime.allowedToolNames,
     toolPreferences: chatModeRuntime.toolPreferences,
-    toolServerPreferences: voiceToolServerPreferences,
+    toolServerPreferences: chatModeRuntime.toolServerPreferences,
     model: { builtinToolProvider: undefined, builtinTools: undefined },
     apiType,
     jsSandboxSettings: mcpManager.getJsSandboxSettings(),
@@ -233,13 +149,12 @@ export async function buildVoiceToolBridge(
         assistant: options.assistant,
       })
 
-  const createGateway = options.createGateway ?? defaultCreateGateway
-  const gateway = createGateway(mcpManager, {
+  const gateway = new AgentToolGateway(mcpManager, {
     toolsEnabled: true,
     allowedToolNames: chatModeRuntime.allowedToolNames,
     toolPreferences: chatModeRuntime.toolPreferences,
     builtinCapabilityPreferences: chatModeRuntime.builtinCapabilityPreferences,
-    toolServerPreferences: voiceToolServerPreferences,
+    toolServerPreferences: chatModeRuntime.toolServerPreferences,
     apiType,
     bypassToolApproval: chatModeRuntime.bypassToolApproval,
     bashReadOnly: chatModeRuntime.bashReadOnly,
@@ -252,6 +167,9 @@ export async function buildVoiceToolBridge(
       : resolveWorkspaceScopeForRuntimeInput(options.assistant),
     allowedSkillPaths,
     blockedCommandPrefixes: resolveBlockedCommandPrefixes(settings),
+    // Every schema went out in the setup frame, so no call is behind
+    // `load_tool_schemas`; the gateway must not classify one as deferred.
+    advertisesAllToolSchemas: true,
   })
 
   let callCounter = 0
@@ -323,29 +241,4 @@ export async function buildVoiceToolBridge(
   }
 
   return { declarations, handleFunctionCalls }
-}
-
-export async function buildVoiceToolBridgeFromChat(
-  options: BuildVoiceToolBridgeFromChatOptions,
-): Promise<VoiceToolBridge> {
-  const chatModeRuntime = resolveChatModeRuntime({
-    mode: options.chatMode,
-    yoloEnabled: options.yoloEnabled,
-    app: options.app,
-    assistant: options.selectedAssistant,
-    assistantEnabledToolNames: getEnabledAssistantToolNames(
-      options.selectedAssistant,
-      toModuleToolSetEnablement(options.moduleToolSets),
-    ),
-    moduleChatMode: options.moduleChatMode,
-  })
-  return buildVoiceToolBridge({
-    mcpManager: options.mcpManager,
-    conversationId: options.conversationId,
-    chatModeRuntime,
-    settings: options.settings,
-    app: options.app,
-    assistant: options.selectedAssistant,
-    apiType: 'gemini',
-  })
 }

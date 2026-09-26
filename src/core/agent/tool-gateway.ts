@@ -308,6 +308,7 @@ export class AgentToolGateway {
    * long-standing terminal behavior unchanged.
    */
   private readonly vaultPathBoundary?: NativePathBoundary
+  private readonly advertisesAllToolSchemas: boolean
   private readonly ajv: AjvInstance
   private readonly schemaValidatorCache = new Map<
     string,
@@ -334,6 +335,13 @@ export class AgentToolGateway {
       moduleToolApprovalPolicies?: ReadonlyMap<string, boolean>
       capabilityOverrides?: ChatModeCapabilityOverrides
       vaultPathBoundary?: NativePathBoundary
+      /**
+       * The surface advertises every enabled tool's schema up front, so nothing
+       * is reachable only through `load_tool_schemas`. Deferred disclosure is
+       * the chat request's own protocol; a surface without a tool catalog (a
+       * realtime session) classifies every call as directly callable instead.
+       */
+      advertisesAllToolSchemas?: boolean
     },
   ) {
     this.toolsEnabled = options?.toolsEnabled ?? true
@@ -358,6 +366,7 @@ export class AgentToolGateway {
     this.moduleToolApprovalPolicies = options?.moduleToolApprovalPolicies
     this.capabilityOverrides = options?.capabilityOverrides
     this.vaultPathBoundary = options?.vaultPathBoundary
+    this.advertisesAllToolSchemas = options?.advertisesAllToolSchemas ?? false
     // `strict: false` keeps ajv tolerant of MCP tool schemas that include
     // vendor-specific keywords or non-canonical types. `allErrors` lists every
     // violation in the error message so the model has enough signal to retry;
@@ -367,6 +376,9 @@ export class AgentToolGateway {
   }
 
   private async isOnDemandToolName(toolName: string): Promise<boolean> {
+    if (this.advertisesAllToolSchemas) {
+      return false
+    }
     if (isLoadToolSchemasToolName(toolName)) {
       return false
     }
