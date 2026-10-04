@@ -125,9 +125,9 @@ jest.mock('./ChatQuickAccess', () => ({
 
 import type { ChatUserMessage } from '../../../types/chat'
 
-import ChatUserInput, { type ChatUserInputProps } from './ChatUserInput'
+import ChatUserInput from './ChatUserInput'
 
-const baseProps: Omit<ChatUserInputProps, 'mentionables'> = {
+const baseProps = {
   initialSerializedEditorState: null,
   onChange: jest.fn(),
   onSubmit: jest.fn(),
@@ -141,14 +141,6 @@ const baseProps: Omit<ChatUserInputProps, 'mentionables'> = {
   showReasoningSelect: false,
   skipImageModelCapabilityCheck: true,
 }
-
-export const createChatUserInputProps = (
-  overrides: Partial<ChatUserInputProps> = {},
-): ChatUserInputProps => ({
-  ...baseProps,
-  mentionables: [],
-  ...overrides,
-})
 
 describe('ChatUserInput CLI capabilities', () => {
   it('hides YOLO controls and model mentions while retaining references, skills, and attachments', () => {

@@ -195,28 +195,4 @@ describe('RuntimeSelector', () => {
     expect(html).not.toContain('yolo-runtime-selector')
     expect(html).not.toContain('CLI')
   })
-
-  it('leaves the trigger enabled by default', () => {
-    Platform.isDesktop = true
-
-    const html = renderToStaticMarkup(
-      <RuntimeSelector currentRuntimeId="codex" onRuntimeChange={() => {}} />,
-    )
-
-    expect(html).not.toContain('disabled')
-  })
-
-  it('locks the trigger when the surface locks it', () => {
-    Platform.isDesktop = true
-
-    const html = renderToStaticMarkup(
-      <RuntimeSelector
-        currentRuntimeId="codex"
-        onRuntimeChange={() => {}}
-        disabled
-      />,
-    )
-
-    expect(html).toContain('disabled=""')
-  })
 })

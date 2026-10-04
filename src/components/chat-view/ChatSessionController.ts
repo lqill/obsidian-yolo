@@ -202,6 +202,7 @@ export type ChatSessionAbortResult =
 
 export type ChatSessionCompactResult =
   | { kind: 'blocked_waiting_approval' }
+  | { kind: 'blocked_live_surface' }
   | { kind: 'blocked_active' }
   | { kind: 'empty' }
   | { kind: 'compacted' }
@@ -1718,9 +1719,9 @@ export class ChatSessionController {
       AgentConversationRunSummary,
       'isActive' | 'isWaitingApproval'
     >
-  }): Promise<ChatSessionCompactResult | null> {
+  }): Promise<ChatSessionCompactResult> {
     if (this.deps.getRealtimeSurface?.() ?? null) {
-      return null
+      return { kind: 'blocked_live_surface' }
     }
     if (input.currentConversationRunSummary.isWaitingApproval) {
       return { kind: 'blocked_waiting_approval' }

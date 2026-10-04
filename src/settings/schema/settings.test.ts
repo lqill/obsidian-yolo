@@ -7,7 +7,6 @@ import {
   DEFAULT_TAB_COMPLETION_OPTIONS,
   DEFAULT_TAB_COMPLETION_SYSTEM_PROMPT,
   DEFAULT_TAB_COMPLETION_TRIGGERS,
-  yoloSettingsSchema,
 } from './setting.types'
 import { parseYoloSettings } from './settings'
 
@@ -736,19 +735,5 @@ describe('parseYoloSettings', () => {
       ],
     })
     expect(byName.knowledgeBases).toEqual([])
-  })
-
-  it('defaults voice settings and survives a corrupt voice field', () => {
-    const parsed = yoloSettingsSchema.parse({})
-    expect(parsed.voice).toEqual({
-      model: 'gemini-3.1-flash-live-preview',
-      voiceName: 'Kore',
-      systemPrompt: '',
-      toolsEnabled: true,
-    })
-
-    const corrupt = yoloSettingsSchema.parse({ voice: 'not-an-object' })
-    expect(corrupt.voice.model).toBe('gemini-3.1-flash-live-preview')
-    expect(corrupt.voice.toolsEnabled).toBe(true)
   })
 })

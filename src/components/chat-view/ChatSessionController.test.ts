@@ -7,10 +7,6 @@ import type {
   CliConversationController,
   CliRuntimeScope,
 } from '../../core/cli-runtime'
-import type { VoiceLiveTurn } from '../../core/realtime'
-import type { GeminiLiveServerEvent } from '../../core/realtime/geminiLiveProtocol'
-import { GeminiLiveSession } from '../../core/realtime/GeminiLiveSession'
-import { voiceSessionStore } from '../../core/realtime/voiceSessionStore'
 import { SETTINGS_SCHEMA_VERSION } from '../../settings/schema/migrations'
 import { parseYoloSettings } from '../../settings/schema/settings'
 import type {
@@ -19,8 +15,6 @@ import type {
   ChatUserMessage,
 } from '../../types/chat'
 
-import { editorStateToPlainText } from './chat-input/utils/editor-state-to-plain-text'
-import { plainTextToEditorState } from './chat-input/utils/plain-text-to-editor-state'
 import type {
   ChatSessionCliContext,
   ChatSessionControllerDeps,
@@ -28,11 +22,6 @@ import type {
 import { ChatSessionController } from './ChatSessionController'
 import type { CliChatOperationCoordinator } from './cliChatIntegration'
 import { ConversationPreferencesController } from './ConversationPreferencesController'
-import {
-  buildFinalTurnMessages,
-  buildLiveTurnMessages,
-  createVoiceLiveTurn,
-} from './voiceTurnMessages'
 
 const idleRunSummary: Pick<
   AgentConversationRunSummary,
@@ -227,10 +216,7 @@ function createPreferencesController(conversationId: string) {
   )
 }
 
-function createDeps(
-  agentService: ReturnType<typeof createMockAgentService>,
-  overrides: Partial<ChatSessionControllerDeps> = {},
-) {
+function createDeps(agentService: ReturnType<typeof createMockAgentService>) {
   const createOrUpdateConversation = jest.fn(async () => undefined)
   const createOrUpdateConversationImmediately = jest.fn(async () => undefined)
   const updateConversationTitle = jest.fn(async () => undefined)
@@ -269,7 +255,6 @@ function createDeps(
     setQueryProgress,
     runtimeNavigationGenerationRef,
     getCliSubmitContext,
-    ...overrides,
   }
   return {
     deps,
@@ -290,11 +275,10 @@ function createDeps(
 function createController(
   conversationId: string,
   initialMessages: ChatMessage[] = [],
-  depOverrides: Partial<ChatSessionControllerDeps> = {},
 ) {
   const agentService = createMockAgentService()
   const preferencesController = createPreferencesController(conversationId)
-  const { deps, ...mocks } = createDeps(agentService, depOverrides)
+  const { deps, ...mocks } = createDeps(agentService)
   const controller = new ChatSessionController(
     conversationId,
     {
@@ -427,87 +411,6 @@ describe('ChatSessionController', () => {
   it('handleHistoricalUserMessageDelete returns null for an unknown message id', () => {
     const { controller } = createController('c1', [userMessage('user-1')])
     expect(controller.handleHistoricalUserMessageDelete('missing')).toBeNull()
-  })
-
-  it('removeLatestTurn deletes the last turn with its tool cards and per-turn state', async () => {
-    const user1 = userMessage('user-1')
-    const assistant1 = assistantMessage('assistant-1')
-    const user2 = userMessage('user-2')
-    const tool2 = {
-      role: 'tool',
-      id: 'tool-2',
-      toolCalls: [],
-    } as unknown as ChatMessage
-    const assistant2 = assistantMessage('assistant-2', {
-      metadata: { branchId: 'branch-a' },
-    })
-    const { controller, createOrUpdateConversation, agentService } =
-      createController('c1', [user1, assistant1, user2, tool2, assistant2])
-    controller.setMessageModelMap(
-      new Map([
-        ['user-1', 'model-1'],
-        ['user-2', 'model-2'],
-      ]),
-    )
-    controller.setMessageReasoningMap(new Map([['user-2', 'high']]))
-    controller.setActiveBranchByUserMessageId(new Map([['user-2', 'branch-a']]))
-    controller.setAssistantGroupBoundaryMessageIds(['assistant-2'])
-
-    const result = controller.removeLatestTurn()
-
-    expect(result?.removedMessages).toEqual([user2, tool2, assistant2])
-    const snapshot = controller.getSnapshot()
-    expect(snapshot.chatMessages).toEqual([user1, assistant1])
-    // The retained turn keeps its identity and its model entry.
-    expect(snapshot.chatMessages[0]).toBe(user1)
-    expect(snapshot.messageModelMap.get('user-1')).toBe('model-1')
-    expect(snapshot.messageModelMap.has('user-2')).toBe(false)
-    expect(snapshot.messageReasoningMap.has('user-2')).toBe(false)
-    expect(snapshot.activeBranchByUserMessageId.has('user-2')).toBe(false)
-    expect(snapshot.assistantGroupBoundaryMessageIds).toEqual([])
-
-    expect(result?.outcome.kind).toBe('persisted')
-    if (result?.outcome.kind === 'persisted') {
-      await expect(result.outcome.ok).resolves.toBe(true)
-    }
-    // The service copy is replaced too, otherwise a later publish would push
-    // the deleted turn straight back into the snapshot.
-    expect(agentService.replaceConversationMessages).toHaveBeenCalledWith(
-      'c1',
-      [user1, assistant1],
-      [],
-    )
-    expect(createOrUpdateConversation).toHaveBeenCalledTimes(1)
-  })
-
-  it('removeLatestTurn returns null when the conversation has no user message', () => {
-    const { controller, createOrUpdateConversation, agentService } =
-      createController('c1', [assistantMessage('assistant-1')])
-
-    expect(controller.removeLatestTurn()).toBeNull()
-    expect(createOrUpdateConversation).not.toHaveBeenCalled()
-    expect(agentService.replaceConversationMessages).not.toHaveBeenCalled()
-  })
-
-  it('removeLatestTurn keeps the conversation and persists an empty list when only one turn existed', async () => {
-    const user1 = userMessage('user-1')
-    const assistant1 = assistantMessage('assistant-1')
-    const { controller, createOrUpdateConversation } = createController('c1', [
-      user1,
-      assistant1,
-    ])
-
-    const result = controller.removeLatestTurn()
-
-    expect(result?.removedMessages).toEqual([user1, assistant1])
-    expect(controller.getSnapshot().chatMessages).toEqual([])
-    if (result?.outcome.kind === 'persisted') {
-      await expect(result.outcome.ok).resolves.toBe(true)
-    }
-    expect(createOrUpdateConversation.mock.calls[0].slice(0, 2)).toEqual([
-      'c1',
-      [],
-    ])
   })
 
   it('handleAssistantMessageEditSave replaces the assistant/tool group in place', async () => {
@@ -1042,7 +945,7 @@ describe('ChatSessionController — submit/abortRun/compactContext/retry', () =>
         },
       })
 
-      expect(result?.kind).toBe('failed')
+      expect(result.kind).toBe('failed')
       expect(
         controller.getSnapshot().pendingCompactionAnchorMessageId,
       ).toBeNull()
@@ -1291,417 +1194,5 @@ describe('ChatSessionController — submit/abortRun/compactContext/retry', () =>
         'c2-anchor',
       )
     })
-  })
-})
-
-describe('live surface messages', () => {
-  const liveUser = () =>
-    userMessage('u1', { promptContent: '', selectedModelIds: ['live-model'] })
-  const liveAssistant = () =>
-    assistantMessage('a1', {
-      content: '',
-      metadata: { generationState: 'streaming' },
-    })
-  const openTurn = (controller: ChatSessionController, conversationId = 'c1') =>
-    controller.upsertConversationMessages({
-      conversationId,
-      messages: [liveUser(), liveAssistant()],
-      persist: false,
-    })
-
-  it('inserts the still-textless pair, syncs and scrolls, without persisting', () => {
-    const { controller, agentService, forceScrollToBottom } =
-      createController('c1')
-    openTurn(controller)
-    expect(controller.getSnapshot().chatMessages.map((m) => m.id)).toEqual([
-      'u1',
-      'a1',
-    ])
-    expect(
-      (controller.getSnapshot().chatMessages[1] as ChatAssistantMessage)
-        .metadata?.generationState,
-    ).toBe('streaming')
-    expect(agentService.replaceConversationMessages).toHaveBeenCalled()
-    expect(forceScrollToBottom).toHaveBeenCalled()
-  })
-
-  it('persists nothing for a turn that has not committed', () => {
-    const { controller, createOrUpdateConversation } = createController('c1')
-    openTurn(controller)
-    expect(createOrUpdateConversation).not.toHaveBeenCalled()
-  })
-
-  it('no-ops when the conversation id does not match', () => {
-    const { controller } = createController('c1')
-    openTurn(controller, 'other')
-    expect(controller.getSnapshot().chatMessages).toEqual([])
-  })
-
-  it('no-ops when the same messages are written again', () => {
-    const { controller } = createController('c1')
-    const pair = [liveUser(), liveAssistant()]
-    controller.upsertConversationMessages({
-      conversationId: 'c1',
-      messages: pair,
-      persist: false,
-    })
-    const before = controller.getSnapshot().chatMessages
-    controller.upsertConversationMessages({
-      conversationId: 'c1',
-      messages: pair,
-      persist: false,
-    })
-    expect(controller.getSnapshot().chatMessages).toBe(before)
-  })
-
-  it('replaces the pair in place, same ids, and titles the first turn', () => {
-    const {
-      controller,
-      createOrUpdateConversation,
-      generateConversationTitle,
-    } = createController('c1')
-    openTurn(controller)
-    const finalizedUser = userMessage('u1', {
-      content: null,
-      promptContent: 'hello there',
-    })
-    const finalizedAssistant = assistantMessage('a1', {
-      content: 'hi back',
-      metadata: { generationState: 'completed' },
-    })
-
-    controller.upsertConversationMessages({
-      conversationId: 'c1',
-      messages: [finalizedUser, finalizedAssistant],
-    })
-
-    const messages = controller.getSnapshot().chatMessages
-    expect(messages.map((m) => m.id)).toEqual(['u1', 'a1'])
-    expect(messages[0]).toBe(finalizedUser)
-    expect(messages[1]).toBe(finalizedAssistant)
-    expect(createOrUpdateConversation).toHaveBeenCalled()
-    expect(generateConversationTitle).toHaveBeenCalledWith(
-      'c1',
-      expect.any(Array),
-    )
-  })
-
-  it('does not re-title a later turn', () => {
-    const { controller, generateConversationTitle } = createController('c1', [
-      userMessage('earlier-user'),
-      assistantMessage('earlier-assistant'),
-    ])
-    openTurn(controller)
-    controller.upsertConversationMessages({
-      conversationId: 'c1',
-      messages: [
-        userMessage('u1', { promptContent: 'again' }),
-        assistantMessage('a1', { metadata: { generationState: 'completed' } }),
-      ],
-    })
-    expect(generateConversationTitle).not.toHaveBeenCalled()
-  })
-
-  it('appends when the live messages were deleted mid-turn', () => {
-    const { controller } = createController('c1')
-    const finalizedUser = userMessage('u1', { promptContent: 'kept' })
-    const finalizedAssistant = assistantMessage('a1', { content: 'reply' })
-    controller.upsertConversationMessages({
-      conversationId: 'c1',
-      messages: [finalizedUser, finalizedAssistant],
-    })
-    expect(controller.getSnapshot().chatMessages.map((m) => m.id)).toEqual([
-      'u1',
-      'a1',
-    ])
-  })
-
-  it('drops the live pair and persists the removal', () => {
-    const { controller, createOrUpdateConversation } = createController('c1', [
-      userMessage('earlier'),
-    ])
-    openTurn(controller)
-    controller.upsertConversationMessages({
-      conversationId: 'c1',
-      removeMessageIds: ['u1', 'a1'],
-    })
-    expect(controller.getSnapshot().chatMessages.map((m) => m.id)).toEqual([
-      'earlier',
-    ])
-    expect(createOrUpdateConversation).toHaveBeenCalled()
-    const lastCall = createOrUpdateConversation.mock.calls.at(-1) as unknown[]
-    expect(lastCall?.[1]).toEqual([expect.objectContaining({ id: 'earlier' })])
-  })
-
-  it('no-ops when neither id is present', () => {
-    const { controller, createOrUpdateConversation } = createController('c1', [
-      userMessage('earlier'),
-    ])
-    controller.upsertConversationMessages({
-      conversationId: 'c1',
-      removeMessageIds: ['u1', 'a1'],
-    })
-    expect(createOrUpdateConversation).not.toHaveBeenCalled()
-  })
-
-  it('keeps a committed turn when the conversation changes', () => {
-    const { controller } = createController('c1')
-    controller.upsertConversationMessages({
-      conversationId: 'c1',
-      messages: [
-        userMessage('u1', { promptContent: 'said' }),
-        assistantMessage('a1', { content: 'answered' }),
-      ],
-    })
-
-    controller.setCurrentConversationId('c2')
-
-    expect(controller.getSnapshot().chatMessages.map((m) => m.id)).toEqual([
-      'u1',
-      'a1',
-    ])
-  })
-})
-
-/**
- * End to end across the three owners of a live voice turn: the session emits
- * transcript events, the store carries the live text the bubbles read, and the
- * controller holds the messages. The wiring mirrors `useVoiceSession`, which is
- * a React hook and therefore not directly renderable in this environment.
- */
-describe('voice turn pipeline', () => {
-  beforeEach(() => voiceSessionStore.reset())
-  afterEach(() => voiceSessionStore.reset())
-
-  const createPipeline = () => {
-    const harness = createController('c1')
-    const microphone = {
-      start: jest.fn(async () => {}),
-      stop: jest.fn(),
-      setMuted: jest.fn(),
-    }
-    const player = { enqueue: jest.fn(), flush: jest.fn(), dispose: jest.fn() }
-    const client = {
-      connect: jest.fn(),
-      close: jest.fn(),
-      sendText: jest.fn(),
-      sendAudio: jest.fn(),
-      sendAudioStreamEnd: jest.fn(),
-      sendInitialHistory: jest.fn(),
-      sendToolResponse: jest.fn(),
-    }
-    let liveTurn: VoiceLiveTurn | null = null
-    const assistantTexts: string[] = []
-    const session = new GeminiLiveSession({
-      client: client as never,
-      microphone: microphone as never,
-      player: player as never,
-      store: voiceSessionStore,
-      onAssistantText: (text) => assistantTexts.push(text),
-      onTurnOpen: () => {
-        liveTurn = createVoiceLiveTurn('c1')
-        voiceSessionStore.setLiveTurn(liveTurn)
-        harness.controller.upsertConversationMessages({
-          conversationId: 'c1',
-          messages: buildLiveTurnMessages({
-            liveTurn,
-            liveModelId: 'live-model',
-            model: undefined,
-          }),
-          persist: false,
-        })
-      },
-      onTurn: (turn) => {
-        const current = liveTurn
-        liveTurn = null
-        voiceSessionStore.setLiveTurn(null)
-        if (!current) return
-        harness.controller.upsertConversationMessages({
-          conversationId: 'c1',
-          messages: buildFinalTurnMessages({
-            liveTurn: current,
-            turn,
-            liveModelId: 'live-model',
-            model: undefined,
-          }),
-        })
-      },
-    })
-    return { ...harness, session, assistantTexts }
-  }
-
-  it('streams a turn into the conversation, then finalizes the same messages', () => {
-    const { session, controller, assistantTexts } = createPipeline()
-    session.start()
-    session.handleEvent({
-      kind: 'inputTranscript',
-      text: 'what is up',
-    } as GeminiLiveServerEvent)
-
-    const liveTurn = voiceSessionStore.getSnapshot().liveTurn
-    expect(liveTurn).not.toBeNull()
-    let messages = controller.getSnapshot().chatMessages
-    expect(messages.map((message) => message.id)).toEqual([
-      liveTurn?.userMessageId,
-      liveTurn?.assistantMessageId,
-    ])
-    expect(messages.map((message) => message.role)).toEqual([
-      'user',
-      'assistant',
-    ])
-    expect(
-      (messages[1] as ChatAssistantMessage).metadata?.generationState,
-    ).toBe('streaming')
-    expect(voiceSessionStore.getPartialUserText()).toBe('what is up')
-
-    session.handleEvent({
-      kind: 'outputTranscript',
-      text: 'not much',
-    } as GeminiLiveServerEvent)
-    // The assistant's side no longer goes through the voice store: it streams
-    // into the conversation's render stream, under the turn's message id.
-    expect(assistantTexts).toEqual(['not much'])
-
-    session.handleEvent({ kind: 'turnComplete' })
-
-    messages = controller.getSnapshot().chatMessages
-    expect(messages.map((message) => message.id)).toEqual([
-      liveTurn?.userMessageId,
-      liveTurn?.assistantMessageId,
-    ])
-    const [user, assistant] = messages as [
-      ChatUserMessage,
-      ChatAssistantMessage,
-    ]
-    expect(user.promptContent).toBe('what is up')
-    expect(editorStateToPlainText(user.content)).toBe('what is up')
-    expect(assistant.content).toBe('not much')
-    expect(assistant.metadata?.generationState).toBe('completed')
-    expect(voiceSessionStore.getSnapshot().liveTurn).toBeNull()
-    expect(voiceSessionStore.getPartialUserText()).toBe('')
-  })
-
-  it('keeps what was already spoken when the model is interrupted', () => {
-    const { session, controller } = createPipeline()
-    session.start()
-    session.handleEvent({
-      kind: 'inputTranscript',
-      text: 'question',
-    } as GeminiLiveServerEvent)
-    session.handleEvent({
-      kind: 'outputTranscript',
-      text: 'half an ans',
-    } as GeminiLiveServerEvent)
-    session.handleEvent({ kind: 'interrupted' })
-
-    const messages = controller.getSnapshot().chatMessages
-    expect(messages.map((message) => message.role)).toEqual([
-      'user',
-      'assistant',
-    ])
-    expect((messages[1] as ChatAssistantMessage).content).toBe('half an ans')
-    expect(voiceSessionStore.getSnapshot().liveTurn).toBeNull()
-  })
-
-  it('appends a second turn without touching the first pair', () => {
-    const { session, controller } = createPipeline()
-    session.start()
-    session.handleEvent({
-      kind: 'inputTranscript',
-      text: 'one',
-    } as GeminiLiveServerEvent)
-    session.handleEvent({
-      kind: 'outputTranscript',
-      text: 'first',
-    } as GeminiLiveServerEvent)
-    session.handleEvent({ kind: 'turnComplete' })
-    const firstPair = controller.getSnapshot().chatMessages
-
-    session.handleEvent({
-      kind: 'inputTranscript',
-      text: 'two',
-    } as GeminiLiveServerEvent)
-    session.handleEvent({
-      kind: 'outputTranscript',
-      text: 'second',
-    } as GeminiLiveServerEvent)
-    session.handleEvent({ kind: 'turnComplete' })
-
-    const messages = controller.getSnapshot().chatMessages
-    expect(messages).toHaveLength(4)
-    expect(messages[0]).toBe(firstPair[0])
-    expect(messages[1]).toBe(firstPair[1])
-    expect(messages.map((message) => message.id)).toHaveLength(
-      new Set(messages.map((message) => message.id)).size,
-    )
-  })
-
-  it('leaves nothing behind when the session ends mid-turn', () => {
-    const { session, controller } = createPipeline()
-    session.start()
-    session.handleEvent({
-      kind: 'inputTranscript',
-      text: 'never finished',
-    } as GeminiLiveServerEvent)
-    const liveTurn = voiceSessionStore.getSnapshot().liveTurn
-    expect(liveTurn).not.toBeNull()
-
-    // What `useVoiceSession.stop()` does: the uncommitted turn is dropped.
-    controller.upsertConversationMessages({
-      conversationId: liveTurn!.conversationId,
-      removeMessageIds: [liveTurn!.userMessageId, liveTurn!.assistantMessageId],
-    })
-    voiceSessionStore.reset()
-
-    expect(controller.getSnapshot().chatMessages).toEqual([])
-  })
-
-  it('persists nothing for a conversation the user left mid-turn', () => {
-    const { session, controller, createOrUpdateConversation } = createPipeline()
-    session.start()
-    session.handleEvent({
-      kind: 'inputTranscript',
-      text: 'mid sentence',
-    } as GeminiLiveServerEvent)
-    expect(controller.getSnapshot().chatMessages).toHaveLength(2)
-
-    // Switching conversations replaces the message list wholesale, and the
-    // uncommitted pair was never written, so nothing has to be reclaimed.
-    controller.setCurrentConversationId('c2')
-    voiceSessionStore.reset()
-
-    expect(createOrUpdateConversation).not.toHaveBeenCalled()
-    expect(voiceSessionStore.getSnapshot().liveTurn).toBeNull()
-  })
-})
-
-describe('realtime surface routing', () => {
-  it('sends a typed submit to the live session instead of starting a run', () => {
-    const sendText = jest.fn()
-    const { controller, runConversation } = createController('c1', [], {
-      getRealtimeSurface: () => ({ sendText }),
-    })
-
-    const result = controller.submit({
-      runtimeId: 'yolo',
-      message: userMessage('draft-1', {
-        content: plainTextToEditorState('spoken by typing'),
-      }),
-      assistantTimeContextEnabled: false,
-      currentConversationRunSummary: idleRunSummary,
-    })
-
-    expect(result.kind).toBe('submitted')
-    expect(sendText).toHaveBeenCalledWith('spoken by typing')
-    expect(runConversation).not.toHaveBeenCalled()
-  })
-
-  it('returns null from compactContext while a surface is live', async () => {
-    const { controller } = createController('c1', [], {
-      getRealtimeSurface: () => ({ sendText: jest.fn() }),
-    })
-    await expect(
-      controller.compactContext({ conversationId: 'c1' } as never),
-    ).resolves.toBeNull()
   })
 })

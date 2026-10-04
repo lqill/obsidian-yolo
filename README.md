@@ -135,7 +135,6 @@ flowchart TB
 
 **Legend** — green: added by this fork · yellow: edited upstream · grey: upstream code, reused as is ·
 uncoloured: Google's Live API and the network between it and the plugin.
-Test files are not shown; they add another ~2,200 lines.
 
 ### Adds
 
@@ -148,8 +147,7 @@ Test files are not shown; they add another ~2,200 lines.
 | Added: `settings.voice` schema, Voice settings section, i18n (25 keys × 3 locales), stylesheet | 479 |
 | Added: docs | 18 |
 | **Non-test total** | **2,875** |
-| Tests (unit + integration, not shown above) | 2,198 |
-| **Added vs upstream** | **5,073** (68 lines deleted) |
+| **Added vs upstream** | **2,875** (68 lines deleted) |
 
 ### Changes upstream
 

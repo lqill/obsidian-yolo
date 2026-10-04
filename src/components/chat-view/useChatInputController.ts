@@ -1408,7 +1408,6 @@ export function useChatInputController({
             currentConversationRunSummary: late.currentConversationRunSummary,
           })
           .then((result) => {
-            if (!result) return
             switch (result.kind) {
               case 'blocked_waiting_approval':
                 new Notice(
