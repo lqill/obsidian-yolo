@@ -12,6 +12,7 @@ export const it: DeepPartial<TranslationKeys> = {
     openChatHistory: 'Apri cronologia chat',
     exportCurrentConversationToVault:
       'Esporta la conversazione attuale nel vault',
+    undoLatestTurn: 'Annulla ultimo turno',
     addSelectionToChat: 'Aggiungi selezione alla chat',
     addFileToChat: 'Aggiungi file alla chat',
     addFolderToChat: 'Aggiungi cartella alla chat',
@@ -1803,6 +1804,7 @@ export const it: DeepPartial<TranslationKeys> = {
     insertUnavailable: 'Nessun editor markdown attivo trovato',
     noAssistantContent: 'Nessun contenuto assistente da inserire',
     regenerate: 'Rigenera',
+    undoLatestTurn: 'Annulla ultimo turno',
     reasoning: 'Ragionamento',
     reasonedFor: 'Ha ragionato per {{seconds}} s',
     annotations: 'Annotazioni',

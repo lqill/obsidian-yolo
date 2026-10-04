@@ -1,5 +1,5 @@
 import { SerializedEditorState } from 'lexical'
-import { FilePlus2, Mic, MicOff } from 'lucide-react'
+import { FilePlus2, Mic, MicOff, Undo2 } from 'lucide-react'
 import { Notice, Platform } from 'obsidian'
 import {
   type CSSProperties,
@@ -165,6 +165,14 @@ export type ChatUserInputProps = {
   onToggleVoice?: () => void
   onToggleVoiceMute?: () => void
   onEndVoice?: () => void
+  /**
+   * Deletes the latest turn (the last user message and everything after it).
+   * Hides the button when omitted — CLI runtimes own their own transcript and
+   * pass nothing.
+   */
+  onUndoLatestTurn?: () => void
+  /** True when the conversation has no turn to undo. */
+  isUndoLatestTurnDisabled?: boolean
 }
 
 const DEFAULT_INPUT_HEIGHT = 80
@@ -232,6 +240,8 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
       onToggleVoice,
       onToggleVoiceMute,
       onEndVoice,
+      onUndoLatestTurn,
+      isUndoLatestTurnDisabled = false,
     },
     ref,
   ) => {
@@ -752,6 +762,19 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
       />
     )
 
+    const renderUndoControl = () =>
+      onUndoLatestTurn ? (
+        <button
+          type="button"
+          className="yolo-chat-user-input-undo-button"
+          aria-label={t('chat.undoLatestTurn', 'Undo last turn')}
+          onClick={onUndoLatestTurn}
+          disabled={isUndoLatestTurnDisabled}
+        >
+          <Undo2 size={16} />
+        </button>
+      ) : null
+
     const renderVoiceControl = () =>
       onToggleVoice && Platform.isDesktop ? (
         <button
@@ -976,6 +999,7 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
               </div>
               <div className="yolo-chat-user-input-controls__right">
                 {renderContextUsageControl()}
+                {renderUndoControl()}
                 {renderSubmitControl()}
               </div>
             </div>
@@ -990,6 +1014,7 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
               {renderVoiceControl()}
               <div className="yolo-chat-user-input-send-row__right">
                 {renderContextUsageControl()}
+                {renderUndoControl()}
                 {renderSubmitControl()}
               </div>
             </div>

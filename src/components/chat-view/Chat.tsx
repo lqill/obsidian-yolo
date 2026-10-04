@@ -201,6 +201,17 @@ export type ChatRef = {
   focusMessage: () => void
   focusMainInput: () => void
   submitMainInput: () => void
+  /**
+   * Deletes the latest turn (last user message and everything after it). Backs
+   * the "Undo last turn" command's `checkCallback` partner below; the composer
+   * button calls the same action directly.
+   */
+  undoLatestTurn: () => void
+  /**
+   * Whether the active runtime has a turn that can be undone. False on CLI
+   * runtimes, whose transcript lives inside the external process.
+   */
+  canUndoLatestTurn: () => boolean
   getCurrentConversationOverrides: () =>
     | ConversationOverrideSettings
     | undefined
@@ -683,6 +694,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
         ? voiceToolBridgeFactoryRef.current(conversationPort)
         : Promise.resolve(null),
   })
+  const { restart: restartVoiceSession } = voiceSession
   const handleToggleVoice = useCallback(() => {
     if (realtimeSurfaceRef.current) {
       voiceSession.stop()
@@ -1305,6 +1317,7 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     handleAssistantMessageEditCancel,
     handleAssistantMessageGroupDelete,
     handleHistoricalUserMessageDelete,
+    handleUndoLatestTurn: removeLatestTurn,
     handleAssistantMessageGroupBranch,
   } = useYoloChatSession({
     sessionController,
@@ -1380,6 +1393,24 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     transitionCliSession,
     createFreshCliConversation,
   })
+
+  /**
+   * The one undo entry point for both the composer button and the command. It
+   * owns only the two things `useYoloChatSession` cannot: refusing on a CLI
+   * runtime (whose transcript lives in the external process) and reconnecting a
+   * live voice session — the live model cannot retract a turn mid-session, so
+   * the cleaned transcript only becomes its history again after a reconnect.
+   */
+  const handleUndoLatestTurn = useCallback(() => {
+    if (isCliRuntime(activeRuntimeId)) return
+    if (!removeLatestTurn()) return
+    if (realtimeVoice.isActive) restartVoiceSession()
+  }, [
+    activeRuntimeId,
+    realtimeVoice.isActive,
+    removeLatestTurn,
+    restartVoiceSession,
+  ])
 
   const {
     handleRecoverPendingToolCall,
@@ -1640,6 +1671,12 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
     focusMessage,
     focusMainInput,
     submitMainInput,
+    undoLatestTurn: () => {
+      handleUndoLatestTurn()
+    },
+    canUndoLatestTurn: () =>
+      !isCliRuntime(activeRuntimeId) &&
+      chatMessages.some((message) => message.role === 'user'),
     getCurrentConversationOverrides: () => {
       if (conversationOverrides) {
         return conversationOverrides
@@ -2031,6 +2068,10 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
           realtimeVoiceSupported ? handleToggleVoiceMute : undefined
         }
         onEndVoice={realtimeVoiceSupported ? voiceSession.stop : undefined}
+        onUndoLatestTurn={isCliRuntimeActive ? undefined : handleUndoLatestTurn}
+        isUndoLatestTurnDisabled={
+          !chatMessages.some((message) => message.role === 'user')
+        }
         runtimeControls={
           isCliRuntimeActive ? (
             <CliRuntimeControls

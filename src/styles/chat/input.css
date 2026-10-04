@@ -3951,6 +3951,51 @@ button.yolo-update-toast-tab.is-active {
   flex: 1 1 auto;
 }
 
+/* 撤销最后一轮：与提交按钮同排的次级图标按钮——保持和提交按钮一致的圆形
+ * 轮廓与尺寸，但不带主操作色。选择器带 `button` 前缀，理由同下方 submit
+ * 圆形按钮（对抗 Obsidian `app.css` 的全局 button box-shadow 与 svg 尺寸）。 */
+button.yolo-chat-user-input-undo-button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  box-shadow: none;
+  outline: 0;
+  line-height: 0;
+  transition:
+    background-color var(--yolo-anim-duration-feedback) ease,
+    color var(--yolo-anim-duration-feedback) ease,
+    opacity var(--yolo-anim-duration-feedback) ease;
+}
+
+button.yolo-chat-user-input-undo-button svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+button.yolo-chat-user-input-undo-button:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+button.yolo-chat-user-input-undo-button:disabled {
+  color: var(--text-faint);
+  cursor: default;
+  opacity: 0.6;
+}
+
 /* 圆形发送/停止按钮（ChatGPT/Claude 风格）。
  *
  * 选择器写成 `button.yolo-chat-user-input-submit-button-circle`，是为了对抗

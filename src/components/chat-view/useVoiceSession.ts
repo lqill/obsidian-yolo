@@ -270,6 +270,22 @@ export const useVoiceSession = ({
     endRealtimeVoiceSession()
   }, [assistantStream, sessionController])
 
+  /**
+   * Reconnects the live session in place. The server keeps its own turn history
+   * for the life of a session and offers no way to retract a turn, so after the
+   * user undoes one the only way to make the model forget it is a new session
+   * whose `initialHistory` is rebuilt from the cleaned transcript.
+   */
+  const restart = useCallback(() => {
+    // A start still in flight builds its history from the transcript only after
+    // its awaits, so it already picks up the post-undo state — nothing to
+    // reconnect. An established session is the one whose server-side history
+    // has to be rebuilt.
+    if (!pinnedConversationRef.current || !runtimeRef.current) return
+    stop()
+    void start()
+  }, [start, stop])
+
   useEffect(() => {
     const pinned = pinnedConversationRef.current
     if (pinned && pinned !== conversationId) stop()
@@ -284,5 +300,5 @@ export const useVoiceSession = ({
     [],
   )
 
-  return { start, stop, sendText, setMuted }
+  return { start, stop, restart, sendText, setMuted }
 }

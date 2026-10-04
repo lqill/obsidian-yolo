@@ -1421,6 +1421,24 @@ export class ChatSessionController {
   }
 
   /**
+   * Deletes the latest turn: the last user message and every message after it
+   * (all branch groups and tool cards included). That is exactly the span
+   * `handleHistoricalUserMessageDelete` removes for a given user message, so
+   * this delegates instead of restating the turn-boundary logic. Returns `null`
+   * when the conversation has no user message to undo.
+   */
+  removeLatestTurn = (): {
+    removedMessages: ChatMessage[]
+    outcome: ChatSessionPersistOutcome
+  } | null => {
+    const lastUserMessage = [...this.snapshot.chatMessages]
+      .reverse()
+      .find((message) => message.role === 'user')
+    if (!lastUserMessage) return null
+    return this.handleHistoricalUserMessageDelete(lastUserMessage.id)
+  }
+
+  /**
    * Equivalent to the original `handleAssistantMessageGroupBranch`, plus the
    * confirmed AgentSessionService-registration fix: the branched conversation's
    * messages are now registered into AgentSessionService memory (`replaceConversationMessages`

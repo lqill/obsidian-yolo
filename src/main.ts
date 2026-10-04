@@ -2468,6 +2468,24 @@ export default class YoloPlugin extends Plugin {
       },
     })
 
+    // 撤销最后一轮：与「导出当前对话」同一套 checkCallback 门——只在活动叶子
+    // 是聊天视图且当前存在可撤销的一轮时可用。主要服务于语音误听（模型听错
+    // 后一轮已落盘）与输入失误；CLI 运行时由其自己持有会话，不在此列。
+    this.addCommand({
+      id: 'undo-latest-turn',
+      name: this.t('commands.undoLatestTurn'),
+      checkCallback: (checking: boolean) => {
+        const view = this.app.workspace.getActiveViewOfType(ChatView)
+        if (!view || !view.canUndoLatestTurn()) {
+          return false
+        }
+        if (!checking) {
+          view.undoLatestTurn()
+        }
+        return true
+      },
+    })
+
     // Global ESC to cancel any ongoing AI continuation/rewrite
     this.registerDomEvent(document, 'keydown', (e: KeyboardEvent) => {
       if (e.key === 'Escape') {

@@ -438,6 +438,24 @@ export class ChatView extends ItemView {
     this.chatRef.current?.exportCurrentConversation()
   }
 
+  /**
+   * Deletes the latest turn in the active conversation. The command's
+   * `checkCallback` gates on `canUndoLatestTurn()` first; the composer button
+   * calls the same `Chat` action directly. Mirrors the export pair above.
+   */
+  undoLatestTurn(): void {
+    this.plugin.getChatLeafSessionManager().touchLeafInteracted(this.leaf)
+    this.chatRef.current?.undoLatestTurn()
+  }
+
+  /**
+   * Whether the active conversation has a turn that can be undone. False on CLI
+   * runtimes, which own their transcript inside the external process.
+   */
+  canUndoLatestTurn(): boolean {
+    return this.chatRef.current?.canUndoLatestTurn() ?? false
+  }
+
   async loadConversation(conversationId: string) {
     this.plugin.getChatLeafSessionManager().touchLeafInteracted(this.leaf)
     await this.chatRef.current?.loadConversation(conversationId)

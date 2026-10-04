@@ -429,6 +429,87 @@ describe('ChatSessionController', () => {
     expect(controller.handleHistoricalUserMessageDelete('missing')).toBeNull()
   })
 
+  it('removeLatestTurn deletes the last turn with its tool cards and per-turn state', async () => {
+    const user1 = userMessage('user-1')
+    const assistant1 = assistantMessage('assistant-1')
+    const user2 = userMessage('user-2')
+    const tool2 = {
+      role: 'tool',
+      id: 'tool-2',
+      toolCalls: [],
+    } as unknown as ChatMessage
+    const assistant2 = assistantMessage('assistant-2', {
+      metadata: { branchId: 'branch-a' },
+    })
+    const { controller, createOrUpdateConversation, agentService } =
+      createController('c1', [user1, assistant1, user2, tool2, assistant2])
+    controller.setMessageModelMap(
+      new Map([
+        ['user-1', 'model-1'],
+        ['user-2', 'model-2'],
+      ]),
+    )
+    controller.setMessageReasoningMap(new Map([['user-2', 'high']]))
+    controller.setActiveBranchByUserMessageId(new Map([['user-2', 'branch-a']]))
+    controller.setAssistantGroupBoundaryMessageIds(['assistant-2'])
+
+    const result = controller.removeLatestTurn()
+
+    expect(result?.removedMessages).toEqual([user2, tool2, assistant2])
+    const snapshot = controller.getSnapshot()
+    expect(snapshot.chatMessages).toEqual([user1, assistant1])
+    // The retained turn keeps its identity and its model entry.
+    expect(snapshot.chatMessages[0]).toBe(user1)
+    expect(snapshot.messageModelMap.get('user-1')).toBe('model-1')
+    expect(snapshot.messageModelMap.has('user-2')).toBe(false)
+    expect(snapshot.messageReasoningMap.has('user-2')).toBe(false)
+    expect(snapshot.activeBranchByUserMessageId.has('user-2')).toBe(false)
+    expect(snapshot.assistantGroupBoundaryMessageIds).toEqual([])
+
+    expect(result?.outcome.kind).toBe('persisted')
+    if (result?.outcome.kind === 'persisted') {
+      await expect(result.outcome.ok).resolves.toBe(true)
+    }
+    // The service copy is replaced too, otherwise a later publish would push
+    // the deleted turn straight back into the snapshot.
+    expect(agentService.replaceConversationMessages).toHaveBeenCalledWith(
+      'c1',
+      [user1, assistant1],
+      [],
+    )
+    expect(createOrUpdateConversation).toHaveBeenCalledTimes(1)
+  })
+
+  it('removeLatestTurn returns null when the conversation has no user message', () => {
+    const { controller, createOrUpdateConversation, agentService } =
+      createController('c1', [assistantMessage('assistant-1')])
+
+    expect(controller.removeLatestTurn()).toBeNull()
+    expect(createOrUpdateConversation).not.toHaveBeenCalled()
+    expect(agentService.replaceConversationMessages).not.toHaveBeenCalled()
+  })
+
+  it('removeLatestTurn keeps the conversation and persists an empty list when only one turn existed', async () => {
+    const user1 = userMessage('user-1')
+    const assistant1 = assistantMessage('assistant-1')
+    const { controller, createOrUpdateConversation } = createController('c1', [
+      user1,
+      assistant1,
+    ])
+
+    const result = controller.removeLatestTurn()
+
+    expect(result?.removedMessages).toEqual([user1, assistant1])
+    expect(controller.getSnapshot().chatMessages).toEqual([])
+    if (result?.outcome.kind === 'persisted') {
+      await expect(result.outcome.ok).resolves.toBe(true)
+    }
+    expect(createOrUpdateConversation.mock.calls[0].slice(0, 2)).toEqual([
+      'c1',
+      [],
+    ])
+  })
+
   it('handleAssistantMessageEditSave replaces the assistant/tool group in place', async () => {
     const user1 = userMessage('user-1')
     const assistant1 = assistantMessage('assistant-1', { content: 'old' })

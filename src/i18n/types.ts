@@ -18,6 +18,7 @@ export type TranslationKeys = {
     openNewChatWindow: string
     openChatHistory?: string
     exportCurrentConversationToVault?: string
+    undoLatestTurn?: string
     addSelectionToChat: string
     addFileToChat: string
     addFolderToChat: string
@@ -1680,6 +1681,7 @@ export type TranslationKeys = {
     insertUnavailable?: string
     noAssistantContent?: string
     regenerate: string
+    undoLatestTurn: string
     reasoning: string
     reasonedFor?: string
     annotations: string

@@ -1264,6 +1264,44 @@ export function useYoloChatSession({
     ],
   )
 
+  /**
+   * Deletes the latest turn. A turn still being generated is part of what undo
+   * retracts, so an active run is aborted first and the turn deleted in the same
+   * tick — the same abort-then-replace order `submit()` uses. Returns whether a
+   * turn was actually removed (the caller may key follow-up work off it, e.g.
+   * reconnecting a live voice session).
+   */
+  const handleUndoLatestTurn = useCallback((): boolean => {
+    if (isCurrentConversationRunActive) {
+      sessionController.abortRun({ runtimeId: 'yolo' })
+    }
+    const result = sessionController.removeLatestTurn()
+    if (!result) return false
+    releaseHighlightIds(
+      collectSelectionHighlightIdsFromMessages(result.removedMessages),
+    )
+    const removedIds = new Set(result.removedMessages.map((m) => m.id))
+    setEditingAssistantMessageId((prev) =>
+      prev && removedIds.has(prev) ? null : prev,
+    )
+    setFocusedMessageId((prev) =>
+      prev && removedIds.has(prev) ? inputMessageId : prev,
+    )
+    if (result.outcome.kind === 'persisted') {
+      void result.outcome.ok.then((ok) => {
+        if (!ok) new Notice('Failed to save chat history')
+      })
+    }
+    return true
+  }, [
+    inputMessageId,
+    isCurrentConversationRunActive,
+    releaseHighlightIds,
+    sessionController,
+    setEditingAssistantMessageId,
+    setFocusedMessageId,
+  ])
+
   // 消息态/偏好切换/AgentSessionService 注册/持久化全部收编进
   // ChatSessionController.branchFromAssistantGroup（含分支缺口修复：分支的
   // 消息现在会注册进 AgentSessionService 内存态,不再只写 React state + 磁盘）。
@@ -1508,6 +1546,7 @@ export function useYoloChatSession({
     handleAssistantMessageEditCancel,
     handleAssistantMessageGroupDelete,
     handleHistoricalUserMessageDelete,
+    handleUndoLatestTurn,
     handleAssistantMessageGroupBranch,
   }
 }
