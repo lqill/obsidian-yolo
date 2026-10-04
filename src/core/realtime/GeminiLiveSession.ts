@@ -1,4 +1,8 @@
 // src/core/realtime/GeminiLiveSession.ts
+import {
+  VoiceAudioError,
+  type VoiceMicFailure,
+} from './audio/voiceAudioSupport'
 import type { GeminiLiveClientEvent } from './GeminiLiveClient'
 import type {
   GeminiLiveFunctionCall,
@@ -13,11 +17,23 @@ export type VoiceMicrophone = {
   start(): Promise<void>
   stop(): void
   setMuted(muted: boolean): void
+  /** Release the OS microphone and suspend the graph; reversible. */
+  suspend(): Promise<void>
+  /** Re-acquire the microphone after `suspend`; rejects with a named reason. */
+  resume(): Promise<void>
 }
 
 export type VoiceAudioPlayer = {
+  /**
+   * Create and unlock the output context while the start still has the user's
+   * activation — playback must not depend on a lazily created context.
+   */
+  prepare(): Promise<void>
   enqueue(dataBase64: string): void
   flush(): void
+  /** Suspend output and drop queued frames; reversible. */
+  pause(): Promise<void>
+  resume(): Promise<void>
   dispose(): void
 }
 
@@ -57,12 +73,26 @@ export type GeminiLiveSessionOptions = {
   initialHistory?: GeminiLiveHistoryTurn[]
 }
 
+/** A named audio failure, or the generic one for anything unexpected. */
+const toVoiceFailure = (
+  error: unknown,
+): { failure: VoiceMicFailure; detail: string } => {
+  if (error instanceof VoiceAudioError)
+    return { failure: error.failure, detail: error.message }
+  return {
+    failure: 'mic_unavailable',
+    detail: error instanceof Error ? error.message : String(error),
+  }
+}
+
 export class GeminiLiveSession {
   private turnOpen = false
   private typedText = ''
   private spokenUserText = ''
   private assistantText = ''
   private stopped = false
+  /** Mirrors the host's foreground state; `true` means audio is live. */
+  private foreground = true
   // Serializes tool-call batches: the Live API can push a second `toolCall`
   // frame while the first batch is still executing, and running them
   // concurrently would let the later batch overwrite the active-tool chip and
@@ -78,14 +108,66 @@ export class GeminiLiveSession {
 
   async start(): Promise<void> {
     this.stopped = false
+    this.foreground = true
     this.toolAbortController = new AbortController()
     this.options.store.setStatus('connecting')
+    // Unlock output while the start still carries the user's activation: a
+    // WebView context created later (on the first server frame) would stay
+    // suspended and the session would be silent.
+    await this.runAudioStep(() => this.options.player.prepare())
     // With history, capture waits for `ready`: the server must receive the
     // seeded `clientContent` before any realtime input reaches the session.
     if ((this.options.initialHistory?.length ?? 0) === 0) {
-      await this.options.microphone.start()
+      await this.runAudioStep(() => this.options.microphone.start())
     }
     this.options.client.connect()
+  }
+
+  /**
+   * Runs an audio step and, on failure, puts the actionable reason in the store
+   * before rethrowing — so the caller that reports `start_failed` cannot bury a
+   * `mic_permission_denied` or an `audio_suspended` under a generic one.
+   */
+  private async runAudioStep(step: () => Promise<void>): Promise<void> {
+    try {
+      await step()
+    } catch (error) {
+      const { failure, detail } = toVoiceFailure(error)
+      this.options.store.setStatus('error', { failure, detail })
+      throw error
+    }
+  }
+
+  /**
+   * Follows the host's foreground state. Backgrounding the WebView suspends its
+   * audio hardware while the socket stays open, so a backgrounded session would
+   * keep claiming to listen while capturing and playing nothing (and would hold
+   * the Android microphone indicator on). Foregrounding re-acquires the
+   * microphone and unlocks output, or fails loudly — the user re-taps the mic if
+   * the grant is gone.
+   */
+  async setForeground(foreground: boolean): Promise<void> {
+    if (this.stopped || foreground === this.foreground) return
+    this.foreground = foreground
+    try {
+      if (foreground)
+        await this.runAudioStep(async () => {
+          await this.options.microphone.resume()
+          await this.options.player.resume()
+        })
+      else
+        await this.runAudioStep(async () => {
+          this.options.client.sendAudioStreamEnd()
+          this.options.player.flush()
+          await this.options.player.pause()
+          await this.options.microphone.suspend()
+        })
+    } catch {
+      // `runAudioStep` already put the reason in the store.
+      return
+    }
+    if (this.stopped) return
+    this.options.store.setStatus(foreground ? 'ready' : 'paused')
   }
 
   stop(): void {
@@ -138,13 +220,10 @@ export class GeminiLiveSession {
     if (this.stopped || history.length === 0) return
     this.options.client.sendInitialHistory(history)
     try {
-      await this.options.microphone.start()
-    } catch (error) {
-      if (this.stopped) return
-      this.options.store.setStatus('error', {
-        failure: 'mic_unavailable',
-        detail: error instanceof Error ? error.message : String(error),
-      })
+      await this.runAudioStep(() => this.options.microphone.start())
+    } catch {
+      // `runAudioStep` already named the failure in the store; the socket stays
+      // open so the session can still answer text input.
     }
   }
 

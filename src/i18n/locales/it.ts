@@ -2552,6 +2552,7 @@ export const it: DeepPartial<TranslationKeys> = {
   voiceMicStop: 'Termina conversazione vocale',
   voiceStatusConnecting: 'Connessione…',
   voiceStatusReady: 'In ascolto',
+  voiceStatusPaused: 'In pausa — app in background',
   voiceStatusError: 'Errore vocale',
   voiceMute: 'Silenzia',
   voiceUnmute: 'Riattiva audio',
@@ -2569,6 +2570,18 @@ export const it: DeepPartial<TranslationKeys> = {
   voiceCustomBaseUrlUnsupported:
     'La modalità vocale richiede l’URL di base Gemini predefinito; URL personalizzati e proxy non possono trasportare la Live API.',
   voiceMicUnavailable: 'Impossibile avviare il microfono.',
+  voiceMicPermissionDenied:
+    'Accesso al microfono negato. Consenti il microfono per Obsidian nelle impostazioni di sistema, poi riprova.',
+  voiceMicLost:
+    'Il microfono ha smesso di fornire audio (permesso revocato o dispositivo scollegato).',
+  voiceAudioSuspended:
+    'Il motore audio non si è avviato. Tocca di nuovo il microfono per riprovare.',
+  voiceInsecureContext:
+    'Questo host non può registrare audio: nessuna API del microfono è disponibile per il plugin.',
+  voiceAudioContextUnsupported:
+    'Questo host non supporta Web Audio, necessario alla modalità vocale per la riproduzione.',
+  voiceAudioWorkletUnsupported:
+    'Questo host non supporta AudioWorklet, necessario alla modalità vocale per acquisire il microfono.',
   voiceSessionClosed: 'La sessione vocale è stata chiusa.',
   voiceToolsUnavailable: 'Gli strumenti vocali non sono disponibili.',
 }

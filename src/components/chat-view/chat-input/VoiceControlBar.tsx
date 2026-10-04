@@ -9,6 +9,12 @@ const FAILURE_KEY: Record<VoiceFailure, string> = {
   no_api_key: 'voiceApiKeyMissing',
   no_model: 'voiceModelMissing',
   custom_base_url: 'voiceCustomBaseUrlUnsupported',
+  insecure_context: 'voiceInsecureContext',
+  audio_context_unsupported: 'voiceAudioContextUnsupported',
+  audio_worklet_unsupported: 'voiceAudioWorkletUnsupported',
+  mic_permission_denied: 'voiceMicPermissionDenied',
+  audio_suspended: 'voiceAudioSuspended',
+  mic_lost: 'voiceMicLost',
   mic_unavailable: 'voiceMicUnavailable',
   server: 'voiceStatusError',
   session_closed: 'voiceSessionClosed',
@@ -35,9 +41,11 @@ export const VoiceControlBar = ({
       <span className="yolo-voice-control-bar__status">
         {snapshot.status === 'connecting'
           ? t('voiceStatusConnecting')
-          : snapshot.status === 'error'
-            ? errorText
-            : t('voiceStatusReady')}
+          : snapshot.status === 'paused'
+            ? t('voiceStatusPaused')
+            : snapshot.status === 'error'
+              ? errorText
+              : t('voiceStatusReady')}
       </span>
       {snapshot.activeToolName ? (
         <span className="yolo-voice-control-bar__tool">

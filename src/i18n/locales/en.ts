@@ -2834,6 +2834,7 @@ export const en: TranslationKeys = {
   voiceMicStop: 'End voice conversation',
   voiceStatusConnecting: 'Connecting…',
   voiceStatusReady: 'Listening',
+  voiceStatusPaused: 'Paused — app in background',
   voiceStatusError: 'Voice error',
   voiceMute: 'Mute',
   voiceUnmute: 'Unmute',
@@ -2851,6 +2852,18 @@ export const en: TranslationKeys = {
   voiceCustomBaseUrlUnsupported:
     'Voice mode requires the default Gemini base URL; custom base URLs and proxies cannot carry the Live API.',
   voiceMicUnavailable: 'Could not start the microphone.',
+  voiceMicPermissionDenied:
+    'Microphone access was denied. Allow the microphone for Obsidian in your system settings, then try again.',
+  voiceMicLost:
+    'The microphone stopped delivering audio (permission revoked or device disconnected).',
+  voiceAudioSuspended:
+    'The audio engine would not start. Tap the microphone again to retry.',
+  voiceInsecureContext:
+    'This host cannot record audio: no microphone API is available to the plugin.',
+  voiceAudioContextUnsupported:
+    'This host has no Web Audio support, which voice mode needs for playback.',
+  voiceAudioWorkletUnsupported:
+    'This host has no AudioWorklet support, which voice mode needs to capture the microphone.',
   voiceSessionClosed: 'The voice session closed.',
   voiceToolsUnavailable: 'Voice tools are unavailable.',
 }

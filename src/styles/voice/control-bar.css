@@ -112,7 +112,12 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 16rem;
+  /*
+   * A rem cap cannot work on a phone: the bar is a full-width flex row there, so
+   * a 16rem chip forces a wrap that costs a whole row. Let the flex line decide
+   * and keep the ellipsis.
+   */
+  max-width: 100%;
 }
 
 /*
@@ -122,6 +127,7 @@
  */
 .yolo-voice-control-bar > button {
   display: inline-flex;
+  position: relative;
   align-items: center;
   min-height: 28px;
   padding: 4px 10px;
@@ -139,9 +145,24 @@
     transform var(--yolo-anim-duration-feedback) ease;
 }
 
-.yolo-voice-control-bar > button:hover {
-  background: var(--background-modifier-hover) !important;
-  color: var(--text-normal);
+/*
+ * Touch: 28px is a mouse target, not a fingertip. Grow the hit area with a
+ * pseudo-element instead of padding, so the bar stays one compact row on a
+ * phone — the same approach `settings/base.css` uses for drag handles.
+ */
+@media (pointer: coarse) {
+  .yolo-voice-control-bar > button::after {
+    content: '';
+    position: absolute;
+    inset: -8px -4px;
+  }
+}
+
+@media (hover: hover) {
+  .yolo-voice-control-bar > button:hover {
+    background: var(--background-modifier-hover) !important;
+    color: var(--text-normal);
+  }
 }
 
 .yolo-voice-control-bar > button:focus-visible {
@@ -160,9 +181,15 @@
   color: var(--text-error);
 }
 
-.yolo-voice-control-bar > button:last-of-type:hover {
-  background: color-mix(in srgb, var(--text-error) 12%, transparent) !important;
-  color: var(--text-error);
+@media (hover: hover) {
+  .yolo-voice-control-bar > button:last-of-type:hover {
+    background: color-mix(
+      in srgb,
+      var(--text-error) 12%,
+      transparent
+    ) !important;
+    color: var(--text-error);
+  }
 }
 
 /*
@@ -173,6 +200,7 @@
  */
 button.yolo-chat-input-voice-toggle {
   display: inline-flex;
+  position: relative;
   align-items: center;
   justify-content: center;
   width: var(--size-4-5);
@@ -191,15 +219,30 @@ button.yolo-chat-input-voice-toggle {
     transform var(--yolo-anim-duration-feedback) ease;
 }
 
+/*
+ * The toggle keeps the sibling `FileUploadButton` footprint so the toolbar does
+ * not reflow when a phone gains a voice button; the extra reach comes from the
+ * hit area instead of the box.
+ */
+@media (pointer: coarse) {
+  button.yolo-chat-input-voice-toggle::after {
+    content: '';
+    position: absolute;
+    inset: -8px;
+  }
+}
+
 button.yolo-chat-input-voice-toggle svg {
   display: block;
   width: 14px;
   height: 14px;
 }
 
-button.yolo-chat-input-voice-toggle:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
+@media (hover: hover) {
+  button.yolo-chat-input-voice-toggle:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
 }
 
 button.yolo-chat-input-voice-toggle:focus-visible {
@@ -217,7 +260,9 @@ button.yolo-chat-input-voice-toggle.is-active {
   color: var(--interactive-accent);
 }
 
-button.yolo-chat-input-voice-toggle.is-active:hover {
-  background: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
-  color: var(--interactive-accent);
+@media (hover: hover) {
+  button.yolo-chat-input-voice-toggle.is-active:hover {
+    background: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+    color: var(--interactive-accent);
+  }
 }

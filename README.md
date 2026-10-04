@@ -50,7 +50,7 @@ flowchart TB
   classDef edited fill:#fff6e0,stroke:#b8860b,color:#4a3600
   classDef reused fill:#eef1f4,stroke:#8a9aa8,color:#2f3b45
 
-  subgraph module["ADDED · src/core/realtime/ (desktop only)"]
+  subgraph module["ADDED · src/core/realtime/ (desktop + mobile app)"]
     direction TB
     Resolve["resolveLiveConnection.ts<br/>settings to endpoint, key, model, voice"]
     History["voiceHistory.ts<br/>conversation to seeded turns"]
@@ -66,6 +66,7 @@ flowchart TB
     Pcm["audio/pcm.ts<br/>PCM math, base64, resample"]
     Mic["audio/PcmMicCapture.ts + micWorklet.ts<br/>16 kHz capture"]
     Player["audio/LiveAudioPlayer.ts<br/>24 kHz playback"]
+    Support["audio/voiceAudioSupport.ts<br/>capability probe, AudioContext unlock"]
 
     Resolve --> Factory
     History --> Factory
@@ -76,9 +77,12 @@ flowchart TB
     Protocol --- Session
     Pcm --> Mic
     Pcm --> Player
+    Support --> Mic
+    Support --> Player
     Mic --> Session
     Session --> Player
     Session --> Store
+    Session --> Support
     Store --> ReadApi
     ControlApi --> Store
     Contract -.-> Session
@@ -295,8 +299,9 @@ See Quick Start above.
 - [x] Learning Mode — a dedicated study view
 - [ ] Annotation Mode — real-time AI annotations and suggestions on notes
 - [ ] Built-in assistant — a corner-pinned helper for config/agents, with auto-compaction and scheduled tasks
-- [ ] Better AI whiteboard
-- [ ] Voice input & meeting notes
+- [x] Better AI whiteboard
+- [x] Voice input — Gemini Live, on desktop and in the mobile app
+- [ ] Meeting notes
 
 ## Documentation
 

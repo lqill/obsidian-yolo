@@ -1,4 +1,3 @@
-import { Platform } from 'obsidian'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 import { usePlugin } from '../../contexts/plugin-context'
@@ -8,6 +7,7 @@ import type {
   VoiceLiveTurn,
   VoiceTurn,
 } from '../../core/realtime'
+import { probeVoiceAudioSupport } from '../../core/realtime/audio/voiceAudioSupport'
 import {
   endRealtimeVoiceSession,
   failRealtimeVoiceSession,
@@ -20,6 +20,7 @@ import type {
   VoiceToolConversationPort,
 } from '../../core/realtime/voiceToolBridge'
 import type { ChatUserMessage } from '../../types/chat'
+import { getNodeDocument } from '../../utils/dom/window-context'
 
 import type { ChatSessionController } from './ChatSessionController'
 import { awaitVoiceToolCallResolution } from './voiceToolCallResolution'
@@ -36,6 +37,7 @@ export const useVoiceSession = ({
   assistantStream,
   stampTimeContext,
   resolveToolBridge,
+  surfaceElement,
 }: {
   sessionController: ChatSessionController
   conversationId: string
@@ -46,6 +48,13 @@ export const useVoiceSession = ({
   resolveToolBridge?: (
     conversationPort: VoiceToolConversationPort,
   ) => Promise<VoiceToolBridge | null>
+  /**
+   * The chat view's own root node. Its `ownerDocument` is the window this
+   * surface lives in, which is where `visibilitychange` must be observed — the
+   * global `document` is the main window's, so a popout would never be told it
+   * went to the background.
+   */
+  surfaceElement?: HTMLElement | null
 }) => {
   const { settings } = useSettings()
   const plugin = usePlugin()
@@ -54,6 +63,7 @@ export const useVoiceSession = ({
     stop(): void
     sendText(t: string): void
     setMuted(m: boolean): void
+    setForeground(foreground: boolean): Promise<void>
   } | null>(null)
   const pinnedConversationRef = useRef<string | null>(null)
   const startingRef = useRef(false)
@@ -177,7 +187,16 @@ export const useVoiceSession = ({
     if (startingRef.current) return
     const currentStatus = getRealtimeVoiceStatus()
     if (currentStatus !== 'idle' && currentStatus !== 'error') return
-    if (!Platform.isDesktop) return
+    // Capability, not platform: the Live transport, the tool bridge, and the
+    // conversation write-back are all platform-free, and Obsidian's Android app
+    // is a WebView that runs the whole path once the audio stack is unlocked. A
+    // `Platform.isDesktop` gate would hide the feature on the hosts that can
+    // actually use it, so the probe names the real obstacle instead.
+    const support = probeVoiceAudioSupport()
+    if (!support.ok) {
+      failRealtimeVoiceSession({ failure: support.reason })
+      return
+    }
     startingRef.current = true
     markRealtimeVoiceConnecting()
     try {
@@ -227,10 +246,14 @@ export const useVoiceSession = ({
       runtimeRef.current = runtime
       await runtime.start()
     } catch (error) {
-      failRealtimeVoiceSession({
-        failure: 'start_failed',
-        detail: error instanceof Error ? error.message : String(error),
-      })
+      // A named audio failure (`mic_permission_denied`, `audio_suspended`, …) is
+      // already in the store with its actionable reason; overwriting it with the
+      // generic one would throw that away.
+      if (getRealtimeVoiceStatus() !== 'error')
+        failRealtimeVoiceSession({
+          failure: 'start_failed',
+          detail: error instanceof Error ? error.message : String(error),
+        })
     } finally {
       startingRef.current = false
     }
@@ -290,6 +313,51 @@ export const useVoiceSession = ({
     const pinned = pinnedConversationRef.current
     if (pinned && pinned !== conversationId) stop()
   }, [conversationId, stop])
+
+  /**
+   * Follows this surface's window. On Android, backgrounding the app suspends
+   * the WebView's audio hardware while the socket stays open: without this the
+   * control bar keeps claiming to listen, the microphone indicator stays lit,
+   * and every frame is decoded into a dead context.
+   */
+  useEffect(() => {
+    if (!surfaceElement) return
+    const ownerDocument = getNodeDocument(surfaceElement)
+    const handleVisibilityChange = () => {
+      const runtime = runtimeRef.current
+      if (!runtime) return
+      void runtime.setForeground(ownerDocument.visibilityState === 'visible')
+    }
+    ownerDocument.addEventListener('visibilitychange', handleVisibilityChange)
+    return () =>
+      ownerDocument.removeEventListener(
+        'visibilitychange',
+        handleVisibilityChange,
+      )
+  }, [surfaceElement])
+
+  /**
+   * Releases the microphone, the audio graph, and the socket when the view goes
+   * away. Deliberately does not touch the conversation: this cleanup can run
+   * after `Chat.tsx` has disposed the session controller, and the live turn's
+   * messages were never durable anyway (`persist: false`).
+   *
+   * Guarded on this hook owning the runtime, because the store is a singleton
+   * shared across windows — a second window's view unmounting must not end the
+   * session this one started.
+   */
+  useEffect(
+    () => () => {
+      if (!runtimeRef.current) return
+      runtimeRef.current.stop()
+      runtimeRef.current = null
+      liveTurnRef.current = null
+      turnToolMessageIdsRef.current = new Set()
+      pinnedConversationRef.current = null
+      endRealtimeVoiceSession()
+    },
+    [],
+  )
 
   const sendText = useCallback(
     (text: string) => runtimeRef.current?.sendText(text),

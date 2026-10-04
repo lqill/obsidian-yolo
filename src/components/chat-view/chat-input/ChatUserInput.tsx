@@ -1,6 +1,6 @@
 import { SerializedEditorState } from 'lexical'
 import { FilePlus2, Mic, MicOff, Undo2 } from 'lucide-react'
-import { Notice, Platform } from 'obsidian'
+import { Notice } from 'obsidian'
 import {
   type CSSProperties,
   type DragEvent as ReactDragEvent,
@@ -776,7 +776,10 @@ const ChatUserInput = forwardRef<ChatUserInputRef, ChatUserInputProps>(
       ) : null
 
     const renderVoiceControl = () =>
-      onToggleVoice && Platform.isDesktop ? (
+      // No platform gate: Obsidian's mobile app is a WebView that runs the whole
+      // voice path, and the session start probes for what it cannot do. Gating
+      // on `Platform` would hide the button on the hosts that can use it.
+      onToggleVoice ? (
         <button
           type="button"
           className={`yolo-chat-input-voice-toggle${isVoiceActive ? ' is-active' : ''}`}

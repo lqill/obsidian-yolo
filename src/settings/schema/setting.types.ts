@@ -427,7 +427,8 @@ export const yoloSettingsSchema = z.object({
   // 只影响之后的新消息,历史消息已固定不变。
   timeContextEnabled: z.boolean().catch(true),
 
-  // Gemini Live voice mode (desktop only). `providerId` selects an existing
+  // Gemini Live voice mode (desktop and the mobile app — the session probes for
+  // what the host's audio stack can do). `providerId` selects an existing
   // Gemini API-key provider; model/voice are free-text with sensible defaults.
   voice: z
     .object({

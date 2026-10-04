@@ -112,6 +112,20 @@ On mobile Enter always starts a new line, so you can't send by accident.
 
 **You can keep typing and sending while the agent is running** — messages queue up and go out once the current turn finishes. Two things will stop you, though: if a tool is waiting for approval you have to approve or reject it first, and if the model is asking you a question you have to answer it first. When you abort a chat, queued messages that haven't been sent are returned to the input box rather than lost.
 
+## Talking instead of typing
+
+The microphone button next to the input starts a **voice conversation** on Google's Gemini Live API: you speak, the model speaks back, and the whole exchange is written into the chat as ordinary messages. It works in the desktop app **and in the mobile app**.
+
+Set it up once in **Settings → YOLO → Providers and Models → Voice (Gemini Live)**: pick a Gemini provider that has an API key (OAuth providers don't work with Live), a Live model, and a voice. The system prompt field is appended to your chat model's own prompt, so the voice model talks with the same memory, skills and mode persona as the text one.
+
+While the session is live, a bar above the input shows the status, the level meter, and Mute / End. Typing still works — what you type is sent as your turn. Undo (the curved arrow) rewinds the last turn and reconnects.
+
+**On mobile**
+
+- Grant Obsidian the microphone permission the first time; a refused grant is reported as such instead of a silent session.
+- Backgrounding the app pauses the session and releases the microphone, so Android's mic indicator goes off. Coming back resumes it — if the permission is gone in the meantime you'll be told why.
+- Voice needs a Gemini Live model, which is API-key only. If the control bar reports something specific ("microphone access denied", "the audio engine would not start"), that's the exact blocker, not a generic failure.
+
 ## While a chat is running
 
 ### Tool approval

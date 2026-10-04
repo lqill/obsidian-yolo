@@ -112,6 +112,20 @@ Su mobile Invio va sempre a capo, così non parte niente per sbaglio.
 
 **Mentre l'Agent sta lavorando puoi comunque continuare a scrivere e inviare**: il messaggio si mette in coda e parte alla fine del turno in corso. Ci sono però due situazioni che lo bloccano: se uno strumento sta aspettando la tua approvazione devi prima approvarlo o rifiutarlo; e se il modello ti sta facendo una domanda devi prima rispondere. Se interrompi la conversazione, i messaggi ancora in coda e non inviati tornano nella casella di input: non si perdono.
 
+## Parlare invece di scrivere
+
+Il pulsante del microfono accanto alla casella di input avvia una **conversazione vocale** sulla Gemini Live API di Google: parli, il modello risponde a voce, e tutto lo scambio viene scritto in chat come normali messaggi. Funziona nell'app desktop **e nell'app mobile**.
+
+Si configura una volta in **Impostazioni → YOLO → Fornitori e modelli → Voce (Gemini Live)**: scegli un provider Gemini con chiave API (i provider OAuth non vanno con Live), un modello Live e una voce. Il campo prompt di sistema viene aggiunto al prompt del modello chat, così il modello vocale parla con la stessa memoria, le stesse skill e la stessa personalità di modalità.
+
+Durante la sessione una barra sopra l'input mostra stato, livello e i pulsanti Silenzia / Termina. Scrivere continua a funzionare: quello che digiti viene inviato come tuo turno. Annulla (la freccia curva) riporta indietro l'ultimo turno e riconnette.
+
+**Su mobile**
+
+- Concedi a Obsidian il permesso del microfono la prima volta: un permesso rifiutato viene segnalato come tale, non come una sessione muta.
+- Mettere l'app in background mette in pausa la sessione e rilascia il microfono, così l'indicatore del microfono di Android si spegne. Tornando nell'app riprende: se nel frattempo il permesso è sparito, ti viene detto il motivo.
+- La voce richiede un modello Gemini Live, che è solo con chiave API. Se la barra segnala qualcosa di preciso («accesso al microfono negato», «il motore audio non si è avviato»), quello è l'ostacolo esatto, non un errore generico.
+
 ## Durante la conversazione
 
 ### L'approvazione degli strumenti

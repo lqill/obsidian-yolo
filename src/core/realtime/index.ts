@@ -60,8 +60,19 @@ export const createGeminiLiveRuntime = (
     microphone: new PcmMicCapture({
       onFrame: (dataBase64) => client.sendAudio(dataBase64),
       onLevel: (level) => voiceSessionStore.setMicLevel(level),
+      // Android revoking RECORD_AUDIO (or a headset unplugging) ends the track
+      // without throwing: report it instead of listening to silence.
+      onLost: (detail) => {
+        voiceSessionStore.setStatus('error', { failure: 'mic_lost', detail })
+      },
     }),
-    player: new LiveAudioPlayer(),
+    player: new LiveAudioPlayer({
+      onFailure: ({ failure, message }) =>
+        voiceSessionStore.setStatus('error', {
+          failure,
+          detail: message,
+        }),
+    }),
     store: voiceSessionStore,
     onTurn: options.onTurn,
     onAssistantText: options.onAssistantText,

@@ -693,6 +693,9 @@ const Chat = forwardRef<ChatRef, ChatProps>((props, ref) => {
       voiceToolBridgeFactoryRef.current
         ? voiceToolBridgeFactoryRef.current(conversationPort)
         : Promise.resolve(null),
+    // The view's own root: the visibility signal must come from the window this
+    // surface lives in, not the main window's `document`.
+    surfaceElement: containerElement,
   })
   const { restart: restartVoiceSession } = voiceSession
   const handleToggleVoice = useCallback(() => {

@@ -1,20 +1,41 @@
 // src/core/realtime/voiceSessionStore.ts
+import type {
+  VoiceAudioSupportFailure,
+  VoiceMicFailure,
+} from './audio/voiceAudioSupport'
 import type { LiveConnectionFailure } from './resolveLiveConnection'
 
-export type VoiceSessionStatus = 'idle' | 'connecting' | 'ready' | 'error'
+export type VoiceSessionStatus =
+  | 'idle'
+  | 'connecting'
+  | 'ready'
+  /**
+   * The host is backgrounded: the microphone is released and output is
+   * suspended, but the session is still live and resumes on foreground. Still
+   * `isActive`, so the control bar and the picker locks stay in sync.
+   */
+  | 'paused'
+  | 'error'
 
 /**
  * Why a voice session failed. Core names the failure; the UI owns the wording,
  * so the store never carries a user-visible string of our own. `detail` holds
  * text we did not write (the server's message, a DOM exception).
+ *
+ * The audio reasons are capability names, not platform names: each one is a
+ * distinct thing a user can act on (grant the mic, enable the permission, leave
+ * the app in the foreground), so each gets its own message.
  */
 export type VoiceFailure =
   | LiveConnectionFailure
-  | 'mic_unavailable'
+  | VoiceAudioSupportFailure
+  | VoiceMicFailure
   | 'server'
   | 'session_closed'
   | 'tools_unavailable'
   | 'start_failed'
+  /** The microphone track ended or was muted under a live session. */
+  | 'mic_lost'
 
 export type VoiceError = Readonly<{
   failure: VoiceFailure

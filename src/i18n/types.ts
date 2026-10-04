@@ -2456,6 +2456,7 @@ export type TranslationKeys = {
   voiceMicStop: string
   voiceStatusConnecting: string
   voiceStatusReady: string
+  voiceStatusPaused: string
   voiceStatusError: string
   voiceMute: string
   voiceUnmute: string
@@ -2469,6 +2470,12 @@ export type TranslationKeys = {
   voiceModelMissing: string
   voiceCustomBaseUrlUnsupported: string
   voiceMicUnavailable: string
+  voiceMicPermissionDenied: string
+  voiceMicLost: string
+  voiceAudioSuspended: string
+  voiceInsecureContext: string
+  voiceAudioContextUnsupported: string
+  voiceAudioWorkletUnsupported: string
   voiceSessionClosed: string
   voiceToolsUnavailable: string
 }

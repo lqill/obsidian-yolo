@@ -2663,6 +2663,7 @@ export const zh: TranslationKeys = {
   voiceMicStop: '结束语音对话',
   voiceStatusConnecting: '连接中…',
   voiceStatusReady: '正在聆听',
+  voiceStatusPaused: '已暂停——应用在后台',
   voiceStatusError: '语音出错',
   voiceMute: '静音',
   voiceUnmute: '取消静音',
@@ -2679,6 +2680,15 @@ export const zh: TranslationKeys = {
   voiceCustomBaseUrlUnsupported:
     '语音模式需要使用 Gemini 默认基础地址；自定义地址与代理无法承载 Live API。',
   voiceMicUnavailable: '无法启动麦克风。',
+  voiceMicPermissionDenied:
+    '麦克风权限被拒绝。请在系统设置中允许 Obsidian 使用麦克风，然后重试。',
+  voiceMicLost: '麦克风已停止提供音频（权限被撤销或设备已断开）。',
+  voiceAudioSuspended: '音频引擎无法启动。再次点击麦克风以重试。',
+  voiceInsecureContext: '当前宿主无法录音：插件没有可用的麦克风接口。',
+  voiceAudioContextUnsupported:
+    '当前宿主不支持 Web Audio，语音模式需要它来播放声音。',
+  voiceAudioWorkletUnsupported:
+    '当前宿主不支持 AudioWorklet，语音模式需要它来采集麦克风。',
   voiceSessionClosed: '语音会话已关闭。',
   voiceToolsUnavailable: '语音工具不可用。',
 }
