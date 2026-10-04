@@ -36,6 +36,14 @@ export class LiveAudioPlayer {
   private paused = false
   /** One recovery in flight at a time, however many frames arrive meanwhile. */
   private recovering = false
+  /**
+   * The last reason handed to `onFailure`, so a context that cannot be unlocked
+   * reports once instead of once per frame. Frames keep arriving while the
+   * context is wedged, and each report writes a fresh `error` object into the
+   * store — a new reference every time, which re-renders the control bar at
+   * frame cadence for one unchanged condition.
+   */
+  private lastFailure: VoiceAudioError | null = null
 
   constructor(private readonly options: LiveAudioPlayerOptions = {}) {}
 
@@ -62,18 +70,23 @@ export class LiveAudioPlayer {
     if (this.recovering) return
     this.recovering = true
     void unlockAudioContext(context)
+      .then(() => {
+        this.lastFailure = null
+      })
       .catch((error: unknown) => {
         // A recovery that lands after `dispose` belongs to a stopped session.
         if (this.disposed) return
-        this.options.onFailure?.(
+        const failure =
           error instanceof VoiceAudioError
             ? error
             : new VoiceAudioError(
                 'audio_suspended',
                 error instanceof Error ? error.message : String(error),
                 { cause: error },
-              ),
-        )
+              )
+        if (this.lastFailure?.failure === failure.failure) return
+        this.lastFailure = failure
+        this.options.onFailure?.(failure)
       })
       .finally(() => {
         this.recovering = false
