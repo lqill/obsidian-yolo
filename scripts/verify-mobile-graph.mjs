@@ -20,6 +20,10 @@ import builtins from 'builtin-modules'
  *
  * Walk from `src/main.ts` over static edges only and fail on anything mobile
  * cannot load. Wired into `npm run build` as `mobile:verify`.
+ *
+ * Only the production build writes `meta.json`, so a standalone run re-verifies
+ * whatever graph the last production build produced. Pass the metafile path as
+ * the first argument to verify a specific one.
  */
 
 /** The bundle's entry point — the graph mobile actually loads. */
@@ -41,7 +45,8 @@ const FORBIDDEN = new Set([
   ...builtins.map((name) => `node:${name}`),
 ])
 
-const metafile = JSON.parse(await readFile('meta.json', 'utf8'))
+const metafilePath = process.argv[2] ?? 'meta.json'
+const metafile = JSON.parse(await readFile(metafilePath, 'utf8'))
 const inputs = new Map(
   Object.entries(metafile.inputs).map(([path, entry]) => [
     path.replaceAll('\\', '/'),
@@ -63,12 +68,16 @@ const walk = () => {
     if (!entry)
       throw new Error(`Mobile graph walk reached an unknown input: ${current}`)
     for (const record of entry.imports ?? []) {
-      if (record.kind !== STATIC_EDGE || record.external) continue
+      if (record.kind !== STATIC_EDGE) continue
       const specifier = record.path.replaceAll('\\', '/')
+      // Check the forbidden set BEFORE skipping externals: esbuild marks every
+      // node builtin and `electron` as external precisely because a WebView
+      // cannot resolve them, so they land here flagged `external: true`.
       if (FORBIDDEN.has(specifier)) {
         violations.push(`${current} -> ${specifier}`)
         continue
       }
+      if (record.external) continue
       queue.push(specifier)
     }
   }

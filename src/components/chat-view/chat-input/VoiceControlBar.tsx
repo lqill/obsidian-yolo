@@ -1,6 +1,12 @@
+import { useEffect, useRef } from 'react'
+
 import { useLanguage } from '../../../contexts/language-context'
 import type { VoiceFailure } from '../../../core/realtime'
-import { useRealtimeVoiceSnapshot } from '../../../core/realtime/useRealtimeVoice'
+import {
+  getRealtimeMicLevel,
+  subscribeRealtimeMicLevel,
+  useRealtimeVoiceStatus,
+} from '../../../core/realtime/useRealtimeVoice'
 
 /** Core names the failure; the wording lives here, resolved at render time. */
 const FAILURE_KEY: Record<VoiceFailure, string> = {
@@ -14,12 +20,40 @@ const FAILURE_KEY: Record<VoiceFailure, string> = {
   audio_worklet_unsupported: 'voiceAudioWorkletUnsupported',
   mic_permission_denied: 'voiceMicPermissionDenied',
   audio_suspended: 'voiceAudioSuspended',
-  mic_lost: 'voiceMicLost',
   mic_unavailable: 'voiceMicUnavailable',
+  mic_lost: 'voiceMicLost',
   server: 'voiceStatusError',
   session_closed: 'voiceSessionClosed',
   tools_unavailable: 'voiceToolsUnavailable',
   start_failed: 'voiceStatusError',
+}
+
+/**
+ * The mic meter, deliberately outside React's render path. `micLevel` is
+ * written once per worklet render quantum — ~125+/s on Android, which a phone
+ * cannot afford as full React renders — so the level goes straight onto the
+ * node's `data-level`, which the stylesheet already keys its sweep and opacity
+ * off. `data-level="0"` is the pre-effect value so the first paint matches a
+ * silent microphone instead of showing the sweep.
+ */
+const VoiceLevelMeter = () => {
+  const elementRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const element = elementRef.current
+    if (!element) return
+    const write = (): void => {
+      element.dataset.level = String(Math.round(getRealtimeMicLevel() * 100))
+    }
+    write()
+    return subscribeRealtimeMicLevel(write)
+  }, [])
+  return (
+    <div
+      className="yolo-voice-control-bar__meter"
+      data-level="0"
+      ref={elementRef}
+    />
+  )
 }
 
 export const VoiceControlBar = ({
@@ -30,7 +64,9 @@ export const VoiceControlBar = ({
   onEnd: () => void
 }) => {
   const { t } = useLanguage()
-  const snapshot = useRealtimeVoiceSnapshot()
+  // The coarse channel: status, mute, active tool, error. The level is on its
+  // own channel so it cannot drag this component onto the frame cadence.
+  const snapshot = useRealtimeVoiceStatus()
   if (snapshot.status === 'idle') return null
   const error = snapshot.error
   const errorText = error
@@ -52,10 +88,7 @@ export const VoiceControlBar = ({
           {t('voiceToolRunning')}: {snapshot.activeToolName}
         </span>
       ) : null}
-      <div
-        className="yolo-voice-control-bar__meter"
-        data-level={Math.round(snapshot.micLevel * 100)}
-      />
+      <VoiceLevelMeter />
       <button type="button" onClick={onToggleMute}>
         {snapshot.muted ? t('voiceUnmute') : t('voiceMute')}
       </button>

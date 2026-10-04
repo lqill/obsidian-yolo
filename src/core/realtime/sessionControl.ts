@@ -19,7 +19,10 @@ export const getRealtimeVoiceStatus = (): VoiceSessionStatus =>
 
 /** Shown from the moment the user asks for a session, before it is resolved. */
 export const markRealtimeVoiceConnecting = (): void => {
-  voiceSessionStore.setStatus('connecting')
+  // `null` clears the previous session's error: the bar switches rendering on
+  // `status`, so a stale error would otherwise still be in the snapshot for the
+  // whole connecting window.
+  voiceSessionStore.setStatus('connecting', null)
 }
 
 export const failRealtimeVoiceSession = (error: VoiceError): void => {

@@ -89,8 +89,9 @@ export const createGeminiLiveRuntime = (
 export { resolveLiveConnection } from './resolveLiveConnection'
 export { buildVoiceHistoryTurns } from './voiceHistory'
 export {
+  getRealtimeMicLevel,
+  subscribeRealtimeMicLevel,
   useRealtimeUserText,
-  useRealtimeVoiceSnapshot,
   useRealtimeVoiceStatus,
 } from './useRealtimeVoice'
 export {

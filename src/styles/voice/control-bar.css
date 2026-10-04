@@ -177,7 +177,17 @@
 
 /* DOM order is mute, end — the last button ends the session. */
 .yolo-voice-control-bar > button:last-of-type {
-  border-color: color-mix(in srgb, var(--text-error) 40%, transparent);
+  /*
+   * `!important` is not decoration here: the shorthand above wins over a plain
+   * longhand at any specificity, so without it the red border this button is
+   * distinguished by would never apply. Same confirmed host collision
+   * (`button:not(.clickable-icon)`), same treatment.
+   */
+  border-color: color-mix(
+    in srgb,
+    var(--text-error) 40%,
+    transparent
+  ) !important;
   color: var(--text-error);
 }
 

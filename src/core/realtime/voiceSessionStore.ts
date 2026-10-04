@@ -121,25 +121,32 @@ const isSameStatus = (
  * Module-level singleton. Popouts share the plugin JS realm, so one store
  * coordinates the single-session lock across windows without touching main.ts.
  * Transient only — never conversation state.
+ *
+ * Three channels, no more: the coarse status, the user transcript, and the mic
+ * level. There is deliberately no "notify me about everything" channel — the two
+ * frame-rate fields are written ~125 times a second, so any consumer that heard
+ * both would re-render at that cadence. A consumer reads the channel it needs.
  */
 export class VoiceSessionStore {
   private snapshot: VoiceSessionSnapshot = IDLE
   private statusSnapshot: VoiceStatusSnapshot = statusOf(IDLE)
-  private readonly listeners = new Set<() => void>()
   /**
    * The user transcript has its own listener set: the mic-level meter writes to
    * the same store at frame cadence, and a subscriber that only cares about the
    * text must not be woken (or re-render) for level updates.
    */
   private readonly userTextListeners = new Set<() => void>()
+  /**
+   * The mic level has its own listener set for the same reason, and one more: it
+   * is written once per worklet render quantum (~125+/s). A subscriber that only
+   * reads it must not be woken for the coarse fields, and must not re-render —
+   * hence `VoiceLevelMeter` writes it straight to the DOM.
+   */
+  private readonly micLevelListeners = new Set<() => void>()
   private readonly statusListeners = new Set<() => void>()
 
+  /** Read-only snapshot, for the non-React callers (`sessionControl`, the session). */
   getSnapshot = (): VoiceSessionSnapshot => this.snapshot
-
-  subscribe = (listener: () => void): (() => void) => {
-    this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
-  }
 
   /** Referentially stable while only frame-rate fields change. */
   getStatusSnapshot = (): VoiceStatusSnapshot => this.statusSnapshot
@@ -161,18 +168,28 @@ export class VoiceSessionStore {
     }
   }
 
+  getMicLevel = (): number => this.snapshot.micLevel
+
+  subscribeMicLevel = (listener: () => void): (() => void) => {
+    this.micLevelListeners.add(listener)
+    return () => {
+      this.micLevelListeners.delete(listener)
+    }
+  }
+
   private set(patch: Partial<VoiceSessionSnapshot>): void {
     const previous = this.snapshot
     this.snapshot = { ...previous, ...patch }
+    if (this.snapshot.micLevel !== previous.micLevel) {
+      for (const listener of [...this.micLevelListeners]) listener()
+    }
     if (this.snapshot.partialUserText !== previous.partialUserText) {
       for (const listener of [...this.userTextListeners]) listener()
     }
     const status = statusOf(this.snapshot)
-    if (!isSameStatus(this.statusSnapshot, status)) {
-      this.statusSnapshot = status
-      for (const listener of [...this.statusListeners]) listener()
-    }
-    for (const listener of this.listeners) listener()
+    if (isSameStatus(this.statusSnapshot, status)) return
+    this.statusSnapshot = status
+    for (const listener of [...this.statusListeners]) listener()
   }
 
   setStatus = (

@@ -16,6 +16,16 @@ import {
 
 const FRAME_SIZE = 1600 // ~100 ms at 16 kHz
 
+/**
+ * How long a `mute` may last before it counts as a lost microphone. `mute` is not
+ * terminal — Android raises it for transient interruptions (a call overlay, a
+ * permission blip) and Chromium can raise it right after acquisition before the
+ * first frames arrive, and the track then recovers on its own. Reporting that as
+ * a dead session would fail a live call loudly for nothing; a mute that never
+ * clears really is a lost microphone and must be reported.
+ */
+const MUTE_LOSS_DELAY_MS = 2000
+
 /** `getUserMedia` constraints for a narrowband speech stream. */
 const CAPTURE_CONSTRAINTS: MediaStreamConstraints = {
   audio: {
@@ -64,10 +74,15 @@ export class PcmMicCapture {
   private mutedByUser = false
   /** The mic is released while the host is backgrounded. */
   private suspended = false
-  private trackHandlers: {
+  /** The track the handlers below are attached to, kept so they detach there. */
+  private watched: {
+    track: MediaStreamTrack
     ended: () => void
     mute: () => void
+    unmute: () => void
   } | null = null
+  /** Pending `mute` escalation; cleared by `unmute`, `stop`, and `suspend`. */
+  private muteLossTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly options: PcmMicCaptureOptions) {}
 
@@ -87,8 +102,13 @@ export class PcmMicCapture {
       const blobUrl = URL.createObjectURL(
         new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }),
       )
-      await this.context.audioWorklet.addModule(blobUrl)
-      URL.revokeObjectURL(blobUrl)
+      try {
+        await this.context.audioWorklet.addModule(blobUrl)
+      } finally {
+        // Revoked on the failure path too: `stop()` in the catch below cannot
+        // see a URL it was never handed.
+        URL.revokeObjectURL(blobUrl)
+      }
       this.worklet = new AudioWorkletNode(this.context, 'mic-capture')
       this.worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
         const context = this.context
@@ -128,29 +148,49 @@ export class PcmMicCapture {
     }
   }
 
-  /** Attaches the loss detectors to the current track and detaches the old one. */
+  /**
+   * Attaches the loss detectors to the current track and detaches the old one.
+   * `ended` is terminal and reported at once; `mute` only escalates if it
+   * persists (see `MUTE_LOSS_DELAY_MS`).
+   */
   private watchTrack(stream: MediaStream | null): void {
     this.detachTrackHandlers()
     const track = stream?.getAudioTracks()[0]
     if (!track) return
-    const ended = () =>
-      this.options.onLost?.(
-        `Microphone track ended (${track.label || 'default'})`,
-      )
-    const mute = () => this.options.onLost?.('Microphone track muted')
+    const label = track.label || 'default'
+    const ended = () => {
+      this.clearMuteTimer()
+      this.options.onLost?.(`Microphone track ended (${label})`)
+    }
+    const mute = () => {
+      if (this.muteLossTimer !== null) return
+      this.muteLossTimer = setTimeout(() => {
+        this.muteLossTimer = null
+        this.options.onLost?.(`Microphone track muted (${label})`)
+      }, MUTE_LOSS_DELAY_MS)
+    }
+    const unmute = () => this.clearMuteTimer()
     track.addEventListener('ended', ended)
     track.addEventListener('mute', mute)
-    this.trackHandlers = { ended, mute }
+    track.addEventListener('unmute', unmute)
+    this.watched = { track, ended, mute, unmute }
   }
 
   private detachTrackHandlers(): void {
-    const handlers = this.trackHandlers
-    const track = this.stream?.getAudioTracks()[0]
-    if (handlers && track) {
-      track.removeEventListener('ended', handlers.ended)
-      track.removeEventListener('mute', handlers.mute)
+    this.clearMuteTimer()
+    const watched = this.watched
+    if (watched) {
+      watched.track.removeEventListener('ended', watched.ended)
+      watched.track.removeEventListener('mute', watched.mute)
+      watched.track.removeEventListener('unmute', watched.unmute)
     }
-    this.trackHandlers = null
+    this.watched = null
+  }
+
+  private clearMuteTimer(): void {
+    if (this.muteLossTimer === null) return
+    clearTimeout(this.muteLossTimer)
+    this.muteLossTimer = null
   }
 
   private pushFrame(frame: Int16Array): void {
@@ -210,18 +250,32 @@ export class PcmMicCapture {
    * Re-acquires the microphone after `suspend`. Fails loudly with a named
    * `VoiceAudioError` so a session that cannot come back reports
    * `mic_permission_denied` (Android revoked the grant) rather than silence.
+   *
+   * A failure partway through must not leave the microphone open: on Android the
+   * OS mic indicator would stay lit with nobody listening, and the session would
+   * look recovered while it is not.
    */
   async resume(): Promise<void> {
     if (!this.suspended) return
     const context = this.context
     if (!context)
       throw new VoiceAudioError('mic_unavailable', 'Capture was not started')
-    this.stream = await this.acquireStream()
-    this.watchTrack(this.stream)
-    const source = context.createMediaStreamSource(this.stream)
-    if (this.worklet) source.connect(this.worklet)
-    this.source = source
-    await unlockAudioContext(context)
+    const stream = await this.acquireStream()
+    try {
+      this.stream = stream
+      this.watchTrack(stream)
+      const source = context.createMediaStreamSource(stream)
+      if (this.worklet) source.connect(this.worklet)
+      this.source = source
+      await unlockAudioContext(context)
+    } catch (error) {
+      this.detachTrackHandlers()
+      stream.getTracks().forEach((track) => track.stop())
+      if (this.stream === stream) this.stream = null
+      this.source?.disconnect()
+      this.source = null
+      throw error instanceof VoiceAudioError ? error : toVoiceMicError(error)
+    }
     this.suspended = false
   }
 
@@ -239,5 +293,6 @@ export class PcmMicCapture {
     this.sink = null
     this.pending = new Int16Array(0)
     this.suspended = false
+    this.mutedByUser = false
   }
 }

@@ -76,6 +76,10 @@ export class GeminiLiveClient {
   }
 
   private send(message: Record<string, unknown>): void {
+    // Not connected yet is a normal window, not an error: `setupComplete` is
+    // awaited before capture and history both open, so text submitted during
+    // `connecting` has no session to receive it. The chat surface reports that
+    // window in the control bar, and the user re-sends.
     if (this.socket && this.socket.readyState === OPEN)
       this.socket.send(JSON.stringify(message))
   }

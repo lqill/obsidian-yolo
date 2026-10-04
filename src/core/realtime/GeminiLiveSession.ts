@@ -111,16 +111,26 @@ export class GeminiLiveSession {
     this.foreground = true
     this.toolAbortController = new AbortController()
     this.options.store.setStatus('connecting')
-    // Unlock output while the start still carries the user's activation: a
-    // WebView context created later (on the first server frame) would stay
-    // suspended and the session would be silent.
-    await this.runAudioStep(() => this.options.player.prepare())
-    // With history, capture waits for `ready`: the server must receive the
-    // seeded `clientContent` before any realtime input reaches the session.
-    if ((this.options.initialHistory?.length ?? 0) === 0) {
-      await this.runAudioStep(() => this.options.microphone.start())
+    try {
+      // Unlock output while the start still carries the user's activation: a
+      // WebView context created later (on the first server frame) would stay
+      // suspended and the session would be silent.
+      await this.runAudioStep(() => this.options.player.prepare())
+      // With history, capture waits for `ready`: the server must receive the
+      // seeded `clientContent` before any realtime input reaches the session.
+      if ((this.options.initialHistory?.length ?? 0) === 0) {
+        await this.runAudioStep(() => this.options.microphone.start())
+      }
+      this.options.client.connect()
+    } catch (error) {
+      // Start is transactional: a half-built session holds an audio context the
+      // OS keeps open, so it is torn down here rather than left for the caller.
+      // The named reason is read first, because `stop` clears the store.
+      const named = this.options.store.getSnapshot().error
+      this.stop()
+      if (named) this.options.store.setStatus('error', named)
+      throw error
     }
-    this.options.client.connect()
   }
 
   /**
@@ -132,6 +142,10 @@ export class GeminiLiveSession {
     try {
       await step()
     } catch (error) {
+      // A step that rejects after teardown belongs to a stopped session; posting
+      // `error` here would resurrect a store that `reset()` already cleared and
+      // leave it `isActive` with no runtime behind it.
+      if (this.stopped) return
       const { failure, detail } = toVoiceFailure(error)
       this.options.store.setStatus('error', { failure, detail })
       throw error
@@ -148,7 +162,6 @@ export class GeminiLiveSession {
    */
   async setForeground(foreground: boolean): Promise<void> {
     if (this.stopped || foreground === this.foreground) return
-    this.foreground = foreground
     try {
       if (foreground)
         await this.runAudioStep(async () => {
@@ -163,9 +176,12 @@ export class GeminiLiveSession {
           await this.options.microphone.suspend()
         })
     } catch {
-      // `runAudioStep` already put the reason in the store.
+      // `runAudioStep` already put the reason in the store. `foreground` is
+      // deliberately left at its previous value so the next visibility change
+      // retries instead of believing the session is where it asked to be.
       return
     }
+    this.foreground = foreground
     if (this.stopped) return
     this.options.store.setStatus(foreground ? 'ready' : 'paused')
   }

@@ -83,7 +83,14 @@ export class LiveAudioPlayer {
   enqueue(dataBase64: string): void {
     if (this.disposed || this.paused) return
     const context = this.ensureContext()
-    if (context.state !== 'running') this.recover(context)
+    if (context.state !== 'running') {
+      // `currentTime` is frozen while a context is suspended, so scheduling here
+      // would stack the whole backlog onto one timeline and play it seconds late,
+      // out of order with everything the model says meanwhile. Drop the frame and
+      // let the in-flight recovery re-unlock the context, exactly like `paused`.
+      this.recover(context)
+      return
+    }
     const samples = int16ToFloat32(base64ToInt16(dataBase64))
     const buffer = context.createBuffer(
       1,

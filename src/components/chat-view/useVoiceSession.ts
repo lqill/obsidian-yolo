@@ -66,6 +66,12 @@ export const useVoiceSession = ({
     setForeground(foreground: boolean): Promise<void>
   } | null>(null)
   const pinnedConversationRef = useRef<string | null>(null)
+  /**
+   * The surface's root node, as a ref as well as a dependency: `start` needs to
+   * read the *current* document's visibility right after the session comes up.
+   */
+  const surfaceElementRef = useRef<HTMLElement | null>(null)
+  surfaceElementRef.current = surfaceElement ?? null
   const startingRef = useRef(false)
   /** The turn being spoken right now; null between turns. */
   const liveTurnRef = useRef<VoiceLiveTurn | null>(null)
@@ -199,6 +205,16 @@ export const useVoiceSession = ({
     }
     startingRef.current = true
     markRealtimeVoiceConnecting()
+    /**
+     * A start that will not produce a session must leave no handles behind. The
+     * runtime's own `start` already tore down its half-built session (audio
+     * contexts included) and re-posted the named reason, so this only drops the
+     * references — calling `stop()` again here would erase that reason.
+     */
+    const abandonStart = () => {
+      runtimeRef.current = null
+      pinnedConversationRef.current = null
+    }
     try {
       const [
         { resolveLiveConnection },
@@ -210,6 +226,7 @@ export const useVoiceSession = ({
       const resolution = resolveLiveConnection({ settings })
       if (!resolution.ok) {
         failRealtimeVoiceSession({ failure: resolution.reason })
+        abandonStart()
         return
       }
       pinnedConversationRef.current = conversationId
@@ -223,6 +240,7 @@ export const useVoiceSession = ({
           failure: 'tools_unavailable',
           detail: error instanceof Error ? error.message : String(error),
         })
+        abandonStart()
         return
       }
       if (!toolBridge) {
@@ -230,6 +248,7 @@ export const useVoiceSession = ({
         // fails loud rather than letting the live model speak from a different
         // config than the chat model.
         failRealtimeVoiceSession({ failure: 'tools_unavailable' })
+        abandonStart()
         return
       }
       const runtime = createGeminiLiveRuntime({
@@ -245,7 +264,17 @@ export const useVoiceSession = ({
       })
       runtimeRef.current = runtime
       await runtime.start()
+      // `start` awaits the microphone permission and the audio unlock, so the
+      // host can be backgrounded while it runs. Push the document's real
+      // visibility down immediately, so a session that came up behind the app's
+      // back does not keep the microphone open waiting for a change that already
+      // happened.
+      void runtime.setForeground(
+        getNodeDocument(surfaceElementRef.current).visibilityState ===
+          'visible',
+      )
     } catch (error) {
+      abandonStart()
       // A named audio failure (`mic_permission_denied`, `audio_suspended`, …) is
       // already in the store with its actionable reason; overwriting it with the
       // generic one would throw that away.
@@ -326,6 +355,11 @@ export const useVoiceSession = ({
     const handleVisibilityChange = () => {
       const runtime = runtimeRef.current
       if (!runtime) return
+      // A start still in flight holds the microphone open across its own awaits
+      // and pushes the document's real visibility down when it resolves, so
+      // applying a change here would suspend a half-built session and leave it
+      // `paused` while it finishes capturing. `start` owns this transition.
+      if (startingRef.current) return
       void runtime.setForeground(ownerDocument.visibilityState === 'visible')
     }
     ownerDocument.addEventListener('visibilitychange', handleVisibilityChange)

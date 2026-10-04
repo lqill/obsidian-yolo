@@ -1,10 +1,7 @@
 // src/core/realtime/useRealtimeVoice.ts
 import { useSyncExternalStore } from 'react'
 
-import type {
-  VoiceSessionSnapshot,
-  VoiceStatusSnapshot,
-} from './voiceSessionStore'
+import type { VoiceStatusSnapshot } from './voiceSessionStore'
 import { voiceSessionStore } from './voiceSessionStore'
 
 const getNoText = (): string => ''
@@ -31,14 +28,15 @@ export function useRealtimeVoiceStatus(): VoiceStatusSnapshot {
   )
 }
 
-/** The whole snapshot, meter included — the control bar renders the level. */
-export function useRealtimeVoiceSnapshot(): VoiceSessionSnapshot {
-  return useSyncExternalStore(
-    voiceSessionStore.subscribe,
-    voiceSessionStore.getSnapshot,
-    voiceSessionStore.getSnapshot,
-  )
-}
+/**
+ * The live mic level and its subscription, deliberately *not* a hook. The level
+ * is written once per worklet render quantum (~125+/s) and nothing in the React
+ * tree needs to re-render for it, so the meter writes `data-level` onto its own
+ * node from the callback. A hook here — or a hook returning the whole snapshot —
+ * would put the whole chat tree back on the frame cadence.
+ */
+export const subscribeRealtimeMicLevel = voiceSessionStore.subscribeMicLevel
+export const getRealtimeMicLevel = voiceSessionStore.getMicLevel
 
 /**
  * The spoken text of one message, or null when it is not the live user turn.
