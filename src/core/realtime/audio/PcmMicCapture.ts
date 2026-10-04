@@ -106,11 +106,26 @@ export class PcmMicCapture {
    * windows must leave nothing published for it to strand.
    */
   private generation = 0
+  /**
+   * An acquisition is in flight. The generation guards what a *teardown* strands,
+   * but two overlapping acquisitions would each open a microphone before either
+   * could be orphaned — so the second one is refused instead.
+   */
+  private acquiring = false
 
   constructor(private readonly options: PcmMicCaptureOptions) {}
 
   async start(): Promise<void> {
-    if (this.context) return
+    if (this.context || this.acquiring) return
+    this.acquiring = true
+    try {
+      await this.acquireAndPublish()
+    } finally {
+      this.acquiring = false
+    }
+  }
+
+  private async acquireAndPublish(): Promise<void> {
     const generation = ++this.generation
     let stream: MediaStream | null = null
     let context: AudioContext | null = null
@@ -310,10 +325,19 @@ export class PcmMicCapture {
    * while it captures nothing.
    */
   async resume(): Promise<void> {
-    if (!this.suspended) return
+    if (!this.suspended || this.acquiring) return
     const context = this.context
     if (!context)
       throw new VoiceAudioError('mic_unavailable', 'Capture was not started')
+    this.acquiring = true
+    try {
+      await this.reacquire(context)
+    } finally {
+      this.acquiring = false
+    }
+  }
+
+  private async reacquire(context: AudioContext): Promise<void> {
     const generation = ++this.generation
     const stream = await this.acquireStream()
     let source: MediaStreamAudioSourceNode | null = null
@@ -341,6 +365,7 @@ export class PcmMicCapture {
 
   stop(): void {
     this.generation += 1
+    this.acquiring = false
     this.detachTrackHandlers()
     this.worklet?.disconnect()
     this.source?.disconnect()
