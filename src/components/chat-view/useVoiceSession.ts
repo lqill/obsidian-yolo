@@ -8,6 +8,7 @@ import type {
   VoiceTurn,
 } from '../../core/realtime'
 import { probeVoiceAudioSupport } from '../../core/realtime/audio/voiceAudioSupport'
+import { VoiceSessionStoppedError } from '../../core/realtime/GeminiLiveSession'
 import {
   endRealtimeVoiceSession,
   failRealtimeVoiceSession,
@@ -275,6 +276,11 @@ export const useVoiceSession = ({
       )
     } catch (error) {
       abandonStart()
+      // The user ended the session while it was still starting (the microphone
+      // permission prompt is open the whole time). `stop()` already reset the
+      // store, so there is nothing to report — painting an error here would show
+      // a failure for the session the user just ended on purpose.
+      if (error instanceof VoiceSessionStoppedError) return
       // A named audio failure (`mic_permission_denied`, `audio_suspended`, …) is
       // already in the store with its actionable reason; overwriting it with the
       // generic one would throw that away.

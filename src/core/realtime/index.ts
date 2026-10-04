@@ -88,6 +88,7 @@ export const createGeminiLiveRuntime = (
 
 export { resolveLiveConnection } from './resolveLiveConnection'
 export { buildVoiceHistoryTurns } from './voiceHistory'
+export { VoiceSessionStoppedError } from './GeminiLiveSession'
 export {
   getRealtimeMicLevel,
   subscribeRealtimeMicLevel,

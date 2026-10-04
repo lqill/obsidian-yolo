@@ -83,14 +83,29 @@ export class PcmMicCapture {
   } | null = null
   /** Pending `mute` escalation; cleared by `unmute`, `stop`, and `suspend`. */
   private muteLossTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * Bumped by `stop` and by every `start`/`resume`, so an acquisition that
+   * resolves after its own session was torn down can tell. `stop()` is
+   * synchronous while `getUserMedia` is not — on Android the permission prompt
+   * keeps it pending for seconds — so without this a user who taps End mid-prompt
+   * gets a microphone (and the OS mic indicator) left running with nobody
+   * listening, and loss handlers attached to a dead session.
+   */
+  private generation = 0
 
   constructor(private readonly options: PcmMicCaptureOptions) {}
 
   async start(): Promise<void> {
     if (this.context) return
+    const generation = ++this.generation
     try {
-      this.stream = await this.acquireStream()
-      this.watchTrack(this.stream)
+      const stream = await this.acquireStream()
+      if (generation !== this.generation) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+      this.stream = stream
+      this.watchTrack(stream)
       const Context = getAudioContextConstructor()
       if (!Context)
         throw new VoiceAudioError(
@@ -260,7 +275,12 @@ export class PcmMicCapture {
     const context = this.context
     if (!context)
       throw new VoiceAudioError('mic_unavailable', 'Capture was not started')
+    const generation = ++this.generation
     const stream = await this.acquireStream()
+    if (generation !== this.generation) {
+      stream.getTracks().forEach((track) => track.stop())
+      return
+    }
     try {
       this.stream = stream
       this.watchTrack(stream)
@@ -280,6 +300,7 @@ export class PcmMicCapture {
   }
 
   stop(): void {
+    this.generation += 1
     this.detachTrackHandlers()
     this.worklet?.disconnect()
     this.source?.disconnect()

@@ -85,6 +85,22 @@ const toVoiceFailure = (
   }
 }
 
+/**
+ * Raised when `stop()` landed while an async step of `start()` was still in
+ * flight. Not a failure to report: the session the user ended is simply gone, so
+ * the caller drops it instead of painting an error over the idle chat.
+ *
+ * Reachable on mobile rather than theoretically: `getUserMedia` stays pending for
+ * as long as the Android microphone permission prompt is on screen, and End is
+ * tappable the whole time.
+ */
+export class VoiceSessionStoppedError extends Error {
+  constructor() {
+    super('The voice session was stopped while it was starting')
+    this.name = 'VoiceSessionStoppedError'
+  }
+}
+
 export class GeminiLiveSession {
   private turnOpen = false
   private typedText = ''
@@ -116,10 +132,12 @@ export class GeminiLiveSession {
       // WebView context created later (on the first server frame) would stay
       // suspended and the session would be silent.
       await this.runAudioStep(() => this.options.player.prepare())
+      this.assertNotStopped()
       // With history, capture waits for `ready`: the server must receive the
       // seeded `clientContent` before any realtime input reaches the session.
       if ((this.options.initialHistory?.length ?? 0) === 0) {
         await this.runAudioStep(() => this.options.microphone.start())
+        this.assertNotStopped()
       }
       this.options.client.connect()
     } catch (error) {
@@ -153,6 +171,17 @@ export class GeminiLiveSession {
   }
 
   /**
+   * Refuses to keep building a session the user already ended. Every async step
+   * above yields, and `stop()` runs synchronously in that gap — on Android the
+   * microphone permission prompt keeps `getUserMedia` pending for the whole time
+   * End is tappable — so without this the socket would be opened after teardown
+   * and the audio steps would keep an OS microphone open behind a dead session.
+   */
+  private assertNotStopped(): void {
+    if (this.stopped) throw new VoiceSessionStoppedError()
+  }
+
+  /**
    * Follows the host's foreground state. Backgrounding the WebView suspends its
    * audio hardware while the socket stays open, so a backgrounded session would
    * keep claiming to listen while capturing and playing nothing (and would hold
@@ -181,9 +210,22 @@ export class GeminiLiveSession {
       // retries instead of believing the session is where it asked to be.
       return
     }
+    this.releaseAudioIfStopped()
     this.foreground = foreground
     if (this.stopped) return
     this.options.store.setStatus(foreground ? 'ready' : 'paused')
+  }
+
+  /**
+   * Drops audio that was being re-acquired for a session that no longer exists.
+   * `stop()` is synchronous, so an acquisition that resolves after it re-opens a
+   * microphone and an AudioContext behind a dead session — the Android mic
+   * indicator stays lit with nobody listening.
+   */
+  private releaseAudioIfStopped(): void {
+    if (!this.stopped) return
+    this.options.microphone.stop()
+    this.options.player.dispose()
   }
 
   stop(): void {
@@ -241,6 +283,7 @@ export class GeminiLiveSession {
       // `runAudioStep` already named the failure in the store; the socket stays
       // open so the session can still answer text input.
     }
+    this.releaseAudioIfStopped()
   }
 
   handleEvent(event: GeminiLiveClientEvent): void {
