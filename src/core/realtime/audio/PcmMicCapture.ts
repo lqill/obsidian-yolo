@@ -272,9 +272,12 @@ export class PcmMicCapture {
    * Reversible: `resume` re-acquires the stream onto the same worklet.
    */
   async suspend(): Promise<void> {
-    if (this.suspended || !this.context) return
-    // Participates in the generation so an acquisition already in flight for a
-    // live capture cannot publish a microphone over this release.
+    if (this.suspended) return
+    // Participates in the generation before the context check: `start` publishes
+    // only at its very end, so an acquisition in flight has nothing to release
+    // yet and must still be told. Without the bump it would publish a microphone
+    // behind an already-released capture — on Android that is a live OS
+    // microphone with the indicator lit and no session listening.
     this.generation += 1
     this.suspended = true
     this.detachTrackHandlers()
@@ -283,6 +286,7 @@ export class PcmMicCapture {
     this.source?.disconnect()
     this.source = null
     this.pending = new Int16Array(0)
+    if (!this.context) return
     try {
       await this.context.suspend()
     } catch {
@@ -299,6 +303,11 @@ export class PcmMicCapture {
    * A failure partway through must not leave the microphone open: on Android the
    * OS mic indicator would stay lit with nobody listening, and the session would
    * look recovered while it is not.
+   *
+   * Also the recovery path for a capture cancelled by `suspend` before it ever
+   * published a context: there is nothing to reconnect onto, so it fails with
+   * `mic_unavailable` rather than reporting a session that is listening again
+   * while it captures nothing.
    */
   async resume(): Promise<void> {
     if (!this.suspended) return
