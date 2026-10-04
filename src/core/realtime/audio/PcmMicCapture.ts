@@ -36,6 +36,15 @@ const CAPTURE_CONSTRAINTS: MediaStreamConstraints = {
   },
 }
 
+/** Releases a graph that was built for a session which no longer exists. */
+const releaseOrphan = (
+  stream: MediaStream | null,
+  context: AudioContext | null,
+): void => {
+  stream?.getTracks().forEach((track) => track.stop())
+  void context?.close()
+}
+
 export type PcmMicCaptureOptions = {
   onFrame: (dataBase64: string) => void
   onLevel: (level: number) => void
@@ -84,12 +93,17 @@ export class PcmMicCapture {
   /** Pending `mute` escalation; cleared by `unmute`, `stop`, and `suspend`. */
   private muteLossTimer: ReturnType<typeof setTimeout> | null = null
   /**
-   * Bumped by `stop` and by every `start`/`resume`, so an acquisition that
-   * resolves after its own session was torn down can tell. `stop()` is
-   * synchronous while `getUserMedia` is not — on Android the permission prompt
-   * keeps it pending for seconds — so without this a user who taps End mid-prompt
-   * gets a microphone (and the OS mic indicator) left running with nobody
-   * listening, and loss handlers attached to a dead session.
+   * Bumped by `stop`, `suspend`, and every `start`/`resume`, so an acquisition
+   * that resolves after its own session was torn down can tell. `stop()` is
+   * synchronous while `getUserMedia` and `addModule` are not — on Android the
+   * permission prompt keeps `getUserMedia` pending for the whole time End is
+   * tappable — so without this a user who taps End mid-prompt gets a microphone
+   * (and the OS mic indicator) left running with nobody listening.
+   *
+   * `start` and `resume` therefore build the whole graph into locals and publish
+   * it in one step at the end. Checking the counter once would not be enough:
+   * there is an `await` after every acquisition, and a teardown in any of those
+   * windows must leave nothing published for it to strand.
    */
   private generation = 0
 
@@ -98,61 +112,74 @@ export class PcmMicCapture {
   async start(): Promise<void> {
     if (this.context) return
     const generation = ++this.generation
+    let stream: MediaStream | null = null
+    let context: AudioContext | null = null
+    let source: MediaStreamAudioSourceNode | null = null
+    let worklet: AudioWorkletNode | null = null
+    let sink: GainNode | null = null
     try {
-      const stream = await this.acquireStream()
-      if (generation !== this.generation) {
-        stream.getTracks().forEach((track) => track.stop())
-        return
-      }
-      this.stream = stream
-      this.watchTrack(stream)
+      stream = await this.acquireStream()
       const Context = getAudioContextConstructor()
       if (!Context)
         throw new VoiceAudioError(
           'mic_unavailable',
           'No AudioContext constructor',
         )
-      this.context = new Context({ sampleRate: LIVE_INPUT_SAMPLE_RATE })
-      this.source = this.context.createMediaStreamSource(this.stream)
+      context = new Context({ sampleRate: LIVE_INPUT_SAMPLE_RATE })
+      // The processor must be registered before the node is constructed, so the
+      // worklet cannot be built until this resolves.
       const blobUrl = URL.createObjectURL(
         new Blob([MIC_WORKLET_SOURCE], { type: 'application/javascript' }),
       )
       try {
-        await this.context.audioWorklet.addModule(blobUrl)
+        await context.audioWorklet.addModule(blobUrl)
       } finally {
-        // Revoked on the failure path too: `stop()` in the catch below cannot
-        // see a URL it was never handed.
+        // Revoked on the failure path too: the catch below cannot see a URL it
+        // was never handed.
         URL.revokeObjectURL(blobUrl)
       }
-      this.worklet = new AudioWorkletNode(this.context, 'mic-capture')
-      this.worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-        const context = this.context
+      source = context.createMediaStreamSource(stream)
+      worklet = new AudioWorkletNode(context, 'mic-capture')
+      worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+        const active = this.context
         const frame = new Int16Array(event.data)
         const resampled =
-          context && context.sampleRate !== LIVE_INPUT_SAMPLE_RATE
+          active && active.sampleRate !== LIVE_INPUT_SAMPLE_RATE
             ? float32ToInt16(
                 resampleLinear(
                   int16ToFloat32(frame),
-                  context.sampleRate,
+                  active.sampleRate,
                   LIVE_INPUT_SAMPLE_RATE,
                 ),
               )
             : frame
         this.pushFrame(resampled)
       }
-      this.sink = this.context.createGain()
+      sink = context.createGain()
       // Zero gain, not `worklet.connect(destination)`: the worklet must reach
       // the destination to be pulled, and monitoring the microphone through a
       // phone's speaker feeds back.
-      this.sink.gain.value = 0
-      this.source.connect(this.worklet)
-      this.worklet.connect(this.sink)
-      this.sink.connect(this.context.destination)
-      await unlockAudioContext(this.context)
+      sink.gain.value = 0
+      source.connect(worklet)
+      worklet.connect(sink)
+      sink.connect(context.destination)
+      await unlockAudioContext(context)
     } catch (error) {
-      this.stop()
+      releaseOrphan(stream, context)
       throw error instanceof VoiceAudioError ? error : toVoiceMicError(error)
     }
+    if (generation !== this.generation) {
+      // A teardown landed while the graph was being built. Nothing was published,
+      // so the locals are ours to release and the torn-down state stays intact.
+      releaseOrphan(stream, context)
+      return
+    }
+    this.stream = stream
+    this.watchTrack(stream)
+    this.context = context
+    this.source = source
+    this.worklet = worklet
+    this.sink = sink
   }
 
   private async acquireStream(): Promise<MediaStream> {
@@ -246,6 +273,9 @@ export class PcmMicCapture {
    */
   async suspend(): Promise<void> {
     if (this.suspended || !this.context) return
+    // Participates in the generation so an acquisition already in flight for a
+    // live capture cannot publish a microphone over this release.
+    this.generation += 1
     this.suspended = true
     this.detachTrackHandlers()
     this.stream?.getTracks().forEach((track) => track.stop())
@@ -277,25 +307,26 @@ export class PcmMicCapture {
       throw new VoiceAudioError('mic_unavailable', 'Capture was not started')
     const generation = ++this.generation
     const stream = await this.acquireStream()
+    let source: MediaStreamAudioSourceNode | null = null
+    try {
+      source = context.createMediaStreamSource(stream)
+      if (this.worklet) source.connect(this.worklet)
+      await unlockAudioContext(context)
+    } catch (error) {
+      source?.disconnect()
+      stream.getTracks().forEach((track) => track.stop())
+      throw error instanceof VoiceAudioError ? error : toVoiceMicError(error)
+    }
     if (generation !== this.generation) {
+      // A teardown landed mid-acquisition; nothing was published, so release the
+      // stream and leave the torn-down state alone.
+      source.disconnect()
       stream.getTracks().forEach((track) => track.stop())
       return
     }
-    try {
-      this.stream = stream
-      this.watchTrack(stream)
-      const source = context.createMediaStreamSource(stream)
-      if (this.worklet) source.connect(this.worklet)
-      this.source = source
-      await unlockAudioContext(context)
-    } catch (error) {
-      this.detachTrackHandlers()
-      stream.getTracks().forEach((track) => track.stop())
-      if (this.stream === stream) this.stream = null
-      this.source?.disconnect()
-      this.source = null
-      throw error instanceof VoiceAudioError ? error : toVoiceMicError(error)
-    }
+    this.stream = stream
+    this.watchTrack(stream)
+    this.source = source
     this.suspended = false
   }
 
